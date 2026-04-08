@@ -139,12 +139,37 @@ class CameraAnalyser(threading.Thread):
 
             rgb.flags.writeable = True
 
+            # ── Debug: log raw landmark positions every frame ─────────────
+            if log.isEnabledFor(logging.DEBUG):
+                if pose_res and pose_res.pose_landmarks:
+                    import mediapipe as _mp
+                    _PL = _mp.solutions.pose.PoseLandmark
+                    _lm = pose_res.pose_landmarks.landmark
+                    _rsh = _lm[_PL.RIGHT_SHOULDER]
+                    _rwr = _lm[_PL.RIGHT_WRIST]
+                    _lsh = _lm[_PL.LEFT_SHOULDER]
+                    _lwr = _lm[_PL.LEFT_WRIST]
+                    log.debug(
+                        "[%s] pose detected | "
+                        "R: sh_y=%.3f wr_y=%.3f diff=%.3f | "
+                        "L: sh_y=%.3f wr_y=%.3f diff=%.3f | "
+                        "threshold=%.3f",
+                        self.label,
+                        _rsh.y, _rwr.y, _rsh.y - _rwr.y,
+                        _lsh.y, _lwr.y, _lsh.y - _lwr.y,
+                        self.s.arm_raised_wrist_above_shoulder_frac,
+                    )
+                else:
+                    log.debug("[%s] no pose detected in frame", self.label)
+
             # ── 1. Arm-raised check ───────────────────────────────────────
             arm_raised, wrist_xy, hand_side = _check_arm_raised(
                 pose_res, self.s, w, h
             )
 
             if not arm_raised:
+                if last_frame_arm_raised:
+                    log.debug("[%s] arm lowered — resetting velocity", self.label)
                 velocity.reset()
                 for g in Gesture:
                     sustain_counts[g] = 0
@@ -152,6 +177,7 @@ class CameraAnalyser(threading.Thread):
                 continue
 
             if not last_frame_arm_raised:
+                log.debug("[%s] arm RAISED on %s side", self.label, hand_side)
                 velocity.reset()
             last_frame_arm_raised = True
 
@@ -162,8 +188,17 @@ class CameraAnalyser(threading.Thread):
             # ── 2. Hand shape ─────────────────────────────────────────────
             is_fist, hand_conf = _classify_hand(hand_res, self.s)
 
-            # ── 3. Candidate gesture from velocity + shape ─────────────────
+            # ── 3. Candidate gesture ──────────────────────────────────────
             candidate = _pick_candidate(vx, vy, is_fist, self.s)
+
+            log.debug(
+                "[%s] arm up | wrist=(%.0f,%.0f) vx=%.1f vy=%.1f "
+                "fist=%s hand_conf=%.2f candidate=%s sustain=%s",
+                self.label, wx, wy, vx, vy,
+                is_fist, hand_conf,
+                candidate.name if candidate else "none",
+                {g.name: sustain_counts[g] for g in Gesture if sustain_counts[g] > 0},
+            )
 
             # ── 4. Sustain — require N consecutive matching frames ─────────
             for g in Gesture:
