@@ -4,7 +4,7 @@
   "slug": "gesture_cam",
   "description": "Dual RTSP camera gesture detection — raises HA events on wave/palm/fist gestures.",
   "url": "https://github.com/silvermy/gesture_cam",
-  "init": true,
+  "init": false,
   "arch": ["aarch64", "amd64"],
   "startup": "application",
   "boot": "auto",
