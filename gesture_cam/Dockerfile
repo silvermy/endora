@@ -44,6 +44,9 @@ COPY core/      core/
 COPY output/    output/
 COPY main.py    .
 
+# Ensure S6 is used
+ENV S6_KEEP_ENV=1
+
 # ── Add-on run script ─────────────────────────────────────────────────────────
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
