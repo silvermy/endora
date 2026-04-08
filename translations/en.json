@@ -1,0 +1,16 @@
+{
+  "configuration": {
+    "rtsp_url_a": {
+      "name": "Camera A — RTSP URL",
+      "description": "e.g. rtsp://admin:pass@192.168.1.100:554/stream1"
+    },
+    "rtsp_url_b": {
+      "name": "Camera B — RTSP URL",
+      "description": "e.g. rtsp://admin:pass@192.168.1.101:554/stream1"
+    },
+    "rtsp_transport": { "name": "RTSP transport", "description": "tcp (reliable) or udp (lower latency)" },
+    "pose_model_complexity": { "name": "Pose model", "description": "0=fastest, 1=balanced, 2=accurate" },
+    "ha_event_name": { "name": "HA event name", "description": "Event fired in Home Assistant" },
+    "log_level": { "name": "Log level", "description": "debug|info|warning|error" }
+  }
+}

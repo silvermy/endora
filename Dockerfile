@@ -1,0 +1,50 @@
+# ── Gesture Cam — Home Assistant Add-on ──────────────────────────────────────
+#
+# Multi-arch: builds for aarch64 (Pi 4/5, most HA hardware) and amd64.
+#
+# Base: ghcr.io/home-assistant/{arch}-base-python:3.11-alpine3.19
+# This is the official HA add-on base — slim, pre-wired for the Supervisor.
+#
+# We install OpenCV's headless build and MediaPipe's arm64 wheel.
+# The image is ~900 MB after layer squash (MediaPipe + OpenCV are large).
+
+ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-python:3.11-alpine3.19
+FROM $BUILD_FROM
+
+LABEL \
+  io.hass.name="Gesture Cam" \
+  io.hass.description="Dual RTSP camera gesture detection" \
+  io.hass.version="1.0.0" \
+  io.hass.type="addon" \
+  maintainer="your@email.com"
+
+# ── System deps ───────────────────────────────────────────────────────────────
+# ffmpeg  : RTSP decoding backend for OpenCV
+# libgl1  : OpenCV runtime dep (even headless build needs libGL.so.1)
+# glib    : mediapipe runtime
+RUN apk add --no-cache \
+    ffmpeg \
+    mesa-gl \
+    glib \
+    libstdc++ \
+    && rm -rf /var/cache/apk/*
+
+# ── Python deps ───────────────────────────────────────────────────────────────
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
+
+# ── Application code ──────────────────────────────────────────────────────────
+WORKDIR /app
+COPY cameras/   cameras/
+COPY config/    config/
+COPY core/      core/
+COPY output/    output/
+COPY main.py    .
+
+# ── Add-on run script ─────────────────────────────────────────────────────────
+COPY run.sh /run.sh
+RUN chmod +x /run.sh
+
+# The Supervisor calls /run.sh to start the add-on
+CMD ["/run.sh"]
