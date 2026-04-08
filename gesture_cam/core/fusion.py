@@ -69,7 +69,8 @@ class GestureFusion:
 
             both_agree = len(sources) >= 2
             if self._single_cam:
-                should_emit = len(candidates) >= 2
+                # Analyser sustain already filters noise — fire immediately
+                should_emit = len(candidates) >= 1
             else:
                 should_emit = both_agree or len(candidates) >= 3
 

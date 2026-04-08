@@ -1,11 +1,9 @@
 """
 config/settings.py
 
-All tunable parameters.  When running as a Home Assistant add-on, values
-are read from the add-on Options (written by the Supervisor to
-/data/options.json).  A plain YAML file is also supported for dev/test.
-
-Priority:  options.json  >  settings.yaml  >  dataclass defaults
+Settings for hands-only gesture detection.
+Pose detection has been removed — only MediaPipe Hands is used.
+This allows detection from any body position: standing, sitting, laying down.
 """
 
 from __future__ import annotations
@@ -34,45 +32,31 @@ class Settings:
     frame_width: int = 640
     frame_height: int = 480
 
-    # ── MediaPipe pose ────────────────────────────────────────────────────
-    # complexity 1 = full model — more reliable than lite (0) for high
-    # camera angles and partially visible bodies. Lower confidence reduces
-    # frame dropout at the cost of occasional false skeleton detections.
-    pose_model_complexity: int = 1
-    pose_min_detection_confidence: float = 0.4
-    pose_min_tracking_confidence: float = 0.4
-
-    # ── MediaPipe hands ───────────────────────────────────────────────────
+    # ── MediaPipe Hands ───────────────────────────────────────────────────
+    # max_num_hands: keep at 1 for speed and to avoid detecting bystanders
     hand_model_max_hands: int = 1
-    hand_min_detection_confidence: float = 0.6
+    # Lower detection confidence = more sensitive, more CPU, more false positives
+    # 0.5 is a good balance for a room camera
+    hand_min_detection_confidence: float = 0.5
     hand_min_tracking_confidence: float = 0.5
 
-    # ── Arm-raised trigger ────────────────────────────────────────────────
-    # diff = shoulder_y - wrist_y  (MediaPipe: 0=top, 1=bottom of frame)
-    # With a HIGH/CEILING camera the wrist appears BELOW the shoulder in the
-    # frame even when fully raised, so diff is negative.
-    # From the log: raised arm gives diff ~ -0.07 to -0.10
-    # Set threshold to -0.15 so any arm raise well above waist triggers.
-    # If your camera is at eye level or below, use +0.05 instead.
-    arm_raised_wrist_above_shoulder_frac: float = -0.15
-    arm_raised_elbow_above_shoulder_frac: float = -0.20
-
     # ── Gesture thresholds ────────────────────────────────────────────────
-    wave_velocity_threshold_px: float = 8.0     # px per frame — very achievable
-    wave_sustain_frames: int = 1                 # fire on first confirmed frame
-    vertical_velocity_threshold_px: float = 8.0
+    # Minimum wrist velocity (px/frame) to register a gesture.
+    # A deliberate Bewitched-style flick hits 20-40 px/frame.
+    # Idle hand movement while sitting is typically under 5 px/frame.
+    # 15 is a good starting point — lower if not triggering, raise if
+    # getting false triggers from normal hand movement.
+    wave_velocity_threshold_px: float = 15.0
+    wave_sustain_frames: int = 1
+    vertical_velocity_threshold_px: float = 15.0
     vertical_sustain_frames: int = 1
     fist_curl_threshold: float = 0.65
-    hand_confidence_threshold: float = 0.55
 
-    # ── Fusion ────────────────────────────────────────────────────────────
-    fusion_agreement_window_s: float = 1.0      # widened from 0.5
-    cooldown_s: float = 1.5
-
-    # ── Single camera mode ────────────────────────────────────────────────
-    # If both RTSP URLs are identical, treat as single-camera deployment.
-    # The fusion layer will fire on a single sustained candidate instead of
-    # requiring agreement between two independent sources.
+    # ── Fusion / debounce ─────────────────────────────────────────────────
+    fusion_agreement_window_s: float = 1.0
+    # Minimum seconds before same gesture can fire again
+    cooldown_s: float = 2.0
+    # Set to true if both RTSP URLs point to the same camera
     single_camera_mode: bool = False
 
     # ── Home Assistant ────────────────────────────────────────────────────
@@ -108,12 +92,11 @@ class Settings:
             except Exception as e:
                 log.warning("Could not parse %s: %s", HA_OPTIONS_PATH, e)
 
-        # get_type_hints resolves forward references / __future__ annotations
-        # to actual Python types (int, float, str, bool) reliably.
         try:
             hints = typing.get_type_hints(cls)
         except Exception:
-            hints = {f.name: type(getattr(cls, f.name, None)) for f in dataclasses.fields(cls)}
+            hints = {f.name: type(getattr(cls, f.name, None))
+                     for f in dataclasses.fields(cls)}
 
         coerced: dict = {}
         for k, v in data.items():
@@ -133,7 +116,8 @@ class Settings:
                 elif t is str:
                     v = str(v)
             except (ValueError, TypeError) as e:
-                log.warning("Could not coerce %s=%r to %s: %s — using default", k, v, t, e)
+                log.warning("Could not coerce %s=%r to %s: %s — using default",
+                            k, v, t, e)
                 continue
             coerced[k] = v
         instance = cls(**coerced)
