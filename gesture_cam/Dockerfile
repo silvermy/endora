@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /tmp/requirements.txt
 # --break-system-packages is required on Debian Bookworm to bypass PEP 668
 # --prefer-binary prevents pip from trying to build MediaPipe from source
-RUN pip3 install --no-cache-dir --upgrade pip \
+RUN pip3 install --no-cache-dir \
     && pip3 install --no-cache-dir \
        --break-system-packages \
        --prefer-binary \
