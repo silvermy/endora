@@ -1,0 +1,38 @@
+# ── Gesture Cam — standalone Docker Compose ───────────────────────────────────
+#
+# Use this when running alongside Home Assistant Container or Core
+# (i.e. you have no Add-on Store).
+#
+# Prerequisites:
+#   1. Build the image:
+#        docker compose build
+#   2. Create a Long-Lived Access Token in HA:
+#        HA → Profile (bottom-left) → Long-Lived Access Tokens → Create Token
+#   3. Copy .env.example to .env and fill in your values:
+#        cp .env.example .env
+#   4. Start:
+#        docker compose up -d
+#   5. Watch logs:
+#        docker compose logs -f gesture_cam
+
+services:
+  gesture_cam:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gesture_cam
+    restart: unless-stopped
+    network_mode: host        # Reaches cameras on LAN + HA on localhost directly
+    environment:
+      - RTSP_URL_A=${RTSP_URL_A}
+      - RTSP_URL_B=${RTSP_URL_B}
+      - HA_TOKEN=${HA_TOKEN}
+      - HA_URL=${HA_URL:-http://localhost:8123/api}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      # Optional: mount a local settings file to override defaults
+      # - ./config/settings.yaml:/data/settings.yaml:ro
+      - gesture_cam_data:/data
+
+volumes:
+  gesture_cam_data:

@@ -1,28 +1,31 @@
 """
 output/backends.py
 
-Home Assistant is the primary output target when running as an add-on.
+Fires Home Assistant events via the REST API.
 
-HABackend fires a HA event via the Supervisor REST API:
-  POST http://supervisor/core/api/events/<event_name>
-  Authorization: Bearer <SUPERVISOR_TOKEN>
+Two auth modes — automatically selected:
 
-The event fires with event_data so automations can branch on gesture type:
+  1. HA Add-on (Home Assistant OS / Supervised):
+     SUPERVISOR_TOKEN is injected by the Supervisor.
+     API endpoint: http://supervisor/core/api  (internal Docker network)
+
+  2. Standalone Docker (Home Assistant Container / Core):
+     HA_TOKEN must be set to a Long-Lived Access Token from your HA profile.
+     HA_URL must point to your HA instance, e.g. http://192.168.1.x:8123/api
+
+Event payload:
   {
-    "gesture": "wave_left",
-    "confidence": 0.91,
+    "gesture":        "wave_left",
+    "confidence":     0.91,
     "source_cameras": ["A", "B"],
-    "timestamp": "2024-04-05T14:32:01.123456"
+    "timestamp":      "2024-04-05T14:32:01.123456+00:00"
   }
 
-In Home Assistant, listen with:
-  trigger:
-    platform: event
-    event_type: gesture_detected
-    event_data:
-      gesture: wave_left
-
-A fallback PrintBackend is included for local testing outside Docker.
+HA automation trigger:
+  platform: event
+  event_type: gesture_detected
+  event_data:
+    gesture: wave_left
 """
 
 from __future__ import annotations
@@ -41,68 +44,80 @@ log = logging.getLogger(__name__)
 
 
 class BaseBackend:
-    def send(self, gesture: Gesture, confidence: float, sources: list[str] = None) -> None:
+    def send(self, gesture: Gesture, confidence: float, sources: list = None) -> None:
         raise NotImplementedError
 
     def close(self) -> None:
         pass
 
 
-# ── Home Assistant Supervisor API ─────────────────────────────────────────────
+# ── Home Assistant REST API ───────────────────────────────────────────────────
 
 class HABackend(BaseBackend):
-    """
-    Fires a Home Assistant event via the internal Supervisor API.
-
-    The SUPERVISOR_TOKEN env var is injected automatically by the HA
-    Supervisor into every add-on container — no user configuration needed.
-
-    The ha_url should be http://supervisor/core/api (the internal Docker
-    network hostname, not the external IP).
-    """
 
     def __init__(self, settings):
-        self._token = os.environ.get("SUPERVISOR_TOKEN", "")
+        # Supervisor token takes priority (add-on mode)
+        self._token = (
+            os.environ.get("SUPERVISOR_TOKEN") or
+            os.environ.get("HA_TOKEN") or
+            ""
+        )
+
+        # In add-on mode the Supervisor sets HA_URL via the internal network.
+        # In standalone mode the user sets HA_URL to their HA IP + port.
+        ha_url = (
+            os.environ.get("HA_URL") or
+            settings.ha_url or
+            "http://supervisor/core/api"
+        ).rstrip("/")
+
+        self._event_name = settings.ha_event_name
+        self._event_url = f"{ha_url}/events/{self._event_name}"
+
         if not self._token:
             log.warning(
-                "SUPERVISOR_TOKEN not set — HA events will be rejected (401). "
-                "This is expected when testing outside Home Assistant."
+                "No auth token found. Set SUPERVISOR_TOKEN (add-on) or "
+                "HA_TOKEN (standalone Docker). Events will be rejected with 401."
             )
-        self._event_name = settings.ha_event_name
-        self._base_url = settings.ha_url.rstrip("/")
-        self._event_url = f"{self._base_url}/events/{self._event_name}"
-        log.info("HA backend → %s", self._event_url)
+        else:
+            mode = "add-on (Supervisor)" if os.environ.get("SUPERVISOR_TOKEN") else "standalone (Long-Lived Token)"
+            log.info("HA backend ready — mode=%s url=%s event=%s",
+                     mode, self._event_url, self._event_name)
 
-    def send(self, gesture: Gesture, confidence: float, sources: list[str] = None) -> None:
+    def send(self, gesture: Gesture, confidence: float, sources: list = None) -> None:
         payload = json.dumps({
-            "gesture": gesture.name.lower(),
-            "confidence": round(confidence, 3),
+            "gesture":        gesture.name.lower(),
+            "confidence":     round(confidence, 3),
             "source_cameras": sorted(sources or []),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp":      datetime.now(timezone.utc).isoformat(),
         }).encode("utf-8")
 
         req = urllib.request.Request(
             self._event_url,
             data=payload,
             headers={
-                "Content-Type": "application/json",
+                "Content-Type":  "application/json",
                 "Authorization": f"Bearer {self._token}",
             },
             method="POST",
         )
         try:
             with urllib.request.urlopen(req, timeout=3.0) as resp:
-                log.info(
-                    "HA event fired: %s  confidence=%.2f  cameras=%s  status=%d",
-                    gesture, confidence, sources, resp.status,
-                )
+                log.info("HA event fired: %s  conf=%.2f  cams=%s  status=%d",
+                         gesture, confidence, sources, resp.status)
         except urllib.error.HTTPError as e:
-            log.error("HA API HTTP %d for gesture %s: %s", e.code, gesture, e.reason)
+            if e.code == 401:
+                log.error(
+                    "HA API returned 401 Unauthorized. "
+                    "Check your SUPERVISOR_TOKEN or HA_TOKEN is valid."
+                )
+            else:
+                log.error("HA API HTTP %d for %s: %s", e.code, gesture, e.reason)
         except urllib.error.URLError as e:
-            log.error("HA API unreachable: %s", e)
+            log.error("HA API unreachable (%s): %s", self._event_url, e)
 
 
-# ── Print (dev / test) ────────────────────────────────────────────────────────
+# ── Print fallback (dev / no token) ──────────────────────────────────────────
 
 class PrintBackend(BaseBackend):
     SYMBOLS = {
@@ -113,7 +128,7 @@ class PrintBackend(BaseBackend):
         Gesture.FIST_GESTURE: "✊ FIST      ",
     }
 
-    def send(self, gesture: Gesture, confidence: float, sources: list[str] = None) -> None:
+    def send(self, gesture: Gesture, confidence: float, sources: list = None) -> None:
         sym = self.SYMBOLS.get(gesture, str(gesture))
         ts = time.strftime("%H:%M:%S")
         print(f"[{ts}] {sym}  conf={confidence:.2f}  cams={sources}", flush=True)
@@ -122,9 +137,16 @@ class PrintBackend(BaseBackend):
 # ── Factory ───────────────────────────────────────────────────────────────────
 
 def make_backend(settings) -> BaseBackend:
-    token = os.environ.get("SUPERVISOR_TOKEN", "")
-    if token or settings.ha_url != "http://supervisor/core/api":
-        # We're inside HA (token present) or user explicitly configured ha_url
+    """
+    Returns HABackend if any auth token is present or ha_url is configured.
+    Falls back to PrintBackend for zero-config local testing.
+    """
+    has_supervisor = bool(os.environ.get("SUPERVISOR_TOKEN"))
+    has_token      = bool(os.environ.get("HA_TOKEN"))
+    has_custom_url = settings.ha_url != "http://supervisor/core/api"
+
+    if has_supervisor or has_token or has_custom_url:
         return HABackend(settings)
-    log.info("No SUPERVISOR_TOKEN — using PrintBackend (dev mode)")
+
+    log.info("No HA token or custom URL configured — using PrintBackend (dev mode)")
     return PrintBackend()
