@@ -55,16 +55,22 @@ class Settings:
     arm_raised_elbow_above_shoulder_frac: float = -0.20
 
     # ── Gesture thresholds ────────────────────────────────────────────────
-    wave_velocity_threshold_px: float = 18.0
-    wave_sustain_frames: int = 3
-    vertical_velocity_threshold_px: float = 15.0
-    vertical_sustain_frames: int = 3
+    wave_velocity_threshold_px: float = 12.0    # lowered from 18 — easier to trigger
+    wave_sustain_frames: int = 2                # lowered from 3 — fewer frames needed
+    vertical_velocity_threshold_px: float = 10.0
+    vertical_sustain_frames: int = 2
     fist_curl_threshold: float = 0.65
     hand_confidence_threshold: float = 0.55
 
     # ── Fusion ────────────────────────────────────────────────────────────
-    fusion_agreement_window_s: float = 0.5
-    cooldown_s: float = 1.2
+    fusion_agreement_window_s: float = 1.0      # widened from 0.5
+    cooldown_s: float = 1.5
+
+    # ── Single camera mode ────────────────────────────────────────────────
+    # If both RTSP URLs are identical, treat as single-camera deployment.
+    # The fusion layer will fire on a single sustained candidate instead of
+    # requiring agreement between two independent sources.
+    single_camera_mode: bool = False
 
     # ── Home Assistant ────────────────────────────────────────────────────
     ha_event_name: str = "gesture_detected"
