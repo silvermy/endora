@@ -1,6 +1,6 @@
 {
   "name": "Gesture Cam",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "slug": "gesture_cam",
   "description": "Dual RTSP camera gesture detection — raises HA events on wave/palm/fist gestures.",
   "url": "https://github.com/silvermy/gesture_cam",
