@@ -1,27 +1,15 @@
-# ── Gesture Cam — Home Assistant Add-on ──────────────────────────────────────
-#
-# Multi-arch: builds for aarch64 (Pi 4/5, most HA hardware) and amd64.
-#
-# Base: ghcr.io/home-assistant/{arch}-base-python:3.11-alpine3.19
-# This is the official HA add-on base — slim, pre-wired for the Supervisor.
-#
-# We install OpenCV's headless build and MediaPipe's arm64 wheel.
-# The image is ~900 MB after layer squash (MediaPipe + OpenCV are large).
+# Use the Home Assistant Debian-based multi-arch image
+FROM ghcr.io/home-assistant/base-debian:bookworm
 
-ARG BUILD_FROM=ghcr.io/home-assistant/base-debian:bookworm
-FROM $BUILD_FROM
+# ── 1. S6-Overlay Configuration ───────────────────────────────────────────────
+# S6_KEEP_ENV: Ensures your RTSP URLs from HA are visible to Python
+# S6_BEHAVIOUR_IF_STAGE2_FAILS: Stops container immediately if run.sh crashes
+ENV S6_KEEP_ENV=1 \
+    S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
+    LANG=C.UTF-8
 
-LABEL \
-  io.hass.name="Gesture Cam" \
-  io.hass.description="Dual RTSP camera gesture detection" \
-  io.hass.version="1.0.0" \
-  io.hass.type="addon" \
-  maintainer="your@email.com"
-
-# ── System deps ───────────────────────────────────────────────────────────────
-# ffmpeg  : RTSP decoding backend for OpenCV
-# libgl1  : OpenCV runtime dep (even headless build needs libGL.so.1)
-# glib    : mediapipe runtime
+# ── 2. Install System Dependencies ───────────────────────────────────────────
+# We install Python, Pip, and the specific libraries MediaPipe/OpenCV need
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
@@ -29,27 +17,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Use pip3 to install your requirements
+# ── 3. Install Python Requirements ───────────────────────────────────────────
 COPY requirements.txt /tmp/requirements.txt
-RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
+# --break-system-packages is required on Debian Bookworm to bypass PEP 668
+# --prefer-binary prevents pip from trying to build MediaPipe from source
+RUN pip3 install --no-cache-dir --upgrade pip \
+    && pip3 install --no-cache-dir \
+       --break-system-packages \
+       --prefer-binary \
+       -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
-# ── Application code ──────────────────────────────────────────────────────────
+# ── 4. Final Setup ────────────────────────────────────────────────────────────
 WORKDIR /app
-COPY cameras/   cameras/
-COPY config/    config/
-COPY core/      core/
-COPY output/    output/
-COPY main.py    .
+COPY . .
 
-# Ensure S6 is used
-ENV S6_KEEP_ENV=1
+# Move run.sh to root and fix line endings (prevents "not found" errors)
+RUN mv run.sh /run.sh \
+    && chmod a+x /run.sh \
+    && sed -i 's/\r$//' /run.sh
 
-# ── Add-on run script ─────────────────────────────────────────────────────────
-COPY run.sh /run.sh
-RUN chmod +x /run.sh
+# Do NOT use ENTRYPOINT. The base image already has /init as the entrypoint.
+# CMD is the "Stage 2" script that S6 will run once the system is ready.
+CMD [ "/run.sh" ]
 
-# The Supervisor calls /run.sh to start the add-on
-CMD ["/run.sh"]
