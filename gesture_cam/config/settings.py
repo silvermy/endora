@@ -45,8 +45,14 @@ class Settings:
     hand_min_tracking_confidence: float = 0.5
 
     # ── Arm-raised trigger ────────────────────────────────────────────────
-    arm_raised_wrist_above_shoulder_frac: float = 0.10
-    arm_raised_elbow_above_shoulder_frac: float = -0.05
+    # diff = shoulder_y - wrist_y  (MediaPipe: 0=top, 1=bottom of frame)
+    # With a HIGH/CEILING camera the wrist appears BELOW the shoulder in the
+    # frame even when fully raised, so diff is negative.
+    # From the log: raised arm gives diff ~ -0.07 to -0.10
+    # Set threshold to -0.15 so any arm raise well above waist triggers.
+    # If your camera is at eye level or below, use +0.05 instead.
+    arm_raised_wrist_above_shoulder_frac: float = -0.15
+    arm_raised_elbow_above_shoulder_frac: float = -0.20
 
     # ── Gesture thresholds ────────────────────────────────────────────────
     wave_velocity_threshold_px: float = 18.0

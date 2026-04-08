@@ -235,7 +235,24 @@ def _check_arm_raised(
 ) -> tuple[bool, tuple[float, float], str]:
     """
     Returns (arm_raised, (wrist_x, wrist_y), side).
-    Checks both arms; returns the first raised one found.
+
+    MediaPipe Y coordinate: 0 = top of frame, 1 = bottom.
+    So a HIGHER wrist position = SMALLER y value.
+
+    With a ceiling-mounted camera looking down, even a fully raised arm
+    will have wrist_y > shoulder_y (wrist appears lower in the frame than
+    the shoulder).  We therefore check that the wrist is within a threshold
+    of the shoulder rather than strictly above it.
+
+    arm_raised_wrist_above_shoulder_frac:
+      Positive (e.g. 0.10)  → wrist must be 10% of frame height ABOVE shoulder
+                               (only works if camera is at eye level or below)
+      Negative (e.g. -0.15) → wrist may be up to 15% of frame height BELOW
+                               shoulder (correct for high/ceiling cameras)
+
+    Read from the debug log: when your arm is raised, note the diff value.
+    Set this threshold to a value slightly more negative than that diff.
+    E.g. if raised-arm diff is -0.08, set threshold to -0.12.
     """
     if not pose_res or not pose_res.pose_landmarks:
         return False, (0.0, 0.0), ""
@@ -254,11 +271,17 @@ def _check_arm_raised(
         el = lm[el_id]
         wr = lm[wr_id]
 
-        # Mediapipe Y: 0 = top, 1 = bottom — so "above" means smaller Y
-        wrist_above_shoulder = (sh.y - wr.y) > settings.arm_raised_wrist_above_shoulder_frac
-        elbow_above_shoulder = (sh.y - el.y) > settings.arm_raised_elbow_above_shoulder_frac
+        # diff = shoulder_y - wrist_y
+        # Positive → wrist is above shoulder in frame (camera at eye level)
+        # Negative → wrist is below shoulder in frame (high/ceiling camera)
+        # Arm is raised when diff > threshold (threshold is often negative)
+        wrist_diff = sh.y - wr.y
+        elbow_diff = sh.y - el.y
 
-        if wrist_above_shoulder and elbow_above_shoulder:
+        wrist_raised = wrist_diff > settings.arm_raised_wrist_above_shoulder_frac
+        elbow_raised = elbow_diff > settings.arm_raised_elbow_above_shoulder_frac
+
+        if wrist_raised and elbow_raised:
             wx = wr.x * frame_w
             wy = wr.y * frame_h
             return True, (wx, wy), side

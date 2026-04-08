@@ -19,7 +19,7 @@ pose_model_complexity: 0
 pose_min_detection_confidence: 0.6
 pose_min_tracking_confidence: 0.5
 
-arm_raised_wrist_above_shoulder_frac: 0.10
+arm_raised_wrist_above_shoulder_frac: -0.15
 wave_velocity_threshold_px: 18.0
 wave_sustain_frames: 3
 vertical_velocity_threshold_px: 15.0
