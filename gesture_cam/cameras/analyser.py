@@ -138,6 +138,10 @@ class CameraAnalyser(threading.Thread):
         velocity = VelocityTracker()
         sustain_counts: dict[Gesture, int] = {g: 0 for g in Gesture}
         last_frame_had_hand = False
+        consecutive_misses = 0
+        # Require this many consecutive missed frames before resetting velocity.
+        # Prevents a single corrupted/dropped frame from wiping tracking state.
+        MISS_TOLERANCE = 4
 
         log.info("[%s] Analyser running (hands-only mode)", self.label)
 
@@ -155,16 +159,20 @@ class CameraAnalyser(threading.Thread):
 
             # ── 1. Hand detected? ─────────────────────────────────────────
             if not hand_res or not hand_res.multi_hand_landmarks:
-                if last_frame_had_hand:
-                    log.debug("[%s] hand lost — resetting", self.label)
-                    velocity.reset()
-                    for g in Gesture:
-                        sustain_counts[g] = 0
-                last_frame_had_hand = False
+                consecutive_misses += 1
+                if consecutive_misses >= MISS_TOLERANCE:
+                    if last_frame_had_hand:
+                        log.debug("[%s] hand lost — resetting", self.label)
+                        velocity.reset()
+                        for g in Gesture:
+                            sustain_counts[g] = 0
+                    last_frame_had_hand = False
 
-                if log.isEnabledFor(logging.DEBUG):
+                if log.isEnabledFor(logging.DEBUG) and consecutive_misses % 10 == 1:
                     log.debug("[%s] no hand detected", self.label)
                 continue
+
+            consecutive_misses = 0
 
             # Use first detected hand
             landmarks = hand_res.multi_hand_landmarks[0].landmark

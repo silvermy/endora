@@ -1,6 +1,6 @@
 {
   "name": "Gesture Cam",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "slug": "gesture_cam",
   "description": "Gesture detection via RTSP cameras — raises HA events on wave/flick/fist gestures. Works sitting, standing, or laying down.",
   "url": "https://github.com/silvermy/gesture_cam",
