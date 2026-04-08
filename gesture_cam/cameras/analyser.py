@@ -44,9 +44,14 @@ WristSample = collections.namedtuple("WristSample", ["x", "y", "t"])
 
 
 class VelocityTracker:
-    """Rolling window of wrist positions → smoothed velocity."""
+    """
+    Rolling window of wrist positions → smoothed velocity.
+    Uses simple first-last delta rather than linear regression so that
+    a single fast sweep across 3-4 frames registers even if intermediate
+    frames are dropped (common with RTSP streams).
+    """
 
-    HISTORY = 8
+    HISTORY = 6
 
     def __init__(self):
         self._samples: Deque[WristSample] = collections.deque(maxlen=self.HISTORY)
@@ -55,14 +60,42 @@ class VelocityTracker:
         self._samples.append(WristSample(x, y, time.monotonic()))
 
     def velocity(self) -> tuple[float, float]:
-        """Return (vx, vy) in pixels-per-frame averaged over recent history."""
-        if len(self._samples) < 3:
+        """
+        Return (vx, vy) in pixels-per-frame.
+        Uses delta between oldest and newest sample, normalised by count.
+        This is more responsive to fast sweeps than linear regression.
+        """
+        if len(self._samples) < 2:
             return 0.0, 0.0
-        xs = [s.x for s in self._samples]
-        ys = [s.y for s in self._samples]
-        vx = float(np.polyfit(range(len(xs)), xs, 1)[0])
-        vy = float(np.polyfit(range(len(ys)), ys, 1)[0])
+        oldest = self._samples[0]
+        newest = self._samples[-1]
+        n = len(self._samples) - 1  # number of intervals
+        dt = newest.t - oldest.t
+        if dt < 0.01:
+            return 0.0, 0.0
+        # Express as pixels per frame assuming ~15fps actual detection rate
+        fps_est = n / dt
+        vx = (newest.x - oldest.x) / n if fps_est > 0 else 0.0
+        vy = (newest.y - oldest.y) / n if fps_est > 0 else 0.0
         return vx, vy
+
+    def peak_velocity(self) -> tuple[float, float]:
+        """
+        Return the maximum frame-to-frame velocity seen in the window.
+        Catches brief fast sweeps that the smoothed average misses.
+        """
+        if len(self._samples) < 2:
+            return 0.0, 0.0
+        max_vx = max_vy = 0.0
+        samples = list(self._samples)
+        for i in range(1, len(samples)):
+            dvx = abs(samples[i].x - samples[i-1].x)
+            dvy = abs(samples[i].y - samples[i-1].y)
+            if dvx > abs(max_vx):
+                max_vx = samples[i].x - samples[i-1].x
+            if dvy > abs(max_vy):
+                max_vy = samples[i].y - samples[i-1].y
+        return max_vx, max_vy
 
     def reset(self):
         self._samples.clear()
@@ -184,17 +217,23 @@ class CameraAnalyser(threading.Thread):
             wx, wy = wrist_xy
             velocity.update(wx, wy)
             vx, vy = velocity.velocity()
+            pvx, pvy = velocity.peak_velocity()
+
+            # Use whichever is larger — average or peak — so brief fast
+            # sweeps register even if smoothed average is low
+            eff_vx = pvx if abs(pvx) > abs(vx) else vx
+            eff_vy = pvy if abs(pvy) > abs(vy) else vy
 
             # ── 2. Hand shape ─────────────────────────────────────────────
             is_fist, hand_conf = _classify_hand(hand_res, self.s)
 
             # ── 3. Candidate gesture ──────────────────────────────────────
-            candidate = _pick_candidate(vx, vy, is_fist, self.s)
+            candidate = _pick_candidate(eff_vx, eff_vy, is_fist, self.s)
 
             log.debug(
                 "[%s] arm up | wrist=(%.0f,%.0f) vx=%.1f vy=%.1f "
-                "fist=%s hand_conf=%.2f candidate=%s sustain=%s",
-                self.label, wx, wy, vx, vy,
+                "pvx=%.1f pvy=%.1f fist=%s hand_conf=%.2f candidate=%s sustain=%s",
+                self.label, wx, wy, vx, vy, pvx, pvy,
                 is_fist, hand_conf,
                 candidate.name if candidate else "none",
                 {g.name: sustain_counts[g] for g in Gesture if sustain_counts[g] > 0},

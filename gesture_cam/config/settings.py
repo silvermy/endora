@@ -35,9 +35,12 @@ class Settings:
     frame_height: int = 480
 
     # ── MediaPipe pose ────────────────────────────────────────────────────
-    pose_model_complexity: int = 0
-    pose_min_detection_confidence: float = 0.6
-    pose_min_tracking_confidence: float = 0.5
+    # complexity 1 = full model — more reliable than lite (0) for high
+    # camera angles and partially visible bodies. Lower confidence reduces
+    # frame dropout at the cost of occasional false skeleton detections.
+    pose_model_complexity: int = 1
+    pose_min_detection_confidence: float = 0.4
+    pose_min_tracking_confidence: float = 0.4
 
     # ── MediaPipe hands ───────────────────────────────────────────────────
     hand_model_max_hands: int = 1
@@ -55,10 +58,10 @@ class Settings:
     arm_raised_elbow_above_shoulder_frac: float = -0.20
 
     # ── Gesture thresholds ────────────────────────────────────────────────
-    wave_velocity_threshold_px: float = 12.0    # lowered from 18 — easier to trigger
-    wave_sustain_frames: int = 2                # lowered from 3 — fewer frames needed
-    vertical_velocity_threshold_px: float = 10.0
-    vertical_sustain_frames: int = 2
+    wave_velocity_threshold_px: float = 8.0     # px per frame — very achievable
+    wave_sustain_frames: int = 1                 # fire on first confirmed frame
+    vertical_velocity_threshold_px: float = 8.0
+    vertical_sustain_frames: int = 1
     fist_curl_threshold: float = 0.65
     hand_confidence_threshold: float = 0.55
 

@@ -45,9 +45,17 @@ class GestureFusion:
     def receive(self, gesture: Gesture, confidence: float, source: str):
         with self._lock:
             now = time.monotonic()
-            window = self.s.fusion_agreement_window_s
 
-            # Purge stale candidates
+            # ── Global cooldown check FIRST ───────────────────────────────
+            # Check before even accumulating candidates so a rapid burst
+            # from the same or different sources doesn't sneak through.
+            if now - self._last_emitted[gesture] < self.s.cooldown_s:
+                log.debug("Gesture %s suppressed by cooldown (%.1fs remaining)",
+                          gesture,
+                          self.s.cooldown_s - (now - self._last_emitted[gesture]))
+                return
+
+            window = self.s.fusion_agreement_window_s
             self._pending[gesture] = [
                 (ts, conf, src)
                 for ts, conf, src in self._pending[gesture]
@@ -60,8 +68,6 @@ class GestureFusion:
             avg_conf = sum(c for _, c, _ in candidates) / len(candidates)
 
             both_agree = len(sources) >= 2
-            # In single-cam mode: fire after 2 candidates from same source
-            # In dual-cam mode: require either 2 sources or 3 candidates
             if self._single_cam:
                 should_emit = len(candidates) >= 2
             else:
@@ -69,11 +75,12 @@ class GestureFusion:
 
             if not should_emit:
                 return
-            if now - self._last_emitted[gesture] < self.s.cooldown_s:
-                return
 
             boost = 1.15 if both_agree else 1.0
             final_conf = min(1.0, avg_conf * boost)
+
+            # Mark emitted BEFORE calling callback to block any re-entrant
+            # candidates that arrive while the callback is executing
             self._last_emitted[gesture] = now
             self._pending[gesture].clear()
             self.total_emitted += 1
@@ -81,4 +88,5 @@ class GestureFusion:
             log.info("✓ GESTURE: %s  confidence=%.2f  cameras=%s",
                      gesture, final_conf, sorted(sources))
 
+        # Call outside the lock
         self.on_gesture(gesture, final_conf, sources)

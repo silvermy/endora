@@ -30,6 +30,7 @@ HA automation trigger:
 
 from __future__ import annotations
 
+import collections
 import json
 import logging
 import os
@@ -42,8 +43,25 @@ from cameras.analyser import Gesture
 
 log = logging.getLogger(__name__)
 
+# Hard minimum between any two firings of the same gesture at the output layer.
+# This is a safety net on top of the fusion cooldown — protects against
+# duplicate events reaching HA even if the fusion layer lets one through.
+OUTPUT_DEBOUNCE_S = 2.0
+
 
 class BaseBackend:
+    def __init__(self):
+        self._last_sent: dict[Gesture, float] = collections.defaultdict(float)
+
+    def _debounced(self, gesture: Gesture) -> bool:
+        """Returns True if this gesture should be suppressed."""
+        now = time.monotonic()
+        if now - self._last_sent[gesture] < OUTPUT_DEBOUNCE_S:
+            log.debug("Output debounce suppressed %s", gesture)
+            return True
+        self._last_sent[gesture] = now
+        return False
+
     def send(self, gesture: Gesture, confidence: float, sources: list = None) -> None:
         raise NotImplementedError
 
@@ -56,6 +74,7 @@ class BaseBackend:
 class HABackend(BaseBackend):
 
     def __init__(self, settings):
+        super().__init__()
         # Supervisor token takes priority (add-on mode)
         self._token = (
             os.environ.get("SUPERVISOR_TOKEN") or
@@ -63,8 +82,6 @@ class HABackend(BaseBackend):
             ""
         )
 
-        # In add-on mode the Supervisor sets HA_URL via the internal network.
-        # In standalone mode the user sets HA_URL to their HA IP + port.
         ha_url = (
             os.environ.get("HA_URL") or
             settings.ha_url or
@@ -85,6 +102,9 @@ class HABackend(BaseBackend):
                      mode, self._event_url, self._event_name)
 
     def send(self, gesture: Gesture, confidence: float, sources: list = None) -> None:
+        if self._debounced(gesture):
+            return
+
         payload = json.dumps({
             "gesture":        gesture.name.lower(),
             "confidence":     round(confidence, 3),
@@ -128,7 +148,12 @@ class PrintBackend(BaseBackend):
         Gesture.FIST_GESTURE: "✊ FIST      ",
     }
 
+    def __init__(self):
+        super().__init__()
+
     def send(self, gesture: Gesture, confidence: float, sources: list = None) -> None:
+        if self._debounced(gesture):
+            return
         sym = self.SYMBOLS.get(gesture, str(gesture))
         ts = time.strftime("%H:%M:%S")
         print(f"[{ts}] {sym}  conf={confidence:.2f}  cams={sources}", flush=True)
