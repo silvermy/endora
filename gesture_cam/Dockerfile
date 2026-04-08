@@ -8,7 +8,7 @@
 # We install OpenCV's headless build and MediaPipe's arm64 wheel.
 # The image is ~900 MB after layer squash (MediaPipe + OpenCV are large).
 
-ARG BUILD_FROM=ghcr.io/hassio-addons/debian-base/amd64:latest
+ARG BUILD_FROM=ghcr.io/home-assistant/base-debian:bookworm
 FROM $BUILD_FROM
 
 LABEL \
