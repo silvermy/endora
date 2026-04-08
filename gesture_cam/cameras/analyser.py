@@ -103,16 +103,16 @@ class CameraAnalyser(threading.Thread):
         mp_hands = mp.solutions.hands
 
         pose = mp_pose.Pose(
-            model_complexity=self.s.pose_model_complexity,
-            min_detection_confidence=self.s.pose_min_detection_confidence,
-            min_tracking_confidence=self.s.pose_min_tracking_confidence,
+            model_complexity=int(self.s.pose_model_complexity),
+            min_detection_confidence=float(self.s.pose_min_detection_confidence),
+            min_tracking_confidence=float(self.s.pose_min_tracking_confidence),
             enable_segmentation=False,
             static_image_mode=False,
         )
         hands = mp_hands.Hands(
-            max_num_hands=self.s.hand_model_max_hands,
-            min_detection_confidence=self.s.hand_min_detection_confidence,
-            min_tracking_confidence=self.s.hand_min_tracking_confidence,
+            max_num_hands=int(self.s.hand_model_max_hands),
+            min_detection_confidence=float(self.s.hand_min_detection_confidence),
+            min_tracking_confidence=float(self.s.hand_min_tracking_confidence),
             static_image_mode=False,
         )
 

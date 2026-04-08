@@ -14,6 +14,7 @@ import dataclasses
 import json
 import logging
 import os
+import typing
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -92,9 +93,35 @@ class Settings:
             except Exception as e:
                 log.warning("Could not parse %s: %s", HA_OPTIONS_PATH, e)
 
-        fields = {f.name for f in dataclasses.fields(cls)}
-        filtered = {k: v for k, v in data.items() if k in fields}
-        instance = cls(**filtered)
+        # get_type_hints resolves forward references / __future__ annotations
+        # to actual Python types (int, float, str, bool) reliably.
+        try:
+            hints = typing.get_type_hints(cls)
+        except Exception:
+            hints = {f.name: type(getattr(cls, f.name, None)) for f in dataclasses.fields(cls)}
+
+        coerced: dict = {}
+        for k, v in data.items():
+            if k not in hints:
+                continue
+            t = hints[k]
+            try:
+                if t is int:
+                    v = int(v)
+                elif t is float:
+                    v = float(v)
+                elif t is bool:
+                    if isinstance(v, str):
+                        v = v.lower() in ("true", "1", "yes")
+                    else:
+                        v = bool(v)
+                elif t is str:
+                    v = str(v)
+            except (ValueError, TypeError) as e:
+                log.warning("Could not coerce %s=%r to %s: %s — using default", k, v, t, e)
+                continue
+            coerced[k] = v
+        instance = cls(**coerced)
 
         for var, field in [
             ("RTSP_URL_A", "rtsp_url_a"),
