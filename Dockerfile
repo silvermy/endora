@@ -8,7 +8,7 @@
 # We install OpenCV's headless build and MediaPipe's arm64 wheel.
 # The image is ~900 MB after layer squash (MediaPipe + OpenCV are large).
 
-ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-python:3.11-alpine3.19
+ARG BUILD_FROM=ghcr.io/hassio-addons/debian-base/amd64:latest
 FROM $BUILD_FROM
 
 LABEL \
@@ -22,16 +22,18 @@ LABEL \
 # ffmpeg  : RTSP decoding backend for OpenCV
 # libgl1  : OpenCV runtime dep (even headless build needs libGL.so.1)
 # glib    : mediapipe runtime
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
     ffmpeg \
-    mesa-gl \
-    glib \
-    libstdc++ \
-    && rm -rf /var/cache/apk/*
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 
-# ── Python deps ───────────────────────────────────────────────────────────────
+# 2. Use pip3 to install your requirements
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
 # ── Application code ──────────────────────────────────────────────────────────
