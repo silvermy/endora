@@ -20,15 +20,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
-# ── 3. Install Python Requirements ───────────────────────────────────────────
+# ── 3. Install Python Requirements (VENV Method) ────────────────────────────
 COPY requirements.txt /tmp/requirements.txt
-# --break-system-packages is required on Debian Bookworm to bypass PEP 668
-# --prefer-binary prevents pip from trying to build MediaPipe from source
-RUN pip3 install --no-cache-dir \
-    && pip3 install --no-cache-dir \
-       --break-system-packages \
-       --prefer-binary \
-       -r /tmp/requirements.txt \
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip3 install --no-cache-dir --prefer-binary -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
 # ── 4. Final Setup ────────────────────────────────────────────────────────────
