@@ -354,19 +354,22 @@ def _pick_candidate(
         if palm_facing == "down":
             return Gesture.PALM_DOWN
 
-    # Fist pump — fist moving upward, both avg and peak must agree
+    # Fist pump — fist moving upward, peak velocity confirms intentional move
     if is_fist:
-        if vy < -vh and pvy < -vh * 0.7:
+        if pvy < -vh and abs(pvx) < abs(pvy):
             return Gesture.FIST_PUMP
 
-    # Wave — open hand, horizontal movement
-    # Both avg AND peak must exceed threshold, but don't require
-    # same direction — the avg velocity direction is authoritative
+    # Wave — open hand, horizontal movement.
+    # Use PEAK velocity as the primary signal — a fast wrist flick spikes
+    # the peak even if the 6-frame average is diluted by still frames.
+    # Average velocity is only used as a minimum sanity check (> 1/3 threshold)
+    # to confirm the hand actually moved and the peak isn't just stale noise.
     if not is_fist:
-        abs_vx, abs_vy = abs(vx), abs(vy)
         abs_pvx = abs(pvx)
+        abs_pvy = abs(pvy)
+        abs_vx  = abs(vx)
 
-        if abs_vx > wh and abs_vx > abs_vy and abs_pvx > wh * 0.5:
-            return Gesture.WAVE_LEFT if vx < 0 else Gesture.WAVE_RIGHT
+        if abs_pvx > wh and abs_pvx > abs_pvy and abs_vx > wh * 0.33:
+            return Gesture.WAVE_LEFT if pvx < 0 else Gesture.WAVE_RIGHT
 
     return None
