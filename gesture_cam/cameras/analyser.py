@@ -360,16 +360,13 @@ def _pick_candidate(
             return Gesture.FIST_PUMP
 
     # Wave — open hand, horizontal movement
-    # Both avg AND peak must exceed threshold to prevent stale-peak triggering
+    # Both avg AND peak must exceed threshold, but don't require
+    # same direction — the avg velocity direction is authoritative
     if not is_fist:
         abs_vx, abs_vy = abs(vx), abs(vy)
         abs_pvx = abs(pvx)
 
-        horizontal_avg   = abs_vx > wh and abs_vx > abs_vy
-        horizontal_peak  = abs_pvx > wh * 0.7   # peak must also be present
-        same_direction   = (vx * pvx) > 0         # avg and peak point same way
-
-        if horizontal_avg and horizontal_peak and same_direction:
+        if abs_vx > wh and abs_vx > abs_vy and abs_pvx > wh * 0.5:
             return Gesture.WAVE_LEFT if vx < 0 else Gesture.WAVE_RIGHT
 
     return None
