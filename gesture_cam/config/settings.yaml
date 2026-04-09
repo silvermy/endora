@@ -24,7 +24,7 @@ palm_orientation_threshold: 0.05
 
 # Velocity thresholds
 wave_velocity_threshold_px: 25.0
-wave_sustain_frames: 2
+wave_sustain_frames: 1
 vertical_velocity_threshold_px: 20.0
 vertical_sustain_frames: 1
 fist_curl_threshold: 0.65

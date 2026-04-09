@@ -55,7 +55,7 @@ class Settings:
 
     # ── Gesture thresholds ────────────────────────────────────────────────
     wave_velocity_threshold_px: float = 25.0
-    wave_sustain_frames: int = 2
+    wave_sustain_frames: int = 1
     vertical_velocity_threshold_px: float = 20.0
     vertical_sustain_frames: int = 1
     fist_curl_threshold: float = 0.65

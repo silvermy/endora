@@ -6,7 +6,7 @@
 
 set -e
 
-bashio::log.info "Gesture Cam v1.3.4 starting..."
+bashio::log.info "Gesture Cam v1.3.5 starting..."
 
 if ! bashio::config.has_value "rtsp_url_a"; then
     bashio::log.fatal "rtsp_url_a is not configured"
