@@ -12,8 +12,10 @@ frame_height: 640
 pose_model_complexity: 1
 pose_min_detection_confidence: 0.4
 pose_min_tracking_confidence: 0.4
-# Slack below nose level — increase if arm-raise not triggering
-arm_above_head_tolerance: 0.05
+# Wrist must be this far ABOVE shoulder (negative = above shoulder).
+# Resting arms: diff +0.05 to +0.15. Raised arm: diff -0.05 to -0.25.
+# -0.10 requires a clear raise without needing full overhead extension.
+arm_above_head_tolerance: -0.10
 
 # Hands — gesture classification
 hand_model_max_hands: 1
