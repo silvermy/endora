@@ -180,8 +180,6 @@ class CameraAnalyser(threading.Thread):
             velocity.update(wx, wy)
             vx, vy   = velocity.velocity()
             pvx, pvy = velocity.peak_velocity()
-            eff_vx   = pvx if abs(pvx) > abs(vx) else vx
-            eff_vy   = pvy if abs(pvy) > abs(vy) else vy
 
             # ── 2. Hand shape and orientation ────────────────────────────
             is_fist, palm_facing, hand_conf = _classify_hand_full(
@@ -190,7 +188,7 @@ class CameraAnalyser(threading.Thread):
 
             # ── 3. Pick candidate ─────────────────────────────────────────
             candidate = _pick_candidate(
-                eff_vx, eff_vy, is_fist, palm_facing, self.s
+                eff_vx, eff_vy, pvx, pvy, is_fist, palm_facing, self.s
             )
 
             if log.isEnabledFor(logging.DEBUG):
@@ -217,7 +215,10 @@ class CameraAnalyser(threading.Thread):
                 confidence = min(1.0, sustain_counts[candidate] / (needed * 2))
                 log.debug("[%s] FIRING %s conf=%.2f", self.label, candidate, confidence)
                 self.on_candidate(candidate, confidence, self.label)
-                sustain_counts[candidate] = 0
+                # Reset ALL counts and velocity after firing to clear stale
+                # peak values that would otherwise trigger immediately again
+                sustain_counts = {g: 0 for g in Gesture}
+                velocity.reset()
 
         pose.close()
         hands.close()
@@ -332,36 +333,43 @@ def _classify_hand_full(
 
 def _pick_candidate(
     vx: float, vy: float,
+    pvx: float, pvy: float,
     is_fist: bool,
     palm_facing: str,
     settings,
 ) -> Optional[Gesture]:
     """
-    Map velocity + hand shape/orientation → gesture candidate.
-
-    Priority order:
-      1. Palm orientation (up/down) — static wrist position, no movement needed
-      2. Fist pump — fist + upward movement
-      3. Wave left/right — open hand + horizontal velocity
+    Require BOTH average velocity AND peak velocity to exceed threshold.
+    This prevents stale peak values from triggering on a still hand.
+    Average velocity catches sustained movement; requiring it alongside
+    peak means a single old high-velocity sample can't fire alone.
     """
     wh = settings.wave_velocity_threshold_px
     vh = settings.vertical_velocity_threshold_px
 
-    # ── Palm orientation gestures — triggered by wrist angle, not velocity ──
+    # Palm orientation — static gesture, no velocity required
     if not is_fist:
         if palm_facing == "up":
             return Gesture.PALM_UP
         if palm_facing == "down":
             return Gesture.PALM_DOWN
 
-    # ── Fist pump — fist moving upward ───────────────────────────────────────
-    if is_fist and vy < -vh:   # negative vy = moving up in frame
-        return Gesture.FIST_PUMP
+    # Fist pump — fist moving upward, both avg and peak must agree
+    if is_fist:
+        if vy < -vh and pvy < -vh * 0.7:
+            return Gesture.FIST_PUMP
 
-    # ── Horizontal wave — open hand, fast horizontal movement ────────────────
+    # Wave — open hand, horizontal movement
+    # Both avg AND peak must exceed threshold to prevent stale-peak triggering
     if not is_fist:
         abs_vx, abs_vy = abs(vx), abs(vy)
-        if abs_vx > wh and abs_vx > abs_vy:
+        abs_pvx = abs(pvx)
+
+        horizontal_avg   = abs_vx > wh and abs_vx > abs_vy
+        horizontal_peak  = abs_pvx > wh * 0.7   # peak must also be present
+        same_direction   = (vx * pvx) > 0         # avg and peak point same way
+
+        if horizontal_avg and horizontal_peak and same_direction:
             return Gesture.WAVE_LEFT if vx < 0 else Gesture.WAVE_RIGHT
 
     return None
