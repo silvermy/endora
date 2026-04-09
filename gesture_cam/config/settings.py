@@ -36,11 +36,10 @@ class Settings:
     pose_min_detection_confidence: float = 0.4
     pose_min_tracking_confidence: float = 0.4
 
-    # How far below nose level the wrist can be and still count as
-    # "arm above head". 0.0 = wrist must be at or above nose.
-    # 0.05 = wrist may be 5% of frame height below nose (a little slack).
-    # Increase if arm-raise isn't triggering; decrease to require higher raise.
-    arm_above_head_tolerance: float = 0.05
+    # Wrist must be this far above the shoulder (negative = above).
+    # Resting: diff +0.05 to +0.15. Raised: diff -0.05 to -0.25.
+    # -0.10 sits cleanly between resting and raised for most setups.
+    arm_above_head_tolerance: float = -0.10
 
     # ── Hands (gesture classification) ───────────────────────────────────
     hand_model_max_hands: int = 1

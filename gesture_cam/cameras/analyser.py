@@ -249,12 +249,18 @@ def _arm_above_head(
     """
     Returns (raised, (wrist_x, wrist_y), side).
 
-    "Arm above head" = wrist is above the nose landmark.
-    This is a much stricter and more natural qualifier than
-    wrist-above-shoulder — it requires a genuine overhead raise.
+    Uses wrist-vs-shoulder — more reliable than wrist-vs-nose because
+    the shoulder stays visible even when the arm is fully extended overhead.
+    The nose landmark causes pose to drop out when arm goes above head level.
 
-    Falls back to wrist-above-shoulder if nose isn't detected
-    (e.g. person is facing away from camera).
+    arm_above_head_tolerance:
+      Negative (e.g. -0.10) = wrist must be 10% of frame height ABOVE shoulder.
+      Positive (e.g.  0.05) = wrist may be 5% below shoulder (loose).
+
+    Calibration from logs:
+      Resting arms typing: diff +0.05 to +0.15  (wrist well below shoulder)
+      Arm at head height:  diff  0.00 to -0.05
+      Arm fully overhead:  diff -0.10 to -0.25
     """
     if not pose_res or not pose_res.pose_landmarks:
         return False, (0.0, 0.0), ""
@@ -262,10 +268,6 @@ def _arm_above_head(
     import mediapipe as mp
     lm  = pose_res.pose_landmarks.landmark
     PL  = mp.solutions.pose.PoseLandmark
-
-    # Reference point: nose (or fallback to mid-shoulder)
-    nose = lm[PL.NOSE]
-    ref_y = nose.y  # smaller y = higher in frame
 
     pairs = [
         ("RIGHT", PL.RIGHT_SHOULDER, PL.RIGHT_ELBOW, PL.RIGHT_WRIST),
@@ -277,18 +279,22 @@ def _arm_above_head(
         el = lm[el_id]
         wr = lm[wr_id]
 
-        # wr.y - ref_y: negative = wrist above nose, positive = wrist below nose
-        wrist_nose_diff      = wr.y - ref_y
-        wrist_above_nose     = wrist_nose_diff < settings.arm_above_head_tolerance
+        # diff = wr.y - sh.y
+        # Negative = wrist above shoulder (arm raised)
+        # Positive = wrist below shoulder (arm at rest)
+        diff                 = wr.y - sh.y
+        wrist_above_shoulder = diff < settings.arm_above_head_tolerance
         elbow_above_shoulder = el.y < sh.y + 0.05
 
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("  [arm-check] %s nose_y=%.3f wr_y=%.3f diff=%.3f tol=%.3f → raised=%s elbow=%s",
-                      side, ref_y, wr.y, wrist_nose_diff,
-                      settings.arm_above_head_tolerance,
-                      wrist_above_nose, elbow_above_shoulder)
+            log.debug(
+                "  [arm-check] %s sh_y=%.3f wr_y=%.3f diff=%.3f tol=%.3f → raised=%s elbow=%s",
+                side, sh.y, wr.y, diff,
+                settings.arm_above_head_tolerance,
+                wrist_above_shoulder, elbow_above_shoulder,
+            )
 
-        if wrist_above_nose and elbow_above_shoulder:
+        if wrist_above_shoulder and elbow_above_shoulder:
             return True, (wr.x * frame_w, wr.y * frame_h), side
 
     return False, (0.0, 0.0), ""
