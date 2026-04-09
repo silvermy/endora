@@ -188,7 +188,7 @@ class CameraAnalyser(threading.Thread):
 
             # ── 3. Pick candidate ─────────────────────────────────────────
             candidate = _pick_candidate(
-                eff_vx, eff_vy, pvx, pvy, is_fist, palm_facing, self.s
+                vx, vy, pvx, pvy, is_fist, palm_facing, self.s
             )
 
             if log.isEnabledFor(logging.DEBUG):
