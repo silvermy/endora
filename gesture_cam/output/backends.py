@@ -145,7 +145,7 @@ class PrintBackend(BaseBackend):
         Gesture.WAVE_RIGHT:   "→ WAVE RIGHT",
         Gesture.PALM_UP:      "↑ PALM UP   ",
         Gesture.PALM_DOWN:    "↓ PALM DOWN ",
-        Gesture.FIST_GESTURE: "✊ FIST      ",
+        Gesture.FIST_PUMP:    "✊ FIST PUMP ",
     }
 
     def __init__(self):
