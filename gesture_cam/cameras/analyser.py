@@ -134,6 +134,10 @@ class CameraAnalyser(threading.Thread):
         last_arm_raised = False
         consecutive_no_pose = 0
         NO_POSE_TOLERANCE = 4
+        arm_raised_since: float = 0.0
+        # Reset tracking if arm held still for this many seconds — prevents
+        # stale velocity values accumulating and reduces idle CPU load
+        ARM_HELD_TIMEOUT_S = 5.0
 
         log.info("[%s] Analyser running (hybrid pose+hands mode)", self.label)
 
@@ -175,7 +179,19 @@ class CameraAnalyser(threading.Thread):
                 log.debug("[%s] arm raised (%s side) wrist=(%.0f,%.0f)",
                           self.label, raised_side, wx, wy)
                 velocity.reset()
+                arm_raised_since = time.monotonic()
             last_arm_raised = True
+
+            # Reset if arm held still too long — clears stale velocity state
+            now = time.monotonic()
+            if now - arm_raised_since > ARM_HELD_TIMEOUT_S:
+                vx_check, _ = velocity.velocity()
+                pvx_check, _ = velocity.peak_velocity()
+                if abs(vx_check) < 2.0 and abs(pvx_check) < 5.0:
+                    velocity.reset()
+                    sustain_counts = {g: 0 for g in Gesture}
+                    arm_raised_since = now
+                    log.debug("[%s] arm held still — resetting tracker", self.label)
 
             velocity.update(wx, wy)
             vx, vy   = velocity.velocity()
