@@ -1,22 +1,22 @@
 """
 cameras/analyser.py
 
-Gesture detection using MediaPipe Hands only — no pose/skeleton required.
+Hybrid gesture detection: MediaPipe Pose + Hands.
 
-This approach detects Bewitched-style wrist flicks from any body position:
-sitting, standing, laying down, facing any direction. The hand just needs
-to be visible in frame.
+Gesture set:
+  WAVE_LEFT    — arm raised above head, open palm, wrist flicks left
+  WAVE_RIGHT   — arm raised above head, open palm, wrist flicks right
+  PALM_UP      — arm raised above head, palm rotated to face ceiling
+  PALM_DOWN    — arm raised above head, palm rotated to face floor
+  FIST_PUMP    — arm raised above head, closed fist, upward pump motion
 
-Pipeline per frame:
-  1. MediaPipe Hands  → detect hand landmarks anywhere in frame
-  2. Wrist tracking   → track wrist position history
-  3. Velocity         → compute directional velocity of the wrist
-  4. Hand shape       → open palm vs fist
-  5. State machine    → require N consistent frames before emitting
-
-The "arm raised" qualifier from the pose-based approach is replaced by a
-minimum velocity threshold — a deliberate flick hits 20+ px/frame, idle
-hand movement is typically under 5 px/frame.
+Detection pipeline per frame:
+  1. Pose  → is arm raised above head? (wrist above nose level)
+  2. Hands → wrist flick velocity (wave left/right)
+             palm orientation (up/down via wrist roll angle)
+             hand shape (open/fist)
+  3. Velocity tracker → directional velocity of wrist
+  4. State machine → N consistent frames before firing
 """
 
 from __future__ import annotations
@@ -36,28 +36,22 @@ log = logging.getLogger(__name__)
 # ── Gesture enum ──────────────────────────────────────────────────────────────
 
 class Gesture(Enum):
-    WAVE_LEFT       = auto()
-    WAVE_RIGHT      = auto()
-    PALM_UP         = auto()
-    PALM_DOWN       = auto()
-    FIST_GESTURE    = auto()
+    WAVE_LEFT    = auto()  # arm up, open hand, flick left
+    WAVE_RIGHT   = auto()  # arm up, open hand, flick right
+    PALM_UP      = auto()  # arm up, palm rotated to face ceiling
+    PALM_DOWN    = auto()  # arm up, palm rotated to face floor
+    FIST_PUMP    = auto()  # arm up, fist, upward pump
 
     def __str__(self):
         return self.name.replace("_", " ").lower()
 
 
-# ── Wrist history / velocity ──────────────────────────────────────────────────
+# ── Velocity tracker ──────────────────────────────────────────────────────────
 
 WristSample = collections.namedtuple("WristSample", ["x", "y", "t"])
 
 
 class VelocityTracker:
-    """
-    Tracks wrist position history and computes both smoothed and peak velocity.
-    Peak velocity catches brief sharp flicks even if the average is low.
-    Only considers recent samples for peak to avoid stale values persisting.
-    """
-
     HISTORY = 6
 
     def __init__(self):
@@ -67,18 +61,14 @@ class VelocityTracker:
         self._samples.append(WristSample(x, y, time.monotonic()))
 
     def velocity(self) -> tuple[float, float]:
-        """Smoothed velocity — delta between oldest and newest sample."""
         if len(self._samples) < 2:
             return 0.0, 0.0
         oldest = self._samples[0]
         newest = self._samples[-1]
         n = len(self._samples) - 1
-        vx = (newest.x - oldest.x) / n
-        vy = (newest.y - oldest.y) / n
-        return vx, vy
+        return (newest.x - oldest.x) / n, (newest.y - oldest.y) / n
 
     def peak_velocity(self) -> tuple[float, float]:
-        """Peak frame-to-frame velocity in last 3 samples."""
         samples = list(self._samples)
         recent = samples[-3:] if len(samples) >= 3 else samples
         if len(recent) < 2:
@@ -97,13 +87,9 @@ class VelocityTracker:
         self._samples.clear()
 
 
-# ── Per-camera analyser ───────────────────────────────────────────────────────
+# ── Analyser ──────────────────────────────────────────────────────────────────
 
 class CameraAnalyser(threading.Thread):
-    """
-    Reads frames from an RtspCapture, runs MediaPipe Hands, and calls
-    on_candidate(gesture, confidence, source_label) when a gesture fires.
-    """
 
     def __init__(
         self,
@@ -126,8 +112,16 @@ class CameraAnalyser(threading.Thread):
         import mediapipe as mp
         import cv2
 
+        mp_pose  = mp.solutions.pose
         mp_hands = mp.solutions.hands
 
+        pose = mp_pose.Pose(
+            model_complexity=int(self.s.pose_model_complexity),
+            min_detection_confidence=float(self.s.pose_min_detection_confidence),
+            min_tracking_confidence=float(self.s.pose_min_tracking_confidence),
+            enable_segmentation=False,
+            static_image_mode=False,
+        )
         hands = mp_hands.Hands(
             max_num_hands=int(self.s.hand_model_max_hands),
             min_detection_confidence=float(self.s.hand_min_detection_confidence),
@@ -137,13 +131,11 @@ class CameraAnalyser(threading.Thread):
 
         velocity = VelocityTracker()
         sustain_counts: dict[Gesture, int] = {g: 0 for g in Gesture}
-        last_frame_had_hand = False
-        consecutive_misses = 0
-        # Require this many consecutive missed frames before resetting velocity.
-        # Prevents a single corrupted/dropped frame from wiping tracking state.
-        MISS_TOLERANCE = 4
+        last_arm_raised = False
+        consecutive_no_pose = 0
+        NO_POSE_TOLERANCE = 4
 
-        log.info("[%s] Analyser running (hands-only mode)", self.label)
+        log.info("[%s] Analyser running (hybrid pose+hands mode)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -154,61 +146,62 @@ class CameraAnalyser(threading.Thread):
             h, w = frame.shape[:2]
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             rgb.flags.writeable = False
-            hand_res = hands.process(rgb)
+            pose_res  = pose.process(rgb)
+            hand_res  = hands.process(rgb)
             rgb.flags.writeable = True
 
-            # ── 1. Hand detected? ─────────────────────────────────────────
-            if not hand_res or not hand_res.multi_hand_landmarks:
-                consecutive_misses += 1
-                if consecutive_misses >= MISS_TOLERANCE:
-                    if last_frame_had_hand:
-                        log.debug("[%s] hand lost — resetting", self.label)
+            # ── 1. Arm raised above head? ─────────────────────────────────
+            arm_raised, wrist_xy, raised_side = _arm_above_head(
+                pose_res, self.s, w, h
+            )
+
+            if not arm_raised:
+                consecutive_no_pose += 1
+                if consecutive_no_pose >= NO_POSE_TOLERANCE:
+                    if last_arm_raised:
+                        log.debug("[%s] arm lowered — resetting", self.label)
                         velocity.reset()
                         for g in Gesture:
                             sustain_counts[g] = 0
-                    last_frame_had_hand = False
-
-                if log.isEnabledFor(logging.DEBUG) and consecutive_misses % 10 == 1:
-                    log.debug("[%s] no hand detected", self.label)
+                    last_arm_raised = False
+                if log.isEnabledFor(logging.DEBUG) and consecutive_no_pose % 10 == 1:
+                    log.debug("[%s] arm not raised", self.label)
                 continue
 
-            consecutive_misses = 0
+            consecutive_no_pose = 0
+            wx, wy = wrist_xy
 
-            # Use first detected hand
-            landmarks = hand_res.multi_hand_landmarks[0].landmark
-
-            # Wrist is landmark 0 in MediaPipe Hands
-            wrist = landmarks[0]
-            wx = wrist.x * w
-            wy = wrist.y * h
-
-            if not last_frame_had_hand:
-                log.debug("[%s] hand detected at (%.0f, %.0f)", self.label, wx, wy)
+            if not last_arm_raised:
+                log.debug("[%s] arm raised (%s side) wrist=(%.0f,%.0f)",
+                          self.label, raised_side, wx, wy)
                 velocity.reset()
-            last_frame_had_hand = True
+            last_arm_raised = True
 
             velocity.update(wx, wy)
-            vx, vy = velocity.velocity()
+            vx, vy   = velocity.velocity()
             pvx, pvy = velocity.peak_velocity()
+            eff_vx   = pvx if abs(pvx) > abs(vx) else vx
+            eff_vy   = pvy if abs(pvy) > abs(vy) else vy
 
-            # Use whichever is larger — avg or peak
-            eff_vx = pvx if abs(pvx) > abs(vx) else vx
-            eff_vy = pvy if abs(pvy) > abs(vy) else vy
+            # ── 2. Hand shape and orientation ────────────────────────────
+            is_fist, palm_facing, hand_conf = _classify_hand_full(
+                hand_res, self.s
+            )
 
-            # ── 2. Hand shape ─────────────────────────────────────────────
-            is_fist, hand_conf = _classify_hand(landmarks, self.s)
-
-            # ── 3. Candidate gesture ──────────────────────────────────────
-            candidate = _pick_candidate(eff_vx, eff_vy, is_fist, self.s)
+            # ── 3. Pick candidate ─────────────────────────────────────────
+            candidate = _pick_candidate(
+                eff_vx, eff_vy, is_fist, palm_facing, self.s
+            )
 
             if log.isEnabledFor(logging.DEBUG):
                 log.debug(
-                    "[%s] hand (%.0f,%.0f) vx=%.1f vy=%.1f "
-                    "pvx=%.1f pvy=%.1f fist=%s conf=%.2f candidate=%s sustain=%s",
+                    "[%s] arm up | wrist=(%.0f,%.0f) vx=%.1f vy=%.1f "
+                    "pvx=%.1f pvy=%.1f fist=%s palm=%s candidate=%s sustain=%s",
                     self.label, wx, wy, vx, vy, pvx, pvy,
-                    is_fist, hand_conf,
+                    is_fist, palm_facing,
                     candidate.name if candidate else "none",
-                    {g.name: sustain_counts[g] for g in Gesture if sustain_counts[g] > 0},
+                    {g.name: sustain_counts[g] for g in Gesture
+                     if sustain_counts[g] > 0},
                 )
 
             # ── 4. Sustain ────────────────────────────────────────────────
@@ -218,73 +211,157 @@ class CameraAnalyser(threading.Thread):
                 else:
                     sustain_counts[g] = max(0, sustain_counts[g] - 1)
 
-            needed = (
-                self.s.wave_sustain_frames
-                if candidate in (Gesture.WAVE_LEFT, Gesture.WAVE_RIGHT)
-                else self.s.vertical_sustain_frames
-            )
+            needed = self.s.wave_sustain_frames
 
             if candidate and sustain_counts.get(candidate, 0) >= needed:
                 confidence = min(1.0, sustain_counts[candidate] / (needed * 2))
-                log.debug(
-                    "[%s] FIRING candidate=%s conf=%.2f",
-                    self.label, candidate, confidence,
-                )
+                log.debug("[%s] FIRING %s conf=%.2f", self.label, candidate, confidence)
                 self.on_candidate(candidate, confidence, self.label)
                 sustain_counts[candidate] = 0
 
+        pose.close()
         hands.close()
         log.info("[%s] Analyser stopped", self.label)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _classify_hand(landmarks, settings) -> tuple[bool, float]:
+def _arm_above_head(
+    pose_res, settings, frame_w: int, frame_h: int
+) -> tuple[bool, tuple[float, float], str]:
     """
-    Classify hand as fist or open using finger curl heuristic.
-    landmarks: list of MediaPipe hand landmark objects.
+    Returns (raised, (wrist_x, wrist_y), side).
+
+    "Arm above head" = wrist is above the nose landmark.
+    This is a much stricter and more natural qualifier than
+    wrist-above-shoulder — it requires a genuine overhead raise.
+
+    Falls back to wrist-above-shoulder if nose isn't detected
+    (e.g. person is facing away from camera).
     """
+    if not pose_res or not pose_res.pose_landmarks:
+        return False, (0.0, 0.0), ""
+
+    import mediapipe as mp
+    lm  = pose_res.pose_landmarks.landmark
+    PL  = mp.solutions.pose.PoseLandmark
+
+    # Reference point: nose (or fallback to mid-shoulder)
+    nose = lm[PL.NOSE]
+    ref_y = nose.y  # smaller y = higher in frame
+
+    pairs = [
+        ("RIGHT", PL.RIGHT_SHOULDER, PL.RIGHT_ELBOW, PL.RIGHT_WRIST),
+        ("LEFT",  PL.LEFT_SHOULDER,  PL.LEFT_ELBOW,  PL.LEFT_WRIST),
+    ]
+
+    for side, sh_id, el_id, wr_id in pairs:
+        sh = lm[sh_id]
+        el = lm[el_id]
+        wr = lm[wr_id]
+
+        # Wrist must be above nose (smaller y value)
+        # Allow a small tolerance for when arm is alongside head
+        wrist_above_nose     = wr.y < (ref_y + settings.arm_above_head_tolerance)
+        elbow_above_shoulder = el.y < sh.y + 0.05  # elbow at least at shoulder level
+
+        if wrist_above_nose and elbow_above_shoulder:
+            return True, (wr.x * frame_w, wr.y * frame_h), side
+
+    return False, (0.0, 0.0), ""
+
+
+def _classify_hand_full(
+    hand_res, settings
+) -> tuple[bool, str, float]:
+    """
+    Returns (is_fist, palm_facing, confidence).
+
+    palm_facing values:
+      'camera'  — palm faces the camera (neutral / waving position)
+      'up'      — palm faces ceiling (wrist bent backward)
+      'down'    — palm faces floor (wrist bent forward)
+      'unknown' — hand not detected or ambiguous
+
+    Palm orientation is determined by the z-depth of the middle finger MCP
+    relative to the wrist. MediaPipe Hands provides z coordinates that encode
+    depth within the hand — when the palm faces up the finger MCPs have
+    negative z relative to wrist; when facing down they have positive z.
+    """
+    if not hand_res or not hand_res.multi_hand_landmarks:
+        return False, "unknown", 0.0
+
+    lm = hand_res.multi_hand_landmarks[0].landmark
+
+    # ── Fist detection ────────────────────────────────────────────────────
     TIPS = [8, 12, 16, 20]
     PIPS = [6, 10, 14, 18]
     MCPS = [5,  9, 13, 17]
 
     curled = 0
     for tip_i, pip_i, mcp_i in zip(TIPS, PIPS, MCPS):
-        tip = landmarks[tip_i]
-        pip = landmarks[pip_i]
-        mcp = landmarks[mcp_i]
-        if tip.y > pip.y and tip.y > mcp.y:
+        if lm[tip_i].y > lm[pip_i].y and lm[tip_i].y > lm[mcp_i].y:
             curled += 1
 
-    frac = curled / 4.0
+    frac    = curled / 4.0
     is_fist = frac >= settings.fist_curl_threshold
-    confidence = frac if is_fist else (1.0 - frac)
-    return is_fist, confidence
+    conf    = frac if is_fist else (1.0 - frac)
+
+    # ── Palm orientation ──────────────────────────────────────────────────
+    # Use the z coordinate of the middle finger MCP (landmark 9) vs wrist (0)
+    # z is normalised: negative = closer to camera, positive = further
+    # Palm up  (facing ceiling): knuckles point up, z_mcp << z_wrist
+    # Palm down (facing floor):  knuckles point down, z_mcp >> z_wrist
+    wrist_z  = lm[0].z
+    middle_z = lm[9].z   # middle finger MCP
+    index_z  = lm[5].z   # index finger MCP
+    ring_z   = lm[13].z  # ring finger MCP
+    avg_mcp_z = (middle_z + index_z + ring_z) / 3.0
+    z_diff = avg_mcp_z - wrist_z
+
+    palm_thresh = settings.palm_orientation_threshold
+    if z_diff < -palm_thresh:
+        palm_facing = "up"
+    elif z_diff > palm_thresh:
+        palm_facing = "down"
+    else:
+        palm_facing = "camera"
+
+    return is_fist, palm_facing, conf
 
 
 def _pick_candidate(
-    vx: float, vy: float, is_fist: bool, settings
+    vx: float, vy: float,
+    is_fist: bool,
+    palm_facing: str,
+    settings,
 ) -> Optional[Gesture]:
     """
-    Select gesture from velocity and hand shape.
-    Fist takes priority over directional gestures.
-    Requires minimum velocity to filter idle hand movement.
+    Map velocity + hand shape/orientation → gesture candidate.
+
+    Priority order:
+      1. Palm orientation (up/down) — static wrist position, no movement needed
+      2. Fist pump — fist + upward movement
+      3. Wave left/right — open hand + horizontal velocity
     """
     wh = settings.wave_velocity_threshold_px
     vh = settings.vertical_velocity_threshold_px
 
-    if is_fist:
-        # Fist still needs minimum movement to avoid triggering when
-        # you just happen to be holding your hand in a fist shape
-        if abs(vx) > wh * 0.5 or abs(vy) > vh * 0.5:
-            return Gesture.FIST_GESTURE
+    # ── Palm orientation gestures — triggered by wrist angle, not velocity ──
+    if not is_fist:
+        if palm_facing == "up":
+            return Gesture.PALM_UP
+        if palm_facing == "down":
+            return Gesture.PALM_DOWN
 
-    abs_vx, abs_vy = abs(vx), abs(vy)
+    # ── Fist pump — fist moving upward ───────────────────────────────────────
+    if is_fist and vy < -vh:   # negative vy = moving up in frame
+        return Gesture.FIST_PUMP
 
-    if abs_vx > wh and abs_vx > abs_vy:
-        return Gesture.WAVE_LEFT if vx < 0 else Gesture.WAVE_RIGHT
-
-    if abs_vy > vh and abs_vy > abs_vx:
-        return Gesture.PALM_UP if vy < 0 else Gesture.PALM_DOWN
+    # ── Horizontal wave — open hand, fast horizontal movement ────────────────
+    if not is_fist:
+        abs_vx, abs_vy = abs(vx), abs(vy)
+        if abs_vx > wh and abs_vx > abs_vy:
+            return Gesture.WAVE_LEFT if vx < 0 else Gesture.WAVE_RIGHT
 
     return None
