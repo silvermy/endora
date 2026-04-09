@@ -277,10 +277,16 @@ def _arm_above_head(
         el = lm[el_id]
         wr = lm[wr_id]
 
-        # Wrist must be above nose (smaller y value)
-        # Allow a small tolerance for when arm is alongside head
-        wrist_above_nose     = wr.y < (ref_y + settings.arm_above_head_tolerance)
-        elbow_above_shoulder = el.y < sh.y + 0.05  # elbow at least at shoulder level
+        # wr.y - ref_y: negative = wrist above nose, positive = wrist below nose
+        wrist_nose_diff      = wr.y - ref_y
+        wrist_above_nose     = wrist_nose_diff < settings.arm_above_head_tolerance
+        elbow_above_shoulder = el.y < sh.y + 0.05
+
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("  [arm-check] %s nose_y=%.3f wr_y=%.3f diff=%.3f tol=%.3f → raised=%s elbow=%s",
+                      side, ref_y, wr.y, wrist_nose_diff,
+                      settings.arm_above_head_tolerance,
+                      wrist_above_nose, elbow_above_shoulder)
 
         if wrist_above_nose and elbow_above_shoulder:
             return True, (wr.x * frame_w, wr.y * frame_h), side
