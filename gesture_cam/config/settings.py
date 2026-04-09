@@ -1,9 +1,7 @@
 """
 config/settings.py
 
-Settings for hands-only gesture detection.
-Pose detection has been removed — only MediaPipe Hands is used.
-This allows detection from any body position: standing, sitting, laying down.
+Hybrid pose+hands gesture detection settings.
 """
 
 from __future__ import annotations
@@ -22,51 +20,57 @@ HA_OPTIONS_PATH = Path("/data/options.json")
 
 @dataclasses.dataclass
 class Settings:
-    # ── RTSP streams ──────────────────────────────────────────────────────
+    # ── RTSP ──────────────────────────────────────────────────────────────
     rtsp_url_a: str = "rtsp://user:pass@192.168.1.100:554/stream1"
     rtsp_url_b: str = "rtsp://user:pass@192.168.1.101:554/stream1"
     rtsp_transport: str = "tcp"
     rtsp_reconnect_delay_s: float = 5.0
 
-    # ── Frame size ────────────────────────────────────────────────────────
+    # ── Frame ─────────────────────────────────────────────────────────────
     frame_width: int = 640
-    frame_height: int = 480
+    frame_height: int = 640
 
-    # ── MediaPipe Hands ───────────────────────────────────────────────────
-    # max_num_hands: keep at 1 for speed and to avoid detecting bystanders
+    # ── Pose (arm-raise detection) ────────────────────────────────────────
+    # Lite model (0) is fast enough now that hands runs separately
+    pose_model_complexity: int = 1
+    pose_min_detection_confidence: float = 0.4
+    pose_min_tracking_confidence: float = 0.4
+
+    # How far below nose level the wrist can be and still count as
+    # "arm above head". 0.0 = wrist must be at or above nose.
+    # 0.05 = wrist may be 5% of frame height below nose (a little slack).
+    # Increase if arm-raise isn't triggering; decrease to require higher raise.
+    arm_above_head_tolerance: float = 0.05
+
+    # ── Hands (gesture classification) ───────────────────────────────────
     hand_model_max_hands: int = 1
-    # Lower detection confidence = more sensitive, more CPU, more false positives
-    # 0.5 is a good balance for a room camera
-    hand_min_detection_confidence: float = 0.5
-    hand_min_tracking_confidence: float = 0.5
+    hand_min_detection_confidence: float = 0.3
+    hand_min_tracking_confidence: float = 0.1
+
+    # ── Palm orientation ──────────────────────────────────────────────────
+    # Z-depth difference threshold between wrist and MCP knuckles.
+    # Larger = requires more extreme wrist bend to register palm_up/down.
+    # Start at 0.05 — lower to 0.03 if palm gestures aren't triggering.
+    palm_orientation_threshold: float = 0.05
 
     # ── Gesture thresholds ────────────────────────────────────────────────
-    # Minimum wrist velocity (px/frame) to register a gesture.
-    # A deliberate Bewitched-style flick hits 20-40 px/frame.
-    # Idle hand movement while sitting is typically under 5 px/frame.
-    # 15 is a good starting point — lower if not triggering, raise if
-    # getting false triggers from normal hand movement.
-    wave_velocity_threshold_px: float = 15.0
+    wave_velocity_threshold_px: float = 10.0
     wave_sustain_frames: int = 1
-    vertical_velocity_threshold_px: float = 15.0
+    vertical_velocity_threshold_px: float = 10.0
     vertical_sustain_frames: int = 1
     fist_curl_threshold: float = 0.65
 
-    # ── Fusion / debounce ─────────────────────────────────────────────────
+    # ── Fusion ────────────────────────────────────────────────────────────
     fusion_agreement_window_s: float = 1.0
-    # Minimum seconds before same gesture can fire again
     cooldown_s: float = 2.0
-    # Set to true if both RTSP URLs point to the same camera
     single_camera_mode: bool = False
 
-    # ── Home Assistant ────────────────────────────────────────────────────
+    # ── HA ────────────────────────────────────────────────────────────────
     ha_event_name: str = "gesture_detected"
     ha_url: str = "http://supervisor/core/api"
 
-    # ── Logging ───────────────────────────────────────────────────────────
+    # ── Misc ──────────────────────────────────────────────────────────────
     log_level: str = "info"
-
-    # ── Display ───────────────────────────────────────────────────────────
     show_display: bool = False
 
     @classmethod
@@ -104,22 +108,16 @@ class Settings:
                 continue
             t = hints[k]
             try:
-                if t is int:
-                    v = int(v)
-                elif t is float:
-                    v = float(v)
+                if t is int:   v = int(v)
+                elif t is float: v = float(v)
                 elif t is bool:
-                    if isinstance(v, str):
-                        v = v.lower() in ("true", "1", "yes")
-                    else:
-                        v = bool(v)
-                elif t is str:
-                    v = str(v)
+                    v = v.lower() in ("true","1","yes") if isinstance(v,str) else bool(v)
+                elif t is str: v = str(v)
             except (ValueError, TypeError) as e:
-                log.warning("Could not coerce %s=%r to %s: %s — using default",
-                            k, v, t, e)
+                log.warning("Could not coerce %s=%r to %s: %s", k, v, t, e)
                 continue
             coerced[k] = v
+
         instance = cls(**coerced)
 
         for var, field in [
