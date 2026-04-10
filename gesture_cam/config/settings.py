@@ -74,6 +74,8 @@ class Settings:
     # ── Misc ──────────────────────────────────────────────────────────────
     log_level: str = "info"
     show_display: bool = False
+    # Set to e.g. 8765 to enable MJPEG debug stream at http://<ha-ip>:8765/
+    debug_port: int = 0
 
     @classmethod
     def load(cls) -> "Settings":
