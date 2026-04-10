@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import socketserver
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Dict, Optional
 
@@ -116,7 +117,9 @@ small{margin-top:5px;font-size:10px;color:#555}
 
 
 def start(port: int) -> None:
-    server = HTTPServer(("0.0.0.0", port), _Handler)
+    class ThreadedHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+    server = ThreadedHTTPServer(("0.0.0.0", port), _Handler)
     t = threading.Thread(target=server.serve_forever, daemon=True,
                          name="DebugServer")
     t.start()
