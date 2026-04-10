@@ -164,7 +164,8 @@ class CameraAnalyser(threading.Thread):
 
             if not arm_raised:
                 consecutive_no_pose += 1
-                consecutive_arm_raised = 0
+                if consecutive_no_pose >= NO_POSE_TOLERANCE:
+                    consecutive_arm_raised = 0
                 if consecutive_no_pose >= NO_POSE_TOLERANCE:
                     if last_arm_raised:
                         log.debug("[%s] arm lowered — resetting", self.label)
