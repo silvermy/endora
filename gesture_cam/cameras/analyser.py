@@ -177,6 +177,15 @@ class CameraAnalyser(threading.Thread):
                     last_arm_raised = False
                 if log.isEnabledFor(logging.DEBUG) and consecutive_no_pose % 10 == 1:
                     log.debug("[%s] arm not raised", self.label)
+                # Debug: still render frame even when arm not raised
+                if self.debug_frame_cb is not None:
+                    try:
+                        dbg = _draw_debug(frame, pose_res, None,
+                                          0, 0, 0, 0, None, False, "unknown",
+                                          consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
+                        self.debug_frame_cb(self.label, dbg)
+                    except Exception:
+                        pass
                 continue
 
             consecutive_no_pose = 0
@@ -189,6 +198,15 @@ class CameraAnalyser(threading.Thread):
                 if not last_arm_raised:
                     velocity.reset()
                 last_arm_raised = True
+                # Debug: render warming-up state
+                if self.debug_frame_cb is not None:
+                    try:
+                        dbg = _draw_debug(frame, pose_res, wrist_xy,
+                                          0, 0, 0, 0, None, False, "unknown",
+                                          consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
+                        self.debug_frame_cb(self.label, dbg)
+                    except Exception:
+                        pass
                 continue
 
             if not last_arm_raised:
