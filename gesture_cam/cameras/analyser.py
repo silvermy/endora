@@ -140,7 +140,7 @@ class CameraAnalyser(threading.Thread):
         # Arm must be raised for this many consecutive frames before
         # gestures can fire — filters phantom 1-2 frame detections
         consecutive_arm_raised = 0
-        ARM_RAISE_MIN_FRAMES = 8
+        ARM_RAISE_MIN_FRAMES = 5
 
         log.info("[%s] Analyser running (hybrid pose+hands mode)", self.label)
 
@@ -292,7 +292,7 @@ def _arm_above_head(
         # Wrist must appear in upper portion of frame
         wrist_in_upper_frame = wr.y < settings.arm_above_head_tolerance
         # Elbow must be at or above shoulder level (arm up, not just wrist)
-        elbow_elevated = el.y < sh.y + 0.05
+        elbow_elevated = el.y < sh.y + 0.15
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
