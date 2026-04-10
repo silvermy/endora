@@ -392,7 +392,7 @@ def _pick_candidate(
         abs_pvy = abs(pvy)
         abs_vx  = abs(vx)
 
-        if abs_pvx > wh and abs_pvx > abs_pvy and abs_vx > wh * 0.33:
+        if abs_pvx > wh and abs_pvx > abs_pvy and abs_vx > wh * 0.1:
             # If camera is mirrored, flip left/right interpretation
             effective_pvx = -pvx if settings.mirror_camera else pvx
             return Gesture.WAVE_LEFT if effective_pvx < 0 else Gesture.WAVE_RIGHT
