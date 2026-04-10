@@ -135,9 +135,12 @@ class CameraAnalyser(threading.Thread):
         consecutive_no_pose = 0
         NO_POSE_TOLERANCE = 4
         arm_raised_since: float = 0.0
-        # Reset tracking if arm held still for this many seconds — prevents
-        # stale velocity values accumulating and reduces idle CPU load
+        # Reset tracking if arm held still for this many seconds
         ARM_HELD_TIMEOUT_S = 5.0
+        # Arm must be raised for this many consecutive frames before
+        # gestures can fire — filters phantom 1-2 frame detections
+        consecutive_arm_raised = 0
+        ARM_RAISE_MIN_FRAMES = 5
 
         log.info("[%s] Analyser running (hybrid pose+hands mode)", self.label)
 
@@ -161,6 +164,7 @@ class CameraAnalyser(threading.Thread):
 
             if not arm_raised:
                 consecutive_no_pose += 1
+                consecutive_arm_raised = 0
                 if consecutive_no_pose >= NO_POSE_TOLERANCE:
                     if last_arm_raised:
                         log.debug("[%s] arm lowered — resetting", self.label)
@@ -173,7 +177,16 @@ class CameraAnalyser(threading.Thread):
                 continue
 
             consecutive_no_pose = 0
+            consecutive_arm_raised += 1
             wx, wy = wrist_xy
+
+            # Don't process gestures until arm has been raised for
+            # enough consecutive frames to rule out phantom detections
+            if consecutive_arm_raised < ARM_RAISE_MIN_FRAMES:
+                if not last_arm_raised:
+                    velocity.reset()
+                last_arm_raised = True
+                continue
 
             if not last_arm_raised:
                 log.debug("[%s] arm raised (%s side) wrist=(%.0f,%.0f)",
