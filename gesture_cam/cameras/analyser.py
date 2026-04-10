@@ -249,18 +249,15 @@ def _arm_above_head(
     """
     Returns (raised, (wrist_x, wrist_y), side).
 
-    Uses wrist-vs-shoulder — more reliable than wrist-vs-nose because
-    the shoulder stays visible even when the arm is fully extended overhead.
-    The nose landmark causes pose to drop out when arm goes above head level.
+    Uses absolute wrist Y position in frame rather than wrist-vs-shoulder.
+    This works regardless of camera angle.
 
-    arm_above_head_tolerance:
-      Negative (e.g. -0.10) = wrist must be 10% of frame height ABOVE shoulder.
-      Positive (e.g.  0.05) = wrist may be 5% below shoulder (loose).
+    arm_above_head_tolerance is now the absolute Y threshold:
+      0.70 = wrist must be in top 70% of frame (y < 0.70)
+      0.65 = wrist must be in top 65% of frame (stricter)
 
-    Calibration from logs:
-      Resting arms typing: diff +0.05 to +0.15  (wrist well below shoulder)
-      Arm at head height:  diff  0.00 to -0.05
-      Arm fully overhead:  diff -0.10 to -0.25
+    From your logs: raised hand wrist_y ≈ 0.644-0.686, resting wrist_y > 0.68
+    Set to 0.70 to catch raised hands. Adjust lower if false triggers occur.
     """
     if not pose_res or not pose_res.pose_landmarks:
         return False, (0.0, 0.0), ""
@@ -279,25 +276,23 @@ def _arm_above_head(
         el = lm[el_id]
         wr = lm[wr_id]
 
-        # diff = wr.y - sh.y
-        # Negative = wrist above shoulder (arm raised)
-        # Positive = wrist below shoulder (arm at rest)
-        diff                 = wr.y - sh.y
-        wrist_above_shoulder = diff < settings.arm_above_head_tolerance
-        elbow_above_shoulder = el.y < sh.y + 0.05
+        # Wrist must appear in upper portion of frame
+        wrist_in_upper_frame = wr.y < settings.arm_above_head_tolerance
+        # Elbow must be at or above shoulder level (arm up, not just wrist)
+        elbow_elevated = el.y < sh.y + 0.05
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
-                "  [arm-check] %s sh_y=%.3f wr_y=%.3f diff=%.3f tol=%.3f → raised=%s elbow=%s",
-                side, sh.y, wr.y, diff,
-                settings.arm_above_head_tolerance,
-                wrist_above_shoulder, elbow_above_shoulder,
+                "  [arm-check] %s wr_y=%.3f tol=%.3f → in_upper=%s el_y=%.3f sh_y=%.3f elbow=%s",
+                side, wr.y, settings.arm_above_head_tolerance,
+                wrist_in_upper_frame, el.y, sh.y, elbow_elevated,
             )
 
-        if wrist_above_shoulder and elbow_above_shoulder:
+        if wrist_in_upper_frame and elbow_elevated:
             return True, (wr.x * frame_w, wr.y * frame_h), side
 
     return False, (0.0, 0.0), ""
+
 
 
 def _classify_hand_full(
