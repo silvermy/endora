@@ -153,7 +153,23 @@ class CameraAnalyser(threading.Thread):
                 continue
 
             h, w = frame.shape[:2]
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # ── Optional centre crop (removes fisheye edge distortion) ────
+            crop_pct = float(getattr(self.s, 'frame_crop_pct', 100))
+            if crop_pct < 100.0:
+                frac = crop_pct / 100.0
+                ch, cw = int(h * frac), int(w * frac)
+                y0 = (h - ch) // 2
+                x0 = (w - cw) // 2
+                proc_frame = frame[y0:y0+ch, x0:x0+cw]
+                ph, pw = ch, cw
+                crop_offset = (x0, y0)
+            else:
+                proc_frame = frame
+                ph, pw = h, w
+                crop_offset = (0, 0)
+
+            rgb = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2RGB)
             rgb.flags.writeable = False
             pose_res  = pose.process(rgb)
             hand_res  = hands.process(rgb)
@@ -161,8 +177,13 @@ class CameraAnalyser(threading.Thread):
 
             # ── 1. Arm raised above head? ─────────────────────────────────
             arm_raised, wrist_xy, raised_side = _arm_above_head(
-                pose_res, self.s, w, h
+                pose_res, self.s, pw, ph
             )
+
+            # Remap wrist coords back to full-frame space for debug overlay
+            if wrist_xy and crop_offset != (0, 0):
+                wrist_xy = (wrist_xy[0] + crop_offset[0],
+                            wrist_xy[1] + crop_offset[1])
 
             if not arm_raised:
                 consecutive_no_pose += 1
