@@ -28,6 +28,7 @@ import time
 from enum import Enum, auto
 from typing import Callable, Deque, Optional
 
+import cv2
 import numpy as np
 
 log = logging.getLogger(__name__)
@@ -112,7 +113,6 @@ class CameraAnalyser(threading.Thread):
 
     def run(self):
         import mediapipe as mp
-        import cv2
 
         mp_pose  = mp.solutions.pose
         mp_hands = mp.solutions.hands
