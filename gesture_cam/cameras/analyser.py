@@ -97,12 +97,14 @@ class CameraAnalyser(threading.Thread):
         settings,
         on_candidate: Callable[[Gesture, float, str], None],
         label: str = "cam",
+        debug_frame_cb=None,
     ):
         super().__init__(daemon=True, name=f"Analyser-{label}")
         self.camera = camera
         self.s = settings
         self.on_candidate = on_candidate
         self.label = label
+        self.debug_frame_cb = debug_frame_cb
         self._stop_evt = threading.Event()
 
     def stop(self):
@@ -245,13 +247,22 @@ class CameraAnalyser(threading.Thread):
                 confidence = min(1.0, sustain_counts[candidate] / (needed * 2))
                 log.debug("[%s] FIRING %s conf=%.2f", self.label, candidate, confidence)
                 self.on_candidate(candidate, confidence, self.label)
-                # Reset ALL counts and velocity after firing, then pause
-                # briefly so trailing frames from the same gesture don't
-                # immediately re-trigger
                 sustain_counts = {g: 0 for g in Gesture}
                 velocity.reset()
                 consecutive_arm_raised = 0
-                time.sleep(0.5)
+
+            # ── Debug overlay ─────────────────────────────────────────────
+            if self.debug_frame_cb is not None:
+                try:
+                    dbg = _draw_debug(
+                        frame, pose_res,
+                        wrist_xy if arm_raised else None,
+                        vx, vy, pvx, pvy, candidate, is_fist, palm_facing,
+                        consecutive_arm_raised, ARM_RAISE_MIN_FRAMES,
+                    )
+                    self.debug_frame_cb(self.label, dbg)
+                except Exception:
+                    pass
 
         pose.close()
         hands.close()
@@ -415,3 +426,54 @@ def _pick_candidate(
             return Gesture.WAVE_LEFT if effective_pvx < 0 else Gesture.WAVE_RIGHT
 
     return None
+
+
+# ── Debug overlay ─────────────────────────────────────────────────────────────
+
+def _draw_debug(frame, pose_res, wrist_xy, vx, vy, pvx, pvy,
+                candidate, is_fist, palm_facing,
+                consec_raised, min_frames):
+    """Draw skeleton + gesture state overlay onto a copy of frame."""
+    import mediapipe as mp
+    img = frame.copy()
+    h, w = img.shape[:2]
+
+    # Draw pose skeleton
+    if pose_res and pose_res.pose_landmarks:
+        mp.solutions.drawing_utils.draw_landmarks(
+            img,
+            pose_res.pose_landmarks,
+            mp.solutions.pose.POSE_CONNECTIONS,
+            landmark_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(
+                color=(0, 255, 0), thickness=2, circle_radius=3),
+            connection_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(
+                color=(0, 200, 0), thickness=2),
+        )
+
+    # Wrist marker + velocity arrow
+    if wrist_xy:
+        wx, wy = int(wrist_xy[0]), int(wrist_xy[1])
+        color = (0, 255, 255) if consec_raised >= min_frames else (0, 128, 255)
+        cv2.circle(img, (wx, wy), 10, color, -1)
+        # Peak velocity arrow
+        ax = int(wx + pvx * 2)
+        ay = int(wy + pvy * 2)
+        cv2.arrowedLine(img, (wx, wy), (ax, ay), (255, 0, 255), 2, tipLength=0.3)
+
+    # Status text
+    ready = consec_raised >= min_frames
+    lines = [
+        f"arm: {'READY' if ready else f'warming {consec_raised}/{min_frames}'}",
+        f"vx={vx:.1f} pvx={pvx:.1f}",
+        f"vy={vy:.1f} pvy={pvy:.1f}",
+        f"fist={is_fist} palm={palm_facing}",
+        f"cand: {candidate.name if candidate else 'none'}",
+    ]
+    y0 = 20
+    for i, line in enumerate(lines):
+        cv2.putText(img, line, (8, y0 + i * 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3)
+        cv2.putText(img, line, (8, y0 + i * 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+
+    return img

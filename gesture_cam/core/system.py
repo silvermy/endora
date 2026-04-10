@@ -11,6 +11,7 @@ import time
 
 from cameras.capture import RtspCapture
 from cameras.analyser import CameraAnalyser, Gesture
+from cameras import debug_server
 from core.fusion import GestureFusion
 from output.backends import make_backend
 
@@ -42,13 +43,22 @@ class GestureSystem:
             name="CamB",
         )
 
+        # Optional debug stream
+        self._debug_enabled = settings.debug_port > 0
+        if self._debug_enabled:
+            debug_server.start(settings.debug_port)
+
+        dbg_cb = debug_server.update_frame if self._debug_enabled else None
+
         self.analyser_a = CameraAnalyser(
             camera=self.cam_a, settings=settings,
             on_candidate=self.fusion.receive, label="A",
+            debug_frame_cb=dbg_cb,
         )
         self.analyser_b = CameraAnalyser(
             camera=self.cam_b, settings=settings,
             on_candidate=self.fusion.receive, label="B",
+            debug_frame_cb=dbg_cb,
         )
 
     def run(self):
@@ -89,6 +99,8 @@ class GestureSystem:
 
     def _on_gesture(self, gesture: Gesture, confidence: float, sources: list):
         self.backend.send(gesture, confidence, sources)
+        if self._debug_enabled:
+            debug_server.notify_gesture(str(gesture))
 
     _last_stats = 0.0
 
