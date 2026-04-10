@@ -29,6 +29,9 @@ class Settings:
     # ── Frame ─────────────────────────────────────────────────────────────
     frame_width: int = 640
     frame_height: int = 640
+    # Crop to central N% of frame before processing — removes fisheye edge distortion
+    # 100 = no crop, 70 = use central 70% of image
+    frame_crop_pct: float = 100.0
 
     # ── Pose (arm-raise detection) ────────────────────────────────────────
     # Lite model (0) is fast enough now that hands runs separately
