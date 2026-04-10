@@ -33,8 +33,8 @@ class Settings:
     # ── Pose (arm-raise detection) ────────────────────────────────────────
     # Lite model (0) is fast enough now that hands runs separately
     pose_model_complexity: int = 1
-    pose_min_detection_confidence: float = 0.4
-    pose_min_tracking_confidence: float = 0.4
+    pose_min_detection_confidence: float = 0.6
+    pose_min_tracking_confidence: float = 0.5
 
     # Wrist must be this far above the shoulder (negative = above).
     # Resting: diff +0.05 to +0.15. Raised: diff -0.05 to -0.25.

@@ -140,7 +140,7 @@ class CameraAnalyser(threading.Thread):
         # Arm must be raised for this many consecutive frames before
         # gestures can fire — filters phantom 1-2 frame detections
         consecutive_arm_raised = 0
-        ARM_RAISE_MIN_FRAMES = 5
+        ARM_RAISE_MIN_FRAMES = 8
 
         log.info("[%s] Analyser running (hybrid pose+hands mode)", self.label)
 
