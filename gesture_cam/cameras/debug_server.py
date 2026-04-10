@@ -14,31 +14,14 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-_latest: Dict[str, Optional[bytes]] = {"A": None, "B": None}
-_sizes: Dict[str, tuple] = {"A": (640, 480), "B": (640, 480)}
+_latest: Dict[str, Optional[np.ndarray]] = {"A": None, "B": None}
 _lock = threading.Lock()
 _last_gesture: Dict = {"label": "", "ts": 0.0}
 
-# Max width per camera panel in the side-by-side view
-MAX_PANEL_W = 640
-
 
 def update_frame(label: str, frame: np.ndarray) -> None:
-    """Receive a frame, downscale if needed, encode to JPEG, store bytes."""
-    try:
-        h, w = frame.shape[:2]
-        # Downscale if wider than MAX_PANEL_W to keep stream fast
-        if w > MAX_PANEL_W:
-            scale = MAX_PANEL_W / w
-            frame = cv2.resize(frame, (MAX_PANEL_W, int(h * scale)),
-                               interpolation=cv2.INTER_AREA)
-            h, w = frame.shape[:2]
-        _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        with _lock:
-            _latest[label] = jpg.tobytes()
-            _sizes[label] = (w, h)
-    except Exception:
-        pass
+    with _lock:
+        _latest[label] = frame
 
 
 def notify_gesture(label: str) -> None:
@@ -48,60 +31,43 @@ def notify_gesture(label: str) -> None:
 
 
 def _compose() -> bytes:
-    """Decode stored JPEGs, stack side by side, re-encode."""
     with _lock:
-        ja = _latest.get("A")
-        jb = _latest.get("B")
+        a = _latest.get("A")
+        b = _latest.get("B")
         gesture_label = _last_gesture.get("label", "")
         gesture_age = time.monotonic() - _last_gesture.get("ts", 0.0)
 
-    def placeholder(w=640, h=480):
-        img = np.zeros((h, w, 3), dtype=np.uint8)
-        cv2.putText(img, "No frame", (w//2 - 55, h//2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (70, 70, 70), 2)
-        return img
+    # Fixed 480x360 panels — same as the working 1.5.4 version
+    placeholder = np.zeros((360, 480, 3), dtype=np.uint8)
+    cv2.putText(placeholder, "No frame", (140, 180),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
 
-    fa = cv2.imdecode(np.frombuffer(ja, np.uint8), cv2.IMREAD_COLOR) \
-         if ja else placeholder()
-    fb = cv2.imdecode(np.frombuffer(jb, np.uint8), cv2.IMREAD_COLOR) \
-         if jb else placeholder()
+    fa = cv2.resize(a if a is not None else placeholder, (480, 360))
+    fb = cv2.resize(b if b is not None else placeholder, (480, 360))
+    combined = np.hstack([fa, fb])
 
-    # Match heights
-    ah, aw = fa.shape[:2]
-    bh, bw = fb.shape[:2]
-    if ah != bh:
-        scale = ah / bh
-        fb = cv2.resize(fb, (int(bw * scale), ah), interpolation=cv2.INTER_AREA)
-        bh, bw = fb.shape[:2]
-
-    # Cam labels — small, top-left of each panel
-    def add_label(img, txt):
-        fs = 0.45
-        cv2.putText(img, txt, (6, 18), cv2.FONT_HERSHEY_SIMPLEX,
-                    fs, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(img, txt, (6, 18), cv2.FONT_HERSHEY_SIMPLEX,
-                    fs, (200, 200, 200), 1, cv2.LINE_AA)
-
-    add_label(fa, "Cam A")
-    add_label(fb, "Cam B")
-
-    divider = np.full((ah, 2, 3), 50, dtype=np.uint8)
-    combined = np.hstack([fa, divider, fb])
-    ch, cw = combined.shape[:2]
+    # Cam labels — pushed down to y=38 to clear Reolink OSD at top
+    cv2.putText(combined, "Cam A", (8, 38),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(combined, "Cam A", (8, 38),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
+    cv2.putText(combined, "Cam B", (488, 38),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(combined, "Cam B", (488, 38),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
 
     # Gesture flash
     if gesture_age < 2.0 and gesture_label:
-        txt = f" {gesture_label.upper()} "
-        (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_DUPLEX, 0.9, 2)
-        tx = (cw - tw) // 2
-        ty = ch - 16
-        cv2.rectangle(combined, (tx-6, ty-th-6), (tx+tw+6, ty+6),
-                      (0, 170, 0), -1)
+        txt = f"  {gesture_label.upper()}  "
+        (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_DUPLEX, 1.0, 2)
+        tx = (combined.shape[1] - tw) // 2
+        ty = combined.shape[0] - 20
+        cv2.rectangle(combined, (tx-8, ty-th-8), (tx+tw+8, ty+8), (0, 170, 0), -1)
         cv2.putText(combined, txt, (tx, ty),
-                    cv2.FONT_HERSHEY_DUPLEX, 0.9, (0, 0, 0), 2, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 0, 0), 2, cv2.LINE_AA)
 
-    _, out = cv2.imencode(".jpg", combined, [cv2.IMWRITE_JPEG_QUALITY, 82])
-    return out.tobytes()
+    _, jpg = cv2.imencode(".jpg", combined, [cv2.IMWRITE_JPEG_QUALITY, 75])
+    return jpg.tobytes()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -141,7 +107,7 @@ small{margin-top:5px;font-size:10px;color:#555}
                         + f"Content-Length: {len(jpg)}\r\n\r\n".encode()
                         + jpg + b"\r\n"
                     )
-                    time.sleep(0.12)   # ~8 fps — easy on the Pi
+                    time.sleep(0.1)
             except (BrokenPipeError, ConnectionResetError):
                 pass
         else:
