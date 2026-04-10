@@ -1,6 +1,6 @@
 {
   "name": "Gesture Cam",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "slug": "gesture_cam",
   "description": "Gesture detection — arm above head + wrist flick/orientation/fist pump. Works from couch or standing.",
   "url": "https://github.com/silvermy/gesture_cam",
@@ -25,6 +25,7 @@
     "palm_orientation_threshold": 0.05,
     "wave_velocity_threshold_px": 25.0,
     "wave_sustain_frames": 1,
+    "mirror_camera": false,
     "vertical_velocity_threshold_px": 20.0,
     "vertical_sustain_frames": 1,
     "fist_curl_threshold": 0.65,
@@ -48,6 +49,7 @@
     "hand_min_detection_confidence": "float",
     "hand_min_tracking_confidence": "float",
     "palm_orientation_threshold": "float",
+    "mirror_camera": "bool",
     "wave_velocity_threshold_px": "float",
     "wave_sustain_frames": "int",
     "vertical_velocity_threshold_px": "float",
