@@ -154,15 +154,24 @@ class CameraAnalyser(threading.Thread):
 
             h, w = frame.shape[:2]
 
-            # ── Optional centre crop (removes fisheye edge distortion) ────
+            # ── Optional asymmetric crop (removes fisheye distortion) ────
+            # frame_crop_top/bottom/left/right = % to remove from each edge
+            ct = float(getattr(self.s, 'frame_crop_top',    0))
+            cb = float(getattr(self.s, 'frame_crop_bottom', 0))
+            cl = float(getattr(self.s, 'frame_crop_left',   0))
+            cr = float(getattr(self.s, 'frame_crop_right',  0))
+            # Legacy symmetric crop_pct support
             crop_pct = float(getattr(self.s, 'frame_crop_pct', 100))
-            if crop_pct < 100.0:
-                frac = crop_pct / 100.0
-                ch, cw = int(h * frac), int(w * frac)
-                y0 = (h - ch) // 2
-                x0 = (w - cw) // 2
-                proc_frame = frame[y0:y0+ch, x0:x0+cw]
-                ph, pw = ch, cw
+            if crop_pct < 100.0 and ct == 0 and cb == 0 and cl == 0 and cr == 0:
+                margin = (100.0 - crop_pct) / 2.0
+                ct = cb = cl = cr = margin
+            y0 = int(h * ct / 100)
+            y1 = h - int(h * cb / 100)
+            x0 = int(w * cl / 100)
+            x1 = w - int(w * cr / 100)
+            if y0 > 0 or y1 < h or x0 > 0 or x1 < w:
+                proc_frame = frame[y0:y1, x0:x1]
+                ph, pw = y1 - y0, x1 - x0
                 crop_offset = (x0, y0)
             else:
                 proc_frame = frame
@@ -493,26 +502,40 @@ def _draw_debug(frame, pose_res, wrist_xy, vx, vy, pvx, pvy,
     if wrist_xy:
         wx, wy = int(wrist_xy[0]), int(wrist_xy[1])
         color = (0, 255, 255) if consec_raised >= min_frames else (0, 128, 255)
-        cv2.circle(img, (wx, wy), 10, color, -1)
+        cv2.circle(img, (wx, wy), 12, color, -1)
+        cv2.circle(img, (wx, wy), 12, (0, 0, 0), 2)
         # Peak velocity arrow
         ax = int(wx + pvx * 2)
         ay = int(wy + pvy * 2)
-        cv2.arrowedLine(img, (wx, wy), (ax, ay), (255, 0, 255), 2, tipLength=0.3)
+        cv2.arrowedLine(img, (wx, wy), (ax, ay), (255, 0, 255), 3, tipLength=0.3)
 
-    # Status text
+    # Status panel — bottom-left, semi-transparent background
     ready = consec_raised >= min_frames
+    arm_state = "ARM READY" if ready else f"warming {consec_raised}/{min_frames}"
+    cand_str = candidate.name if candidate else "none"
     lines = [
-        f"arm: {'READY' if ready else f'warming {consec_raised}/{min_frames}'}",
-        f"vx={vx:.1f} pvx={pvx:.1f}",
-        f"vy={vy:.1f} pvy={pvy:.1f}",
-        f"fist={is_fist} palm={palm_facing}",
-        f"cand: {candidate.name if candidate else 'none'}",
+        (arm_state, (0, 255, 100) if ready else (0, 165, 255)),
+        (f"pvx={pvx:.0f}  vx={vx:.0f}", (255, 255, 255)),
+        (f"pvy={pvy:.0f}  vy={vy:.0f}", (255, 255, 255)),
+        (f"fist={is_fist}  palm={palm_facing}", (255, 255, 255)),
+        (f"candidate: {cand_str}", (255, 255, 0) if cand_str != "none" else (180, 180, 180)),
     ]
-    y0 = 20
-    for i, line in enumerate(lines):
-        cv2.putText(img, line, (8, y0 + i * 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3)
-        cv2.putText(img, line, (8, y0 + i * 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+    lh = 28
+    pad = 8
+    panel_h = len(lines) * lh + pad * 2
+    panel_w = 260
+    y_start = h - panel_h - 8
+    # Dark background
+    overlay = img.copy()
+    cv2.rectangle(overlay, (6, y_start - 4), (6 + panel_w, y_start + panel_h),
+                  (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.6, img, 0.4, 0, img)
+    # Text
+    for i, (line, color) in enumerate(lines):
+        y = y_start + pad + i * lh + lh - 6
+        cv2.putText(img, line, (14, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 4)
+        cv2.putText(img, line, (14, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 1)
 
     return img

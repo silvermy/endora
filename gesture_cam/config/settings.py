@@ -32,6 +32,12 @@ class Settings:
     # Crop to central N% of frame before processing — removes fisheye edge distortion
     # 100 = no crop, 70 = use central 70% of image
     frame_crop_pct: float = 100.0
+    # Asymmetric crop — % to remove from each edge independently
+    # e.g. frame_crop_bottom: 20 removes bottom 20% (floor/furniture ghosts)
+    frame_crop_top: float = 0.0
+    frame_crop_bottom: float = 0.0
+    frame_crop_left: float = 0.0
+    frame_crop_right: float = 0.0
 
     # ── Pose (arm-raise detection) ────────────────────────────────────────
     # Lite model (0) is fast enough now that hands runs separately

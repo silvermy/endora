@@ -1,6 +1,6 @@
 {
   "name": "Gesture Cam",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "slug": "gesture_cam",
   "description": "Gesture detection \u2014 arm above head + wrist flick/orientation/fist pump. Works from couch or standing.",
   "url": "https://github.com/silvermy/gesture_cam",
@@ -37,7 +37,11 @@
     "ha_event_name": "gesture_detected",
     "log_level": "info",
     "debug_port": 0,
-    "frame_crop_pct": 100.0
+    "frame_crop_pct": 100.0,
+    "frame_crop_top": 0.0,
+    "frame_crop_bottom": 0.0,
+    "frame_crop_left": 0.0,
+    "frame_crop_right": 0.0
   },
   "schema": {
     "rtsp_url_a": "str",
@@ -65,7 +69,11 @@
     "ha_event_name": "str",
     "log_level": "list(debug|info|warning|error)",
     "debug_port": "int",
-    "frame_crop_pct": "float"
+    "frame_crop_pct": "float",
+    "frame_crop_top": "float",
+    "frame_crop_bottom": "float",
+    "frame_crop_left": "float",
+    "frame_crop_right": "float"
   },
   "map": [
     "data"
