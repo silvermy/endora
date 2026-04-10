@@ -509,33 +509,32 @@ def _draw_debug(frame, pose_res, wrist_xy, vx, vy, pvx, pvy,
         ay = int(wy + pvy * 2)
         cv2.arrowedLine(img, (wx, wy), (ax, ay), (255, 0, 255), 3, tipLength=0.3)
 
-    # Status panel — bottom-left, semi-transparent background
+    # Status panel — bottom-left, scaled to frame size
     ready = consec_raised >= min_frames
-    arm_state = "ARM READY" if ready else f"warming {consec_raised}/{min_frames}"
+    arm_state = "ARM READY" if ready else f"warm {consec_raised}/{min_frames}"
     cand_str = candidate.name if candidate else "none"
     lines = [
         (arm_state, (0, 255, 100) if ready else (0, 165, 255)),
-        (f"pvx={pvx:.0f}  vx={vx:.0f}", (255, 255, 255)),
-        (f"pvy={pvy:.0f}  vy={vy:.0f}", (255, 255, 255)),
-        (f"fist={is_fist}  palm={palm_facing}", (255, 255, 255)),
-        (f"candidate: {cand_str}", (255, 255, 0) if cand_str != "none" else (180, 180, 180)),
+        (f"pvx={pvx:.0f} vx={vx:.0f}", (255, 255, 255)),
+        (f"pvy={pvy:.0f} vy={vy:.0f}", (255, 255, 255)),
+        (f"fist={is_fist} palm={palm_facing}", (255, 255, 255)),
+        (f"cand: {cand_str}", (255, 255, 0) if cand_str != "none" else (160, 160, 160)),
     ]
-    lh = 28
-    pad = 8
+    fs = max(0.35, w / 1800)          # font scale relative to frame width
+    lh = int(fs * 42)
+    pad = int(fs * 12)
     panel_h = len(lines) * lh + pad * 2
-    panel_w = 260
-    y_start = h - panel_h - 8
-    # Dark background
+    panel_w = int(w * 0.30)
+    y_start = h - panel_h - 6
     overlay = img.copy()
-    cv2.rectangle(overlay, (6, y_start - 4), (6 + panel_w, y_start + panel_h),
+    cv2.rectangle(overlay, (4, y_start - 2), (4 + panel_w, y_start + panel_h),
                   (0, 0, 0), -1)
-    cv2.addWeighted(overlay, 0.6, img, 0.4, 0, img)
-    # Text
+    cv2.addWeighted(overlay, 0.55, img, 0.45, 0, img)
     for i, (line, color) in enumerate(lines):
-        y = y_start + pad + i * lh + lh - 6
-        cv2.putText(img, line, (14, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 4)
-        cv2.putText(img, line, (14, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 1)
+        y = y_start + pad + i * lh + lh - 4
+        cv2.putText(img, line, (10, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(img, line, (10, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs, color, 1, cv2.LINE_AA)
 
     return img
