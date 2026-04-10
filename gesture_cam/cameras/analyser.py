@@ -245,10 +245,13 @@ class CameraAnalyser(threading.Thread):
                 confidence = min(1.0, sustain_counts[candidate] / (needed * 2))
                 log.debug("[%s] FIRING %s conf=%.2f", self.label, candidate, confidence)
                 self.on_candidate(candidate, confidence, self.label)
-                # Reset ALL counts and velocity after firing to clear stale
-                # peak values that would otherwise trigger immediately again
+                # Reset ALL counts and velocity after firing, then pause
+                # briefly so trailing frames from the same gesture don't
+                # immediately re-trigger
                 sustain_counts = {g: 0 for g in Gesture}
                 velocity.reset()
+                consecutive_arm_raised = 0
+                time.sleep(0.5)
 
         pose.close()
         hands.close()
