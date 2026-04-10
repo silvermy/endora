@@ -53,6 +53,9 @@ class Settings:
     palm_orientation_threshold: float = 0.05
 
     # ── Gesture thresholds ────────────────────────────────────────────────
+    # Set mirror_camera: true if left/right gestures are reversed
+    # (e.g. camera mounted facing you, mirroring the scene horizontally)
+    mirror_camera: bool = False
     wave_velocity_threshold_px: float = 25.0
     wave_sustain_frames: int = 1
     vertical_velocity_threshold_px: float = 20.0
