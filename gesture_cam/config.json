@@ -1,11 +1,14 @@
 {
   "name": "Gesture Cam",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "slug": "gesture_cam",
-  "description": "Gesture detection — arm above head + wrist flick/orientation/fist pump. Works from couch or standing.",
+  "description": "Gesture detection \u2014 arm above head + wrist flick/orientation/fist pump. Works from couch or standing.",
   "url": "https://github.com/silvermy/gesture_cam",
   "init": false,
-  "arch": ["aarch64", "amd64"],
+  "arch": [
+    "aarch64",
+    "amd64"
+  ],
   "startup": "application",
   "boot": "auto",
   "options": {
@@ -16,23 +19,23 @@
     "frame_width": 640,
     "frame_height": 640,
     "pose_model_complexity": 1,
-    "pose_min_detection_confidence": 0.4,
-    "pose_min_tracking_confidence": 0.4,
-    "arm_above_head_tolerance": 0.855,
+    "pose_min_detection_confidence": 0.3,
+    "pose_min_tracking_confidence": 0.3,
+    "arm_above_head_tolerance": 0.86,
     "hand_model_max_hands": 1,
     "hand_min_detection_confidence": 0.3,
     "hand_min_tracking_confidence": 0.1,
     "palm_orientation_threshold": 0.05,
-    "wave_velocity_threshold_px": 25.0,
+    "wave_velocity_threshold_px": 15.0,
     "wave_sustain_frames": 1,
-    "mirror_camera": false,
+    "mirror_camera": true,
     "vertical_velocity_threshold_px": 20.0,
     "vertical_sustain_frames": 1,
     "fist_curl_threshold": 0.65,
     "fusion_agreement_window_s": 1.0,
-    "cooldown_s": 2.0,
+    "cooldown_s": 4.0,
     "ha_event_name": "gesture_detected",
-    "log_level": "debug"
+    "log_level": "info"
   },
   "schema": {
     "rtsp_url_a": "str",
@@ -60,7 +63,9 @@
     "ha_event_name": "str",
     "log_level": "list(debug|info|warning|error)"
   },
-  "map": ["data"],
+  "map": [
+    "data"
+  ],
   "host_network": false,
   "homeassistant_api": true,
   "hassio_api": true,

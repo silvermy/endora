@@ -39,7 +39,7 @@ class Settings:
     # Wrist must be this far above the shoulder (negative = above).
     # Resting: diff +0.05 to +0.15. Raised: diff -0.05 to -0.25.
     # -0.10 sits cleanly between resting and raised for most setups.
-    arm_above_head_tolerance: float = 0.855
+    arm_above_head_tolerance: float = 0.86
 
     # ── Hands (gesture classification) ───────────────────────────────────
     hand_model_max_hands: int = 1
@@ -55,8 +55,8 @@ class Settings:
     # ── Gesture thresholds ────────────────────────────────────────────────
     # Set mirror_camera: true if left/right gestures are reversed
     # (e.g. camera mounted facing you, mirroring the scene horizontally)
-    mirror_camera: bool = False
-    wave_velocity_threshold_px: float = 25.0
+    mirror_camera: bool = True
+    wave_velocity_threshold_px: float = 15.0
     wave_sustain_frames: int = 1
     vertical_velocity_threshold_px: float = 20.0
     vertical_sustain_frames: int = 1
