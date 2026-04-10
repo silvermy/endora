@@ -210,10 +210,13 @@ class CameraAnalyser(threading.Thread):
                 # Debug: still render frame even when arm not raised
                 if self.debug_frame_cb is not None:
                     try:
-                        dbg = _draw_debug(frame, pose_res, None,
-                                          0, 0, 0, 0, None, False, "unknown",
-                                          consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
-                        self.debug_frame_cb(self.label, dbg)
+                        _debug_frame_counter = getattr(self, '_dfc', 0) + 1
+                        self._dfc = _debug_frame_counter
+                        if _debug_frame_counter % 3 == 0:
+                            dbg = _draw_debug(frame, pose_res, None,
+                                              0, 0, 0, 0, None, False, "unknown",
+                                              consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
+                            self.debug_frame_cb(self.label, dbg)
                     except Exception:
                         pass
                 continue
@@ -231,10 +234,13 @@ class CameraAnalyser(threading.Thread):
                 # Debug: render warming-up state
                 if self.debug_frame_cb is not None:
                     try:
-                        dbg = _draw_debug(frame, pose_res, wrist_xy,
-                                          0, 0, 0, 0, None, False, "unknown",
-                                          consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
-                        self.debug_frame_cb(self.label, dbg)
+                        _debug_frame_counter = getattr(self, '_dfc', 0) + 1
+                        self._dfc = _debug_frame_counter
+                        if _debug_frame_counter % 3 == 0:
+                            dbg = _draw_debug(frame, pose_res, wrist_xy,
+                                              0, 0, 0, 0, None, False, "unknown",
+                                              consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
+                            self.debug_frame_cb(self.label, dbg)
                     except Exception:
                         pass
                 continue
@@ -302,13 +308,16 @@ class CameraAnalyser(threading.Thread):
             # ── Debug overlay ─────────────────────────────────────────────
             if self.debug_frame_cb is not None:
                 try:
-                    dbg = _draw_debug(
-                        frame, pose_res,
-                        wrist_xy if arm_raised else None,
-                        vx, vy, pvx, pvy, candidate, is_fist, palm_facing,
-                        consecutive_arm_raised, ARM_RAISE_MIN_FRAMES,
-                    )
-                    self.debug_frame_cb(self.label, dbg)
+                    _debug_frame_counter = getattr(self, '_dfc', 0) + 1
+                    self._dfc = _debug_frame_counter
+                    if _debug_frame_counter % 3 == 0:
+                        dbg = _draw_debug(
+                            frame, pose_res,
+                            wrist_xy if arm_raised else None,
+                            vx, vy, pvx, pvy, candidate, is_fist, palm_facing,
+                            consecutive_arm_raised, ARM_RAISE_MIN_FRAMES,
+                        )
+                        self.debug_frame_cb(self.label, dbg)
                 except Exception:
                     pass
 
