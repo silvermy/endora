@@ -39,7 +39,7 @@ class Settings:
     # Wrist must be this far above the shoulder (negative = above).
     # Resting: diff +0.05 to +0.15. Raised: diff -0.05 to -0.25.
     # -0.10 sits cleanly between resting and raised for most setups.
-    arm_above_head_tolerance: float = 0.70
+    arm_above_head_tolerance: float = 0.855
 
     # ── Hands (gesture classification) ───────────────────────────────────
     hand_model_max_hands: int = 1
