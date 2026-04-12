@@ -133,14 +133,18 @@ class Settings:
 
         instance = cls(**coerced)
 
-        for var, field in [
-            ("RTSP_URL_A", "rtsp_url_a"),
-            ("RTSP_URL_B", "rtsp_url_b"),
-            ("HA_URL",     "ha_url"),
-            ("LOG_LEVEL",  "log_level"),
+        for var, field, cast in [
+            ("RTSP_URL_A",  "rtsp_url_a",  str),
+            ("RTSP_URL_B",  "rtsp_url_b",  str),
+            ("HA_URL",      "ha_url",      str),
+            ("LOG_LEVEL",   "log_level",   str),
+            ("DEBUG_PORT",  "debug_port",  int),
         ]:
             val = os.environ.get(var)
             if val:
-                setattr(instance, field, val)
+                try:
+                    setattr(instance, field, cast(val))
+                except (ValueError, TypeError):
+                    pass
 
         return instance
