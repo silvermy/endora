@@ -1,4 +1,4 @@
-# ── Gesture Cam — Home Assistant Add-on ──────────────────────────────────────
+# ── Endora — Home Assistant Add-on ───────────────────────────────────────────
 # Base: ghcr.io/home-assistant/base-debian:bookworm
 # S6-overlay is built into this base image. /init is the entrypoint and
 # becomes PID 1. We register our app as an S6 service under /etc/services.d/
@@ -41,7 +41,7 @@ COPY main.py   .
 # S6 looks for services in /etc/services.d/<name>/run
 # The 'run' script is exec'd by S6 as the service process.
 # No CMD or ENTRYPOINT — the base image's /init (S6) handles that.
-RUN mkdir -p /etc/services.d/gesture_cam
-COPY run.sh /etc/services.d/gesture_cam/run
-RUN chmod a+x /etc/services.d/gesture_cam/run \
-    && sed -i 's/\r$//' /etc/services.d/gesture_cam/run
+RUN mkdir -p /etc/services.d/endora
+COPY run.sh /etc/services.d/endora/run
+RUN chmod a+x /etc/services.d/endora/run \
+    && sed -i 's/\r$//' /etc/services.d/endora/run

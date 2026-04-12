@@ -22,4 +22,13 @@ bashio::log.info "Camera A: $(bashio::config 'rtsp_url_a' | sed 's|//[^:]*:[^@]*
 bashio::log.info "Camera B: $(bashio::config 'rtsp_url_b' | sed 's|//[^:]*:[^@]*@|//****:****@|g')"
 bashio::log.info "HA event: $(bashio::config 'ha_event_name')"
 
+# Export add-on options as environment variables so Python settings.py
+# can read them directly regardless of /data/options.json parsing order.
+export DEBUG_PORT="$(bashio::config 'debug_port')"
+export LOG_LEVEL="$(bashio::config 'log_level')"
+
+if [ "${DEBUG_PORT}" != "0" ] && [ -n "${DEBUG_PORT}" ]; then
+    bashio::log.info "Debug stream: http://<ha-ip>:${DEBUG_PORT}/"
+fi
+
 exec /opt/venv/bin/python3 /app/main.py
