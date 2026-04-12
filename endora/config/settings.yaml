@@ -35,3 +35,4 @@ cooldown_s: 2.0
 fusion_agreement_window_s: 1.0
 ha_event_name: gesture_detected
 log_level: debug
+debug_port: 8765

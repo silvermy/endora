@@ -194,6 +194,7 @@ class CameraAnalyser(threading.Thread):
             # on proc_frame.  No remapping to full-frame needed.
 
             if not arm_raised:
+                pose_detected = bool(pose_res and pose_res.pose_landmarks)
                 consecutive_no_pose += 1
                 if consecutive_no_pose >= NO_POSE_TOLERANCE:
                     consecutive_arm_raised = 0
@@ -205,7 +206,10 @@ class CameraAnalyser(threading.Thread):
                             sustain_counts[g] = 0
                     last_arm_raised = False
                 if log.isEnabledFor(logging.DEBUG) and consecutive_no_pose % 10 == 1:
-                    log.debug("[%s] arm not raised", self.label)
+                    if not pose_detected:
+                        log.debug("[%s] NO POSE DETECTED — body not found in frame", self.label)
+                    else:
+                        log.debug("[%s] arm not raised (pose OK, arm down)", self.label)
                 # Debug: still render frame even when arm not raised
                 if self.debug_frame_cb is not None:
                     try:

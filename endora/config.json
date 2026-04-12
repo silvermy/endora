@@ -36,7 +36,7 @@
     "cooldown_s": 4.0,
     "ha_event_name": "gesture_detected",
     "log_level": "info",
-    "debug_port": 0,
+    "debug_port": 8765,
     "frame_crop_pct": 100.0,
     "frame_crop_top": 0.0,
     "frame_crop_bottom": 0.0,
