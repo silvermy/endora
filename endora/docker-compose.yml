@@ -1,4 +1,4 @@
-# ── Gesture Cam — standalone Docker Compose ───────────────────────────────────
+# ── Endora — standalone Docker Compose ───────────────────────────────────
 #
 # Use this when running alongside Home Assistant Container or Core
 # (i.e. you have no Add-on Store).
@@ -13,14 +13,14 @@
 #   4. Start:
 #        docker compose up -d
 #   5. Watch logs:
-#        docker compose logs -f gesture_cam
+#        docker compose logs -f endora
 
 services:
-  gesture_cam:
+  endora:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: gesture_cam
+    container_name: endora
     restart: unless-stopped
     network_mode: host        # Reaches cameras on LAN + HA on localhost directly
     environment:
@@ -32,7 +32,7 @@ services:
     volumes:
       # Optional: mount a local settings file to override defaults
       # - ./config/settings.yaml:/data/settings.yaml:ro
-      - gesture_cam_data:/data
+      - endora_data:/data
 
 volumes:
-  gesture_cam_data:
+  endora_data:

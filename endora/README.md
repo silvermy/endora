@@ -1,6 +1,6 @@
-# Gesture Cam
+# Endora
 
-Watches two RTSP camera streams for five hand gestures and fires
+Watches two RTSP camera streams for hand gestures and fires
 Home Assistant events you can use in any automation.
 
 Runs as a Docker container — either as a **Home Assistant Add-on** (HA OS /
@@ -12,13 +12,13 @@ Supervised) or as a **standalone Docker container** alongside HA Container/Core.
 
 | Event data value | Movement | Hand |
 |---|---|---|
-| `wave_left` | Wrist sweeps left | Open palm |
-| `wave_right` | Wrist sweeps right | Open palm |
-| `palm_up` | Wrist moves upward | Flat palm |
-| `palm_down` | Wrist moves downward | Flat palm |
-| `fist_gesture` | Any direction | Closed fist |
+| `wave_left` | Wrist flicks left | Open palm, arm raised |
+| `wave_right` | Wrist flicks right | Open palm, arm raised |
+| `palm_up` | Palm facing ceiling | Flat palm, arm raised |
+| `palm_down` | Palm facing floor | Flat palm, arm raised |
+| `fist_pump` | Upward punch | Closed fist, arm raised |
 
-All gestures require the arm to be raised above shoulder height first.
+All gestures require the arm to be raised above head level first.
 
 ---
 
@@ -28,14 +28,14 @@ All gestures require the arm to be raised above shoulder height first.
 
 **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
 
-Add: `https://github.com/silvermy/gesture_cam`
+Add: `https://github.com/silvermy/endora`
 
 Or install as a local add-on:
 
 ```bash
 # SSH into your HA host
 cd /addons
-git clone https://github.com/silvermy/gesture_cam gesture_cam
+git clone https://github.com/silvermy/endora endora
 ```
 
 Then: **Settings → Add-ons → Add-on Store → ⋮ → Check for updates**
@@ -70,8 +70,8 @@ Copy the token — you only see it once.
 ### 2. Configure
 
 ```bash
-git clone https://github.com/silvermy/gesture_cam
-cd gesture_cam
+git clone https://github.com/silvermy/endora
+cd endora
 cp .env.example .env
 ```
 
@@ -88,8 +88,57 @@ HA_URL=http://localhost:8123/api
 
 ```bash
 docker compose up -d --build
-docker compose logs -f gesture_cam
+docker compose logs -f endora
 ```
+
+---
+
+## Debug web page
+
+Endora includes a live MJPEG debug stream that lets you see exactly what the
+gesture engine sees — skeleton overlay, wrist tracking, velocity readout, and
+gesture state — all in your browser, in real time.
+
+### Enable it
+
+Set `debug_port` in your configuration:
+
+```yaml
+debug_port: 8765
+```
+
+For the HA add-on, also expose the port in `config.json` (already present) and
+open it in your firewall if needed.
+
+### Open it
+
+Navigate to:
+
+```
+http://<your-ha-ip>:8765/
+```
+
+### What you'll see
+
+The page shows a side-by-side MJPEG stream from both cameras (Cam A left,
+Cam B right). Each camera panel overlays:
+
+| Overlay element | Meaning |
+|---|---|
+| **Green skeleton** | MediaPipe Pose detected your body — landmarks and connections drawn |
+| **`NO POSE DETECTED`** (red banner) | MediaPipe cannot find a body in the frame — check lighting, camera angle, or try a higher `pose_model_complexity` |
+| **Cyan dot on wrist** | Arm is raised and ready — gestures can fire |
+| **Orange dot on wrist** | Arm is raised but warming up (not enough consecutive frames yet) |
+| **Magenta arrow** | Peak wrist velocity vector — shows direction and magnitude of last movement |
+| **Bottom-left panel** | Live readout: arm state, vx/pvx, vy/pvy, fist flag, palm orientation, current candidate gesture |
+| **Green banner (center-bottom)** | Gesture fired — shows the gesture name for 2 seconds |
+
+### Tuning workflow
+
+1. Open the debug page and stand in front of the camera.
+2. If you see **"NO POSE DETECTED"**: MediaPipe can't find you. Try `pose_model_complexity: 2`, lower `pose_min_detection_confidence`, improve lighting, or move closer.
+3. If the skeleton appears but gestures don't fire: watch the bottom-left panel. Raise your arm and check that the wrist dot appears (cyan). Then wave and observe the `pvx` value — if it stays below `wave_velocity_threshold_px`, lower that threshold.
+4. If gestures fire too easily: raise `wave_velocity_threshold_px` or `arm_above_head_tolerance`.
 
 ---
 
@@ -109,7 +158,7 @@ Every gesture fires event type `gesture_detected`:
 ### Lights on/off
 
 ```yaml
-- alias: "Gesture — wave right → lights on"
+- alias: "Endora — wave right → lights on"
   trigger:
     platform: event
     event_type: gesture_detected
@@ -120,7 +169,7 @@ Every gesture fires event type `gesture_detected`:
     target:
       area_id: living_room
 
-- alias: "Gesture — wave left → lights off"
+- alias: "Endora — wave left → lights off"
   trigger:
     platform: event
     event_type: gesture_detected
@@ -135,7 +184,7 @@ Every gesture fires event type `gesture_detected`:
 ### Volume
 
 ```yaml
-- alias: "Gesture — palm up → volume up"
+- alias: "Endora — palm up → volume up"
   trigger:
     platform: event
     event_type: gesture_detected
@@ -146,7 +195,7 @@ Every gesture fires event type `gesture_detected`:
     target:
       entity_id: media_player.living_room_tv
 
-- alias: "Gesture — palm down → volume down"
+- alias: "Endora — palm down → volume down"
   trigger:
     platform: event
     event_type: gesture_detected
@@ -158,15 +207,15 @@ Every gesture fires event type `gesture_detected`:
       entity_id: media_player.living_room_tv
 ```
 
-### Fist — toggle TV
+### Fist pump — toggle TV
 
 ```yaml
-- alias: "Gesture — fist → TV toggle"
+- alias: "Endora — fist pump → TV toggle"
   trigger:
     platform: event
     event_type: gesture_detected
     event_data:
-      gesture: fist_gesture
+      gesture: fist_pump
   action:
     service: media_player.toggle
     target:
@@ -179,11 +228,13 @@ Every gesture fires event type `gesture_detected`:
 
 | Problem | Fix |
 |---|---|
-| False triggers | Raise `arm_raised_wrist_above_shoulder_frac` to `0.20` |
-| Gesture not detecting | Lower `wave_velocity_threshold_px` to `12`; check lighting |
+| No skeleton on debug page | Check lighting; try `pose_model_complexity: 2`; lower `pose_min_detection_confidence` to `0.3` |
+| False triggers | Raise `wave_velocity_threshold_px`; raise `arm_above_head_tolerance` |
+| Gesture not detecting | Lower `wave_velocity_threshold_px`; check the debug page pvx readout |
 | High CPU | Set `frame_width: 320`, `frame_height: 240`; use `pose_model_complexity: 0` |
 | Stream dropping | Switch `rtsp_transport` to `udp` on wired LAN |
 | 401 from HA | Check token; for add-on ensure `homeassistant_api: true` in config.json |
+| Left/right reversed | Set `mirror_camera: true` |
 
 ---
 
@@ -198,15 +249,17 @@ Every gesture fires event type `gesture_detected`:
 | `frame_width` | `640` | Processing frame width |
 | `frame_height` | `480` | Processing frame height |
 | `pose_model_complexity` | `0` | 0=fastest, 1=balanced, 2=accurate |
-| `arm_raised_wrist_above_shoulder_frac` | `0.10` | Arm-raise sensitivity |
-| `wave_velocity_threshold_px` | `18.0` | px/frame needed for a wave |
-| `wave_sustain_frames` | `3` | Consistent frames before firing |
-| `vertical_velocity_threshold_px` | `15.0` | px/frame for palm up/down |
-| `vertical_sustain_frames` | `3` | Consistent frames for vertical |
+| `pose_min_detection_confidence` | `0.4` | Lower = detects more; raises false positives |
+| `arm_above_head_tolerance` | `0.86` | Absolute Y threshold (0–1); wrist must be above this Y in frame |
+| `wave_velocity_threshold_px` | `15.0` | px/frame needed for a wave |
+| `wave_sustain_frames` | `1` | Consistent frames before firing |
 | `fist_curl_threshold` | `0.65` | Curl fraction = fist (0–1) |
-| `fusion_agreement_window_s` | `0.5` | Agreement window between cameras |
-| `cooldown_s` | `1.2` | Min seconds between same gesture |
+| `palm_orientation_threshold` | `0.05` | z-depth sensitivity for palm up/down |
+| `mirror_camera` | `true` | Flip left/right if camera faces you |
+| `fusion_agreement_window_s` | `1.0` | Agreement window between cameras |
+| `cooldown_s` | `2.0` | Min seconds between same gesture |
 | `ha_event_name` | `gesture_detected` | HA event type name |
+| `debug_port` | `0` | Set to e.g. `8765` to enable debug web page; `0` = disabled |
 | `log_level` | `info` | `debug` \| `info` \| `warning` \| `error` |
 
 ---
@@ -214,7 +267,7 @@ Every gesture fires event type `gesture_detected`:
 ## Project structure
 
 ```
-gesture_cam/
+endora/
 ├── Dockerfile
 ├── docker-compose.yml     # For standalone (non-add-on) deployment
 ├── .env.example           # Copy to .env for standalone mode
@@ -229,7 +282,8 @@ gesture_cam/
 │   └── settings.yaml      # Dev-only config override
 ├── cameras/
 │   ├── capture.py         # RTSP capture thread (auto-reconnect)
-│   └── analyser.py        # MediaPipe pose + hands → gesture candidates
+│   ├── analyser.py        # MediaPipe pose + hands → gesture candidates
+│   └── debug_server.py    # MJPEG debug stream (http://<ip>:<debug_port>/)
 ├── core/
 │   ├── system.py          # Orchestrator
 │   └── fusion.py          # Two-camera agreement + cooldown

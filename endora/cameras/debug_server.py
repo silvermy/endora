@@ -81,7 +81,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html")
             self.end_headers()
             self.wfile.write(b"""<!DOCTYPE html><html><head>
-<title>Gesture Cam Debug</title>
+<title>Endora Debug</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body{background:#0d0d0d;margin:0;padding:6px 0;display:flex;
@@ -90,7 +90,7 @@ h3{margin:4px 0 6px;font-size:13px;letter-spacing:2px;color:#888}
 img{max-width:100%;display:block}
 small{margin-top:5px;font-size:10px;color:#555}
 </style></head><body>
-<h3>GESTURE CAM DEBUG</h3>
+<h3>ENDORA DEBUG</h3>
 <img src="/stream">
 <small>cyan=ready &nbsp;|&nbsp; orange=warming &nbsp;|&nbsp; arrow=peak velocity</small>
 </body></html>""")

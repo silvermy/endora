@@ -1,4 +1,4 @@
-# Gesture Cam — Python dependencies
+# Endora — Python dependencies
 # Built into the Docker image at build time.
 
 # ── Computer vision ───────────────────────────────────────────────────────────

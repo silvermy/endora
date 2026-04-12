@@ -1,12 +1,12 @@
 #!/usr/bin/with-contenv bashio
-# ── Gesture Cam — S6 service run script ──────────────────────────────────────
-# This file lives at /etc/services.d/gesture_cam/run
-# S6 calls it to start (and restart on crash) the gesture cam process.
+# ── Endora — S6 service run script ──────────────────────────────────────
+# This file lives at /etc/services.d/endora/run
+# S6 calls it to start (and restart on crash) the endora process.
 # with-contenv imports the container environment so RTSP URLs etc. are visible.
 
 set -e
 
-bashio::log.info "Gesture Cam v1.5.9 starting..."
+bashio::log.info "Endora v1.5.9 starting..."
 
 if ! bashio::config.has_value "rtsp_url_a"; then
     bashio::log.fatal "rtsp_url_a is not configured"
