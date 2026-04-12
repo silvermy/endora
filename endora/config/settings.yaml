@@ -1,4 +1,4 @@
-# Gesture Cam v1.3.0
+# Endora v1.3.0
 # Arm above head + wrist gestures
 
 rtsp_url_a: "rtsp://admin:YOUR_PASSWORD@10.0.0.178:554/h264Preview_01_sub"

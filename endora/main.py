@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Gesture Cam — Home Assistant Add-on entry point
+Endora — Home Assistant Add-on entry point
 
 When running as a HA add-on, settings come from /data/options.json
 (written by the Supervisor).  The SUPERVISOR_TOKEN env var is injected
@@ -34,7 +34,7 @@ def main():
     setup_logging(settings.log_level)
 
     log = logging.getLogger("main")
-    log.info("Gesture Cam starting (HA add-on mode)")
+    log.info("Endora starting (HA add-on mode)")
     log.info("RTSP A: %s", _mask(settings.rtsp_url_a))
     log.info("RTSP B: %s", _mask(settings.rtsp_url_b))
     log.info("HA event: %s → %s/events/%s",

@@ -189,10 +189,9 @@ class CameraAnalyser(threading.Thread):
                 pose_res, self.s, pw, ph
             )
 
-            # Remap wrist coords back to full-frame space for debug overlay
-            if wrist_xy and crop_offset != (0, 0):
-                wrist_xy = (wrist_xy[0] + crop_offset[0],
-                            wrist_xy[1] + crop_offset[1])
+            # wrist_xy stays in proc_frame pixel space — used for velocity
+            # tracking (relative movement only) and debug overlay which draws
+            # on proc_frame.  No remapping to full-frame needed.
 
             if not arm_raised:
                 consecutive_no_pose += 1
@@ -213,12 +212,12 @@ class CameraAnalyser(threading.Thread):
                         _debug_frame_counter = getattr(self, '_dfc', 0) + 1
                         self._dfc = _debug_frame_counter
                         if _debug_frame_counter % 3 == 0:
-                            dbg = _draw_debug(frame, pose_res, None,
+                            dbg = _draw_debug(proc_frame, pose_res, None,
                                               0, 0, 0, 0, None, False, "unknown",
                                               consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
                             self.debug_frame_cb(self.label, dbg)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("[%s] debug render error: %s", self.label, e)
                 continue
 
             consecutive_no_pose = 0
@@ -237,12 +236,12 @@ class CameraAnalyser(threading.Thread):
                         _debug_frame_counter = getattr(self, '_dfc', 0) + 1
                         self._dfc = _debug_frame_counter
                         if _debug_frame_counter % 3 == 0:
-                            dbg = _draw_debug(frame, pose_res, wrist_xy,
+                            dbg = _draw_debug(proc_frame, pose_res, wrist_xy,
                                               0, 0, 0, 0, None, False, "unknown",
                                               consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
                             self.debug_frame_cb(self.label, dbg)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("[%s] debug render error: %s", self.label, e)
                 continue
 
             if not last_arm_raised:
@@ -312,14 +311,14 @@ class CameraAnalyser(threading.Thread):
                     self._dfc = _debug_frame_counter
                     if _debug_frame_counter % 3 == 0:
                         dbg = _draw_debug(
-                            frame, pose_res,
+                            proc_frame, pose_res,
                             wrist_xy if arm_raised else None,
                             vx, vy, pvx, pvy, candidate, is_fist, palm_facing,
                             consecutive_arm_raised, ARM_RAISE_MIN_FRAMES,
                         )
                         self.debug_frame_cb(self.label, dbg)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("[%s] debug render error: %s", self.label, e)
 
         pose.close()
         hands.close()
@@ -495,7 +494,7 @@ def _draw_debug(frame, pose_res, wrist_xy, vx, vy, pvx, pvy,
     img = frame.copy()
     h, w = img.shape[:2]
 
-    # Draw pose skeleton
+    # Draw pose skeleton — or a bright warning if pose was not detected
     if pose_res and pose_res.pose_landmarks:
         mp.solutions.drawing_utils.draw_landmarks(
             img,
@@ -506,6 +505,19 @@ def _draw_debug(frame, pose_res, wrist_xy, vx, vy, pvx, pvy,
             connection_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(
                 color=(0, 200, 0), thickness=2),
         )
+    else:
+        # Pose model did not detect a body — make this very obvious
+        msg = "NO POSE DETECTED"
+        fs = max(0.6, w / 800)
+        (tw, th), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, fs, 2)
+        tx = (w - tw) // 2
+        ty = 60
+        cv2.rectangle(img, (tx - 6, ty - th - 6), (tx + tw + 6, ty + 6),
+                      (0, 0, 180), -1)
+        cv2.putText(img, msg, (tx, ty),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0), 4, cv2.LINE_AA)
+        cv2.putText(img, msg, (tx, ty),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs, (255, 255, 255), 2, cv2.LINE_AA)
 
     # Wrist marker + velocity arrow
     if wrist_xy:

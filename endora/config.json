@@ -1,9 +1,9 @@
 {
-  "name": "Gesture Cam",
+  "name": "Endora",
   "version": "1.5.9",
-  "slug": "gesture_cam",
+  "slug": "endora",
   "description": "Gesture detection \u2014 arm above head + wrist flick/orientation/fist pump. Works from couch or standing.",
-  "url": "https://github.com/silvermy/gesture_cam",
+  "url": "https://github.com/silvermy/endora",
   "init": false,
   "arch": [
     "aarch64",
@@ -84,7 +84,7 @@
   "auth_api": false,
   "ingress": false,
   "panel_icon": "mdi:hand-wave",
-  "panel_title": "Gesture Cam",
+  "panel_title": "Endora",
   "ports": {
     "8765/tcp": 8765
   }
