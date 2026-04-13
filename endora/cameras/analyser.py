@@ -160,32 +160,31 @@ class CameraAnalyser(threading.Thread):
             # the first frame (lazy-init so we know the actual input size).
             # Requires raw fisheye RTSP — disable in-camera dewarping first.
             if getattr(self.s, 'dewarp_enable', False):
-                if not hasattr(self, '_dewarp_maps'):
-                    from cameras.dewarp import build_dewarp_maps
-                    cx_raw = float(getattr(self.s, 'dewarp_cx', -1.0))
-                    cy_raw = float(getattr(self.s, 'dewarp_cy', -1.0))
-                    dw = int(getattr(self.s, 'dewarp_out_width',  640))
-                    dh = int(getattr(self.s, 'dewarp_out_height', 480))
+                from cameras.dewarp import build_dewarp_maps, apply_dewarp
+                cx_raw = float(getattr(self.s, 'dewarp_cx',   -1.0))
+                cy_raw = float(getattr(self.s, 'dewarp_cy',   -1.0))
+                dw     = int(getattr(self.s,   'dewarp_out_width',  640))
+                dh     = int(getattr(self.s,   'dewarp_out_height', 480))
+                fov    = float(getattr(self.s, 'dewarp_fov',   180.0))
+                pan    = float(getattr(self.s, 'dewarp_pan',     0.0))
+                tilt   = float(getattr(self.s, 'dewarp_tilt',   20.0))
+                roll   = float(getattr(self.s, 'dewarp_roll',    0.0))
+                vfov   = float(getattr(self.s, 'dewarp_vfov',   75.0))
+                # Cache key — rebuild maps if any param changes
+                _key = (w, h, dw, dh, fov, pan, tilt, roll, vfov, cx_raw, cy_raw)
+                if getattr(self, '_dewarp_key', None) != _key:
                     self._dewarp_maps = build_dewarp_maps(
                         in_w=w, in_h=h,
                         out_w=dw, out_h=dh,
-                        fisheye_fov_deg=float(getattr(self.s, 'dewarp_fov',  180.0)),
-                        pan_deg=float(getattr(self.s,  'dewarp_pan',   0.0)),
-                        tilt_deg=float(getattr(self.s, 'dewarp_tilt',  20.0)),
-                        vfov_deg=float(getattr(self.s, 'dewarp_vfov',  75.0)),
+                        fisheye_fov_deg=fov,
+                        pan_deg=pan,
+                        tilt_deg=tilt,
+                        roll_deg=roll,
+                        vfov_deg=vfov,
                         cx=None if cx_raw < 0 else cx_raw,
                         cy=None if cy_raw < 0 else cy_raw,
                     )
-                    log.info(
-                        "[%s] Dewarp maps built: %dx%d → %dx%d  "
-                        "fov=%.0f° pan=%.1f° tilt=%.1f° vfov=%.0f°",
-                        self.label, w, h, dw, dh,
-                        float(getattr(self.s, 'dewarp_fov',  180.0)),
-                        float(getattr(self.s, 'dewarp_pan',   0.0)),
-                        float(getattr(self.s, 'dewarp_tilt',  20.0)),
-                        float(getattr(self.s, 'dewarp_vfov',  75.0)),
-                    )
-                from cameras.dewarp import apply_dewarp
+                    self._dewarp_key = _key
                 frame = apply_dewarp(frame, *self._dewarp_maps)
                 h, w = frame.shape[:2]
 

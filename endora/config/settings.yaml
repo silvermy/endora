@@ -1,4 +1,4 @@
-# Endora v1.6.6
+# Endora v1.6.7
 
 # Arm above head + wrist gestures
 # Tuned for wall-mounted Reolink fisheye with internal dewarping.
@@ -59,7 +59,8 @@ debug_port: 8765
 dewarp_enable: false
 dewarp_fov: 180.0        # total lens FOV in degrees (Reolink FE = 180)
 dewarp_pan: 0.0          # + = right, - = left  (degrees)
-dewarp_tilt: 30.0        # + = down toward floor (degrees). Start at 20-35.
+dewarp_tilt: 30.0        # + = down toward floor, - = upward. Start at 30-50.
+dewarp_roll: 0.0         # levels a tilted horizon. If scene leans right use negative.
 dewarp_vfov: 75.0        # virtual camera FOV — wider = more room visible
 dewarp_out_width: 640
 dewarp_out_height: 480
