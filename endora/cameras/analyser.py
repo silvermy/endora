@@ -178,6 +178,20 @@ class CameraAnalyser(threading.Thread):
                 ph, pw = h, w
                 crop_offset = (0, 0)
 
+            # ── Optional CLAHE low-light enhancement ──────────────────────
+            # Boosts local contrast in dark/IR images before MediaPipe sees
+            # the frame. Much better than simple brightness — preserves
+            # structure while making body landmarks pop against background.
+            if getattr(self.s, 'low_light_enhance', False):
+                clip = float(getattr(self.s, 'low_light_clip', 2.0))
+                lab = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2LAB)
+                l_ch, a_ch, b_ch = cv2.split(lab)
+                clahe = cv2.createCLAHE(clipLimit=clip, tileGridSize=(8, 8))
+                l_ch = clahe.apply(l_ch)
+                proc_frame = cv2.cvtColor(
+                    cv2.merge([l_ch, a_ch, b_ch]), cv2.COLOR_LAB2BGR
+                )
+
             rgb = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2RGB)
             rgb.flags.writeable = False
             pose_res  = pose.process(rgb)

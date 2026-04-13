@@ -80,6 +80,15 @@ class Settings:
     ha_event_name: str = "gesture_detected"
     ha_url: str = "http://supervisor/core/api"
 
+    # ── Low-light / night-vision enhancement ─────────────────────────────
+    # CLAHE (Contrast Limited Adaptive Histogram Equalization) boosts local
+    # contrast in dark/IR frames before MediaPipe inference.  Helps pose
+    # detection in dim rooms without amplifying noise like a brightness boost.
+    low_light_enhance: bool = False
+    # CLAHE clip limit — higher = stronger contrast boost, more noise risk.
+    # 2.0 is a safe default; try 3.0–4.0 for very dark scenes.
+    low_light_clip: float = 2.0
+
     # ── Misc ──────────────────────────────────────────────────────────────
     log_level: str = "info"
     show_display: bool = False
