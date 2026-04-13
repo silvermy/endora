@@ -540,7 +540,7 @@ def _draw_debug(frame, pose_res, wrist_xy, vx, vy, pvx, pvy,
     # Wrist marker + velocity arrow
     if wrist_xy:
         wx, wy = int(wrist_xy[0]), int(wrist_xy[1])
-        color = (0, 255, 255) if consec_raised >= min_frames else (0, 128, 255)
+        color = (255, 255, 0) if consec_raised >= min_frames else (0, 128, 255)
         cv2.circle(img, (wx, wy), 12, color, -1)
         cv2.circle(img, (wx, wy), 12, (0, 0, 0), 2)
         # Peak velocity arrow
