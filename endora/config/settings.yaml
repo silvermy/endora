@@ -1,4 +1,4 @@
-# Endora v1.6.4
+# Endora v1.6.5
 # Arm above head + wrist gestures
 # Tuned for wall-mounted Reolink fisheye with dewarp/defisheye enabled.
 # If defisheye is OFF on the camera, re-enable frame_crop_top.
@@ -32,7 +32,7 @@ wave_velocity_threshold_px: 15.0
 wave_sustain_frames: 1
 vertical_velocity_threshold_px: 15.0
 vertical_sustain_frames: 1
-fist_curl_threshold: 0.65
+fist_curl_threshold: 0.75
 
 # Crop — disable once defisheye is on (flat image fills the frame cleanly).
 # Re-enable with frame_crop_top: 55 if still using circular fisheye.

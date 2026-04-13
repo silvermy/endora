@@ -69,7 +69,7 @@ class Settings:
     wave_sustain_frames: int = 1
     vertical_velocity_threshold_px: float = 20.0
     vertical_sustain_frames: int = 1
-    fist_curl_threshold: float = 0.65
+    fist_curl_threshold: float = 0.75
 
     # ── Fusion ────────────────────────────────────────────────────────────
     fusion_agreement_window_s: float = 1.0
