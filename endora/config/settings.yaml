@@ -1,7 +1,7 @@
-# Endora v1.6.5
+# Endora v1.6.6
+
 # Arm above head + wrist gestures
-# Tuned for wall-mounted Reolink fisheye with dewarp/defisheye enabled.
-# If defisheye is OFF on the camera, re-enable frame_crop_top.
+# Tuned for wall-mounted Reolink fisheye with internal dewarping.
 
 rtsp_url_a: "rtsp://admin:YOUR_PASSWORD@10.0.0.178:554/h264Preview_01_sub"
 rtsp_url_b: "rtsp://admin:YOUR_PASSWORD@10.0.0.178:554/h264Preview_01_sub"
@@ -43,6 +43,28 @@ fusion_agreement_window_s: 1.0
 ha_event_name: gesture_detected
 log_level: debug
 debug_port: 8765
+
+# ── Internal fisheye dewarping ────────────────────────────────────────────
+# Switch dewarp_enable to true AND switch your RTSP URL to the RAW fisheye
+# stream (set the Reolink camera to "Fisheye" mode, not "Defisheye").
+# The dewarping happens entirely inside Endora — no Reolink app needed.
+#
+# Tuning workflow:
+#  1. Enable dewarp, restart the add-on.
+#  2. Open the debug page — you should see a flat perspective view.
+#  3. Adjust dewarp_tilt until the floor/ceiling split looks right.
+#  4. Adjust dewarp_pan if you need to shift left/right.
+#  5. Lower dewarp_vfov if you want less wide-angle distortion at the edges.
+#
+dewarp_enable: false
+dewarp_fov: 180.0        # total lens FOV in degrees (Reolink FE = 180)
+dewarp_pan: 0.0          # + = right, - = left  (degrees)
+dewarp_tilt: 30.0        # + = down toward floor (degrees). Start at 20-35.
+dewarp_vfov: 75.0        # virtual camera FOV — wider = more room visible
+dewarp_out_width: 640
+dewarp_out_height: 480
+# dewarp_cx: -1          # fisheye circle centre X (default = frame centre)
+# dewarp_cy: -1          # fisheye circle centre Y (default = frame centre)
 
 # Night-vision / low-light enhancement (CLAHE).
 # Enable this when IR night vision makes pose detection unreliable.
