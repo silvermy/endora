@@ -18,6 +18,13 @@ log = logging.getLogger(__name__)
 _latest: Dict[str, Optional[np.ndarray]] = {"A": None, "B": None}
 _lock = threading.Lock()
 _last_gesture: Dict = {"label": "", "ts": 0.0}
+_single_camera: bool = False   # set by configure() before start()
+
+
+def configure(camera_count: int) -> None:
+    """Call before start() to set 1- or 2-camera layout."""
+    global _single_camera
+    _single_camera = (camera_count == 1)
 
 
 def update_frame(label: str, frame: np.ndarray) -> None:
@@ -31,6 +38,25 @@ def notify_gesture(label: str) -> None:
         _last_gesture["ts"] = time.monotonic()
 
 
+def _letterbox(src: Optional[np.ndarray], pw: int, ph: int,
+               placeholder: str = "No frame") -> np.ndarray:
+    """Fit src into pw×ph with black bars, preserving aspect ratio."""
+    if src is None:
+        blank = np.zeros((ph, pw, 3), dtype=np.uint8)
+        cv2.putText(blank, placeholder, (pw // 2 - 60, ph // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 128, 128), 2)
+        return blank
+    sh, sw = src.shape[:2]
+    scale = min(pw / sw, ph / sh)
+    nw, nh = int(sw * scale), int(sh * scale)
+    resized = cv2.resize(src, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    out = np.zeros((ph, pw, 3), dtype=np.uint8)
+    y0 = (ph - nh) // 2
+    x0 = (pw - nw) // 2
+    out[y0:y0 + nh, x0:x0 + nw] = resized
+    return out
+
+
 def _compose() -> bytes:
     with _lock:
         a = _latest.get("A")
@@ -38,38 +64,28 @@ def _compose() -> bytes:
         gesture_label = _last_gesture.get("label", "")
         gesture_age = time.monotonic() - _last_gesture.get("ts", 0.0)
 
-    PANEL_W, PANEL_H = 480, 360
-
-    def _letterbox(src, pw, ph):
-        """Fit src into pw×ph with black bars, preserving aspect ratio."""
-        if src is None:
-            blank = np.zeros((ph, pw, 3), dtype=np.uint8)
-            cv2.putText(blank, "No frame", (pw//2 - 60, ph//2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 128, 128), 2)
-            return blank
-        sh, sw = src.shape[:2]
-        scale = min(pw / sw, ph / sh)
-        nw, nh = int(sw * scale), int(sh * scale)
-        resized = cv2.resize(src, (nw, nh), interpolation=cv2.INTER_LINEAR)
-        out = np.zeros((ph, pw, 3), dtype=np.uint8)
-        y0 = (ph - nh) // 2
-        x0 = (pw - nw) // 2
-        out[y0:y0+nh, x0:x0+nw] = resized
-        return out
-
-    fa = _letterbox(a, PANEL_W, PANEL_H)
-    fb = _letterbox(b, PANEL_W, PANEL_H)
-    combined = np.hstack([fa, fb])
-
-    # Cam labels — pushed down to y=38 to clear Reolink OSD at top
-    cv2.putText(combined, "Cam A", (8, 38),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3, cv2.LINE_AA)
-    cv2.putText(combined, "Cam A", (8, 38),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
-    cv2.putText(combined, "Cam B", (488, 38),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3, cv2.LINE_AA)
-    cv2.putText(combined, "Cam B", (488, 38),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
+    if _single_camera:
+        # Single wide panel — no side-by-side
+        PANEL_W, PANEL_H = 960, 540
+        combined = _letterbox(a, PANEL_W, PANEL_H)
+        cv2.putText(combined, "Cam A", (8, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(combined, "Cam A", (8, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 1, cv2.LINE_AA)
+    else:
+        # Two panels side by side
+        PANEL_W, PANEL_H = 480, 360
+        fa = _letterbox(a, PANEL_W, PANEL_H)
+        fb = _letterbox(b, PANEL_W, PANEL_H)
+        combined = np.hstack([fa, fb])
+        cv2.putText(combined, "Cam A", (8, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(combined, "Cam A", (8, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
+        cv2.putText(combined, "Cam B", (488, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(combined, "Cam B", (488, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
 
     # Gesture flash
     if gesture_age < 2.0 and gesture_label:
