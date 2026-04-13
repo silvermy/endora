@@ -154,6 +154,41 @@ class CameraAnalyser(threading.Thread):
 
             h, w = frame.shape[:2]
 
+            # ── Optional fisheye dewarping ────────────────────────────────
+            # Converts raw equidistant fisheye to flat perspective before
+            # any cropping or MediaPipe processing.  Maps are built once on
+            # the first frame (lazy-init so we know the actual input size).
+            # Requires raw fisheye RTSP — disable in-camera dewarping first.
+            if getattr(self.s, 'dewarp_enable', False):
+                if not hasattr(self, '_dewarp_maps'):
+                    from cameras.dewarp import build_dewarp_maps
+                    cx_raw = float(getattr(self.s, 'dewarp_cx', -1.0))
+                    cy_raw = float(getattr(self.s, 'dewarp_cy', -1.0))
+                    dw = int(getattr(self.s, 'dewarp_out_width',  640))
+                    dh = int(getattr(self.s, 'dewarp_out_height', 480))
+                    self._dewarp_maps = build_dewarp_maps(
+                        in_w=w, in_h=h,
+                        out_w=dw, out_h=dh,
+                        fisheye_fov_deg=float(getattr(self.s, 'dewarp_fov',  180.0)),
+                        pan_deg=float(getattr(self.s,  'dewarp_pan',   0.0)),
+                        tilt_deg=float(getattr(self.s, 'dewarp_tilt',  20.0)),
+                        vfov_deg=float(getattr(self.s, 'dewarp_vfov',  75.0)),
+                        cx=None if cx_raw < 0 else cx_raw,
+                        cy=None if cy_raw < 0 else cy_raw,
+                    )
+                    log.info(
+                        "[%s] Dewarp maps built: %dx%d → %dx%d  "
+                        "fov=%.0f° pan=%.1f° tilt=%.1f° vfov=%.0f°",
+                        self.label, w, h, dw, dh,
+                        float(getattr(self.s, 'dewarp_fov',  180.0)),
+                        float(getattr(self.s, 'dewarp_pan',   0.0)),
+                        float(getattr(self.s, 'dewarp_tilt',  20.0)),
+                        float(getattr(self.s, 'dewarp_vfov',  75.0)),
+                    )
+                from cameras.dewarp import apply_dewarp
+                frame = apply_dewarp(frame, *self._dewarp_maps)
+                h, w = frame.shape[:2]
+
             # ── Optional asymmetric crop (removes fisheye distortion) ────
             # frame_crop_top/bottom/left/right = % to remove from each edge
             ct = float(getattr(self.s, 'frame_crop_top',    0))

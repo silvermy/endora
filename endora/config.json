@@ -1,6 +1,6 @@
 {
   "name": "Endora",
-  "version": "1.6.5",
+  "version": "1.6.6",
   "slug": "endora",
   "description": "Gesture detection \u2014 arm above head + wrist flick/orientation/fist pump. Works from couch or standing.",
   "url": "https://github.com/silvermy/endora",
@@ -43,7 +43,16 @@
     "frame_crop_top": 0.0,
     "frame_crop_bottom": 0.0,
     "frame_crop_left": 0.0,
-    "frame_crop_right": 0.0
+    "frame_crop_right": 0.0,
+    "dewarp_enable": false,
+    "dewarp_fov": 180.0,
+    "dewarp_pan": 0.0,
+    "dewarp_tilt": 20.0,
+    "dewarp_vfov": 75.0,
+    "dewarp_out_width": 640,
+    "dewarp_out_height": 480,
+    "dewarp_cx": -1.0,
+    "dewarp_cy": -1.0
   },
   "schema": {
     "rtsp_url_a": "str",
@@ -77,7 +86,16 @@
     "frame_crop_top": "float",
     "frame_crop_bottom": "float",
     "frame_crop_left": "float",
-    "frame_crop_right": "float"
+    "frame_crop_right": "float",
+    "dewarp_enable": "bool",
+    "dewarp_fov": "float",
+    "dewarp_pan": "float",
+    "dewarp_tilt": "float",
+    "dewarp_vfov": "float",
+    "dewarp_out_width": "int",
+    "dewarp_out_height": "int",
+    "dewarp_cx": "float",
+    "dewarp_cy": "float"
   },
   "map": [
     "data"

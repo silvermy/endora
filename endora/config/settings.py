@@ -80,6 +80,27 @@ class Settings:
     ha_event_name: str = "gesture_detected"
     ha_url: str = "http://supervisor/core/api"
 
+    # ── Fisheye dewarping ─────────────────────────────────────────────────
+    # Converts raw equidistant fisheye → flat perspective before MediaPipe.
+    # Requires the RAW fisheye RTSP stream (disable in-camera dewarping).
+    # Maps are built once on the first frame — restart the add-on to apply
+    # changes to pan/tilt/fov settings.
+    dewarp_enable: bool = False
+    # Total FOV of the fisheye lens in degrees (180 = hemisphere).
+    dewarp_fov: float = 180.0
+    # Virtual camera pan (+= right, -= left) and tilt (+= down toward floor).
+    # Tune these to point the virtual viewport toward where you stand/sit.
+    dewarp_pan: float = 0.0
+    dewarp_tilt: float = 20.0
+    # Virtual camera vertical FOV — wider sees more room, more distortion.
+    dewarp_vfov: float = 75.0
+    # Output frame size of the dewarped image.
+    dewarp_out_width: int = 640
+    dewarp_out_height: int = 480
+    # Fisheye circle centre in the input image (-1 = use frame geometric centre).
+    dewarp_cx: float = -1.0
+    dewarp_cy: float = -1.0
+
     # ── Low-light / night-vision enhancement ─────────────────────────────
     # CLAHE (Contrast Limited Adaptive Histogram Equalization) boosts local
     # contrast in dark/IR frames before MediaPipe inference.  Helps pose
