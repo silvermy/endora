@@ -92,6 +92,9 @@ class Settings:
     # Tune these to point the virtual viewport toward where you stand/sit.
     dewarp_pan: float = 0.0
     dewarp_tilt: float = 20.0
+    # Roll to level a tilted horizon. + = clockwise, - = counter-clockwise.
+    # If the scene leans to the right use a negative value (e.g. -20).
+    dewarp_roll: float = 0.0
     # Virtual camera vertical FOV — wider sees more room, more distortion.
     dewarp_vfov: float = 75.0
     # Output frame size of the dewarped image.

@@ -38,13 +38,27 @@ def _compose() -> bytes:
         gesture_label = _last_gesture.get("label", "")
         gesture_age = time.monotonic() - _last_gesture.get("ts", 0.0)
 
-    # Fixed 480x360 panels — same as the working 1.5.4 version
-    placeholder = np.zeros((360, 480, 3), dtype=np.uint8)
-    cv2.putText(placeholder, "No frame", (140, 180),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
+    PANEL_W, PANEL_H = 480, 360
 
-    fa = cv2.resize(a if a is not None else placeholder, (480, 360))
-    fb = cv2.resize(b if b is not None else placeholder, (480, 360))
+    def _letterbox(src, pw, ph):
+        """Fit src into pw×ph with black bars, preserving aspect ratio."""
+        if src is None:
+            blank = np.zeros((ph, pw, 3), dtype=np.uint8)
+            cv2.putText(blank, "No frame", (pw//2 - 60, ph//2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 128, 128), 2)
+            return blank
+        sh, sw = src.shape[:2]
+        scale = min(pw / sw, ph / sh)
+        nw, nh = int(sw * scale), int(sh * scale)
+        resized = cv2.resize(src, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        out = np.zeros((ph, pw, 3), dtype=np.uint8)
+        y0 = (ph - nh) // 2
+        x0 = (pw - nw) // 2
+        out[y0:y0+nh, x0:x0+nw] = resized
+        return out
+
+    fa = _letterbox(a, PANEL_W, PANEL_H)
+    fb = _letterbox(b, PANEL_W, PANEL_H)
     combined = np.hstack([fa, fb])
 
     # Cam labels — pushed down to y=38 to clear Reolink OSD at top

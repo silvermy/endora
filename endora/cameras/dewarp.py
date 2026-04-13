@@ -10,32 +10,47 @@ Equidistant projection model:  r = f * θ
 
 Usage
 -----
-Build the remap tables once at startup (or on first frame):
+Build the remap tables once at startup (lazy-init on first frame):
 
     from cameras.dewarp import build_dewarp_maps, apply_dewarp
 
     map_x, map_y = build_dewarp_maps(
         in_w=1280, in_h=960,
-        out_w=640,  out_h=480,
+        out_w=1280,  out_h=480,
         fisheye_fov_deg=180.0,
         pan_deg=0.0,    # + = right,  - = left
-        tilt_deg=30.0,  # + = down toward floor
-        vfov_deg=75.0,  # virtual camera FOV (wider = more room)
+        tilt_deg=30.0,  # + = DOWN toward floor,  - = upward
+        roll_deg=0.0,   # + = clockwise,  - = counter-clockwise (levels horizon)
+        vfov_deg=50.0,  # vertical FOV of output; horizontal FOV grows with out_w
     )
-
-Then per frame:
 
     flat = apply_dewarp(fisheye_frame, map_x, map_y)
 
-The per-frame cost is a single cv2.remap() call — effectively free.
+Per-frame cost is a single cv2.remap() — effectively free.
+
+Sign conventions
+----------------
+  tilt_deg  + = camera looks DOWN toward the floor
+            - = camera looks UP toward the ceiling
+  pan_deg   + = camera looks RIGHT
+            - = camera looks LEFT
+  roll_deg  + = image rotates clockwise (scene appears to lean left)
+            - = image rotates counter-clockwise (use this to level a CCW-leaning scene)
+
+Horizontal FOV
+--------------
+Horizontal FOV is derived from vfov_deg and the output aspect ratio:
+    hfov/2 = arctan( (out_w/out_h) * tan(vfov/2) )
+So to widen the view without changing vertical FOV, increase out_w.
+  out_w=640,  out_h=480, vfov=50° → hfov ≈ 64°
+  out_w=1280, out_h=480, vfov=50° → hfov ≈ 102°
+  out_w=1920, out_h=480, vfov=50° → hfov ≈ 124°
 
 RTSP note
 ---------
-Use the RAW fisheye stream from your camera (no in-camera dewarping).
-For Reolink FE cameras the main stream is typically:
-    rtsp://<user>:<pass>@<ip>:554/h264Preview_01_main
-Set the camera's "video format" to "Fisheye" (not "Defisheye") in the
-Reolink app or web UI so the RTSP output is the untouched circle.
+Use the RAW fisheye RTSP stream (no in-camera dewarping).
+Set the Reolink camera to "Fisheye" mode (not "Defisheye") in the
+Reolink app so the RTSP output is the untouched fisheye circle.
 """
 
 from __future__ import annotations
@@ -56,6 +71,7 @@ def build_dewarp_maps(
     fisheye_fov_deg: float = 180.0,
     pan_deg: float = 0.0,
     tilt_deg: float = 0.0,
+    roll_deg: float = 0.0,
     vfov_deg: float = 70.0,
     cx: float | None = None,
     cy: float | None = None,
@@ -66,23 +82,21 @@ def build_dewarp_maps(
 
     Parameters
     ----------
-    in_w, in_h        Input (fisheye) frame size in pixels.
-    out_w, out_h      Output (flat perspective) frame size in pixels.
-    fisheye_fov_deg   Total field of view of the fisheye lens.
-                      180 = hemisphere; 360 = full sphere (rare).
-    pan_deg           Virtual camera horizontal pan.
-                      0 = straight ahead; + = right; - = left.
-    tilt_deg          Virtual camera vertical tilt.
-                      0 = horizontal; + = downward; - = upward.
-    vfov_deg          Vertical field of view of the output image.
-                      70–90 is typical. Larger = more room visible
-                      but more perspective distortion at the edges.
-    cx, cy            Fisheye circle centre in the input image.
-                      Defaults to the geometric centre of the frame.
+    in_w, in_h        Input (fisheye) frame dimensions in pixels.
+    out_w, out_h      Output (flat perspective) frame dimensions.
+                      Wider out_w = wider horizontal FOV with same vfov.
+    fisheye_fov_deg   Total FOV of the fisheye lens (180 = hemisphere).
+    pan_deg           Horizontal pan: + = right, - = left.
+    tilt_deg          Vertical tilt:  + = DOWN toward floor, - = upward.
+    roll_deg          Image roll to level a tilted horizon.
+                      + = clockwise, - = counter-clockwise.
+                      If the scene leans to the right, use a negative value.
+    vfov_deg          Vertical FOV of the output image.
+    cx, cy            Fisheye circle centre (-1 / None = frame geometric centre).
 
     Returns
     -------
-    (map_x, map_y)  float32 arrays of shape (out_h, out_w) for cv2.remap().
+    (map_x, map_y)  float32 arrays shape (out_h, out_w) for cv2.remap().
     """
     if cx is None:
         cx = in_w / 2.0
@@ -90,66 +104,74 @@ def build_dewarp_maps(
         cy = in_h / 2.0
 
     # ── Fisheye focal length (equidistant model) ──────────────────────────
-    # The fisheye "circle" has radius = min(in_w, in_h) / 2.
-    # That radius corresponds to half the total FOV angle.
     fisheye_radius = min(in_w, in_h) / 2.0
     fov_rad = np.deg2rad(fisheye_fov_deg)
     f_fish = fisheye_radius / (fov_rad / 2.0)
 
-    # ── Virtual camera focal length ────────────────────────────────────────
-    # Derived from the desired output vertical FOV.
+    # ── Virtual camera focal length (from vertical FOV + output height) ───
     f_virt = (out_h / 2.0) / np.tan(np.deg2rad(vfov_deg) / 2.0)
 
-    # ── Rotation matrix: pan around Y, then tilt around X ─────────────────
+    # ── Rotation matrices ─────────────────────────────────────────────────
+    # Convention: X right, Y down (image), Z forward.
+    # Positive tilt = rotate around X so Z tips downward = camera looks down.
+    # Positive pan  = rotate around Y so Z tips right    = camera looks right.
+    # Positive roll = rotate around Z clockwise.
     pan_r  = np.deg2rad(pan_deg)
-    tilt_r = np.deg2rad(tilt_deg)
+    tilt_r = np.deg2rad(-tilt_deg)   # negate: positive tilt_deg = downward
+    roll_r = np.deg2rad(roll_deg)
 
-    Ry = np.array([
+    Ry = np.array([                         # pan around Y
         [ np.cos(pan_r),  0.0, np.sin(pan_r)],
         [ 0.0,            1.0, 0.0          ],
         [-np.sin(pan_r),  0.0, np.cos(pan_r)],
     ], dtype=np.float64)
 
-    Rx = np.array([
+    Rx = np.array([                         # tilt around X
         [1.0,  0.0,             0.0            ],
         [0.0,  np.cos(tilt_r), -np.sin(tilt_r)],
         [0.0,  np.sin(tilt_r),  np.cos(tilt_r)],
     ], dtype=np.float64)
 
-    R = Rx @ Ry   # combined rotation
+    Rz = np.array([                         # roll around Z
+        [ np.cos(roll_r), -np.sin(roll_r), 0.0],
+        [ np.sin(roll_r),  np.cos(roll_r), 0.0],
+        [ 0.0,             0.0,            1.0],
+    ], dtype=np.float64)
 
-    # ── Build output pixel grid ────────────────────────────────────────────
+    R = Rx @ Ry @ Rz    # tilt, then pan, then roll
+
+    # ── Output pixel grid ─────────────────────────────────────────────────
     us = np.arange(out_w, dtype=np.float64) - out_w / 2.0
     vs = np.arange(out_h, dtype=np.float64) - out_h / 2.0
-    ug, vg = np.meshgrid(us, vs)   # shape (out_h, out_w)
+    ug, vg = np.meshgrid(us, vs)            # shape (out_h, out_w)
 
-    # Virtual camera rays (normalised 3-D direction vectors)
-    zg   = np.full_like(ug, f_virt)
-    rays = np.stack([ug, vg, zg], axis=-1)          # (out_h, out_w, 3)
+    # Virtual camera ray directions (normalised)
+    rays  = np.stack([ug, vg, np.full_like(ug, f_virt)], axis=-1)
     norms = np.linalg.norm(rays, axis=-1, keepdims=True)
     rays  = rays / norms
 
-    # ── Rotate rays into the fisheye frame ───────────────────────────────
-    flat    = rays.reshape(-1, 3)           # (N, 3)
+    # ── Rotate into the fisheye frame ─────────────────────────────────────
+    flat    = rays.reshape(-1, 3)
     rotated = (R @ flat.T).T.reshape(out_h, out_w, 3)
 
     dx = rotated[..., 0]
     dy = rotated[..., 1]
     dz = rotated[..., 2]
 
-    # ── Equidistant back-projection ───────────────────────────────────────
-    # θ = angle from the optical axis
+    # ── Equidistant back-projection → fisheye pixel coords ───────────────
     theta = np.arctan2(np.sqrt(dx**2 + dy**2), dz)
-    phi   = np.arctan2(dy, dx)             # azimuth
+    phi   = np.arctan2(dy, dx)
 
-    r     = f_fish * theta                 # pixel radius in fisheye image
+    r     = f_fish * theta
     map_x = (cx + r * np.cos(phi)).astype(np.float32)
     map_y = (cy + r * np.sin(phi)).astype(np.float32)
 
-    log.debug(
-        "Dewarp maps: input=%dx%d fisheye_f=%.1fpx "
-        "virtual_f=%.1fpx pan=%.1f° tilt=%.1f° vfov=%.1f°",
-        in_w, in_h, f_fish, f_virt, pan_deg, tilt_deg, vfov_deg,
+    hfov = np.degrees(2 * np.arctan((out_w / out_h) * np.tan(np.deg2rad(vfov_deg) / 2.0)))
+    log.info(
+        "Dewarp maps: %dx%d → %dx%d  "
+        "pan=%.1f° tilt=%.1f° roll=%.1f° vfov=%.0f° hfov=%.0f°",
+        in_w, in_h, out_w, out_h,
+        pan_deg, tilt_deg, roll_deg, vfov_deg, hfov,
     )
 
     return map_x, map_y
@@ -160,18 +182,7 @@ def apply_dewarp(
     map_x: np.ndarray,
     map_y: np.ndarray,
 ) -> np.ndarray:
-    """
-    Apply precomputed dewarp maps to a single frame.
-
-    Parameters
-    ----------
-    frame           Raw fisheye frame (BGR, any dtype).
-    map_x, map_y   Source coordinate maps from build_dewarp_maps().
-
-    Returns
-    -------
-    Flat perspective frame (same dtype as input).
-    """
+    """Apply precomputed dewarp maps to a frame (single cv2.remap call)."""
     return cv2.remap(
         frame, map_x, map_y,
         interpolation=cv2.INTER_LINEAR,
