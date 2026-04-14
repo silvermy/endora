@@ -34,7 +34,7 @@ def main():
     setup_logging(settings.log_level)
 
     log = logging.getLogger("main")
-    log.info("Endora v1.6.9 starting (HA add-on mode)")
+    log.info("Endora v1.6.10 starting (HA add-on mode)")
     log.info("RTSP A: %s", _mask(settings.rtsp_url_a))
     log.info("RTSP B: %s", _mask(settings.rtsp_url_b))
     log.info("HA event: %s → %s/events/%s",
