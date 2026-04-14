@@ -1,4 +1,4 @@
-# Endora v1.6.13
+# Endora v1.6.14
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # Changes here are overridden by the HA UI — edit in the UI instead.
@@ -15,7 +15,7 @@ arm_above_head_tolerance: 0.80
 
 # Minimum peak wrist velocity (pixels) required to register a wave.
 # Watch the pvx value on the debug page while waving to calibrate.
-wave_velocity_threshold_px: 20.0
+wave_velocity_threshold_px: 10.0
 
 # How many consecutive frames the gesture must appear before firing.
 # Higher = fewer false positives but slightly more latency.
@@ -46,6 +46,16 @@ dewarp_out_width: 1920   # wider = more horizontal FOV
 dewarp_out_height: 480
 
 # ── Advanced (rarely needed — leave at defaults unless you know why) ──────────
+
+# Furniture filter: skeleton shoulders must appear above this Y fraction.
+# 0.85 = top 85% of frame. Lower = stricter.
+# If the skeleton keeps jumping to the coffee table, lower this (e.g. 0.70).
+pose_shoulder_max_y: 0.80
+
+# Crop bottom of frame (%) — useful to cut out a table that confuses the
+# skeleton detector. E.g. 15 removes the bottom 15% before MediaPipe sees it.
+# frame_crop_bottom: 15
+
 # pose_model_complexity: 2        # 0=fastest 1=balanced 2=most accurate (max)
 # pose_min_detection_confidence: 0.3
 # pose_min_tracking_confidence: 0.3
@@ -58,7 +68,6 @@ dewarp_out_height: 480
 # frame_width: 640
 # frame_height: 640
 # frame_crop_top: 0
-# frame_crop_bottom: 0
 # dewarp_cx: -1          # fisheye circle centre X (default = frame centre)
 # dewarp_cy: -1          # fisheye circle centre Y (default = frame centre)
 # low_light_clip: 2.0

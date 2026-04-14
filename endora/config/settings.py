@@ -44,6 +44,11 @@ class Settings:
     pose_min_detection_confidence: float = 0.3
     pose_min_tracking_confidence: float = 0.3
     arm_above_head_tolerance: float = 0.80
+    # Furniture filter: reject poses whose average shoulder Y exceeds this.
+    # 0.85 = shoulders must appear in upper 85% of frame.
+    # Lower (e.g. 0.70) = stricter — use when camera is overhead and table
+    # silhouette keeps stealing the skeleton from the person.
+    pose_shoulder_max_y: float = 0.85
 
     # ── Hands (gesture classification) ───────────────────────────────────
     # Advanced: override in settings.yaml if needed
