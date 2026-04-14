@@ -6,7 +6,7 @@
 
 set -e
 
-bashio::log.info "Endora v1.6.14 starting..."
+bashio::log.info "Endora v1.6.15 starting..."
 
 if ! bashio::config.has_value "rtsp_url_a"; then
     bashio::log.fatal "rtsp_url_a is not configured"
