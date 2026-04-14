@@ -255,14 +255,14 @@ class CameraAnalyser(threading.Thread):
             if pose_res and pose_res.pose_landmarks:
                 _lm_f = pose_res.pose_landmarks.landmark
                 _PL_f = mp.solutions.pose.PoseLandmark
-                # Average visibility of the four torso anchor points
+                # Use shoulder visibility only — hips are hidden from overhead
+                # cameras and would drag the average below threshold for real people.
+                # Furniture false-detections still score near 0 on shoulders.
                 _vis_scores = [
                     _lm_f[_PL_f.LEFT_SHOULDER].visibility,
                     _lm_f[_PL_f.RIGHT_SHOULDER].visibility,
-                    _lm_f[_PL_f.LEFT_HIP].visibility,
-                    _lm_f[_PL_f.RIGHT_HIP].visibility,
                 ]
-                _avg_vis = sum(_vis_scores) / 4.0
+                _avg_vis = sum(_vis_scores) / len(_vis_scores)
                 _min_vis = float(getattr(self.s, 'pose_visibility_min', 0.35))
                 if _avg_vis < _min_vis:
                     _furniture_rejection_streak += 1
