@@ -117,8 +117,15 @@ class CameraAnalyser(threading.Thread):
         mp_pose  = mp.solutions.pose
         mp_hands = mp.solutions.hands
 
+        _complexity = max(0, min(2, int(self.s.pose_model_complexity)))
+        if _complexity != int(self.s.pose_model_complexity):
+            log.warning(
+                "[%s] pose_model_complexity=%s is invalid — "
+                "MediaPipe Pose only accepts 0, 1, or 2. Clamping to %d.",
+                self.label, self.s.pose_model_complexity, _complexity,
+            )
         pose = mp_pose.Pose(
-            model_complexity=int(self.s.pose_model_complexity),
+            model_complexity=_complexity,
             min_detection_confidence=float(self.s.pose_min_detection_confidence),
             min_tracking_confidence=float(self.s.pose_min_tracking_confidence),
             enable_segmentation=False,
