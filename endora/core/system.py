@@ -55,6 +55,7 @@ class GestureSystem:
         self._debug_enabled = settings.debug_port > 0
         if self._debug_enabled:
             debug_server.configure(camera_count=1 if self._single else 2)
+            debug_server.set_settings(settings)
             debug_server.start(settings.debug_port)
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
