@@ -34,7 +34,7 @@ _PARAMS = [
     ("arm_above_head_tolerance",   "Arm height tolerance",         0.30, 1.0, 0.01, "Gesture"),
     ("cooldown_s",                 "Cooldown (s)",                 0,   10,   0.25, "Gesture"),
     ("fist_curl_threshold",        "Fist curl threshold",          0.25, 1.0, 0.05, "Gesture"),
-    ("pose_shoulder_max_y",        "Max shoulder Y (furniture)",   0.40, 1.0, 0.01, "Body"),
+    ("pose_visibility_min",         "Min body visibility (furn.)",  0.05, 0.8, 0.01, "Body"),
     ("frame_crop_bottom",          "Crop bottom (%)",              0,   60,   1,    "Body"),
     ("frame_crop_top",             "Crop top (%)",                 0,   30,   1,    "Body"),
     ("dewarp_tilt",                "Tilt (° down)",               -10,  80,   1,    "Dewarp"),

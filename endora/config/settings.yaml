@@ -1,4 +1,4 @@
-# Endora v1.6.16
+# Endora v1.6.17
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # Changes here are overridden by the HA UI — edit in the UI instead.
@@ -47,13 +47,16 @@ dewarp_out_height: 480
 
 # ── Advanced (rarely needed — leave at defaults unless you know why) ──────────
 
-# Furniture filter: skeleton shoulders must appear above this Y fraction.
-# Lower = stricter. Your couch shoulders are ~y=0.40; table "shoulders" ~y=0.70.
-pose_shoulder_max_y: 0.60
+# Furniture filter — uses MediaPipe landmark visibility (0–1 confidence).
+# Real body landmarks score well even from overhead; furniture near 0.
+# 0.35 rejects false detections without blocking the person.
+# Raise toward 0.5 if the table keeps winning; lower toward 0.2 if you
+# are being rejected (watch the logs for "pose rejected: avg_torso_visibility").
+pose_visibility_min: 0.35
 
-# Crop bottom of frame (%) — physically removes the coffee table from the
-# frame before MediaPipe sees it so it can't detect it as a body at all.
-frame_crop_bottom: 30
+# Crop bottom of frame (%) — removes the coffee table area entirely.
+# 15 is a good starting point; only increase if the table still appears.
+frame_crop_bottom: 15
 
 # pose_model_complexity: 2        # 0=fastest 1=balanced 2=most accurate (max)
 # pose_min_detection_confidence: 0.3
