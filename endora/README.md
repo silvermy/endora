@@ -1,7 +1,5 @@
 # Endora
 
-<img src="icon.png" alt="Endora" width="120" align="right">
-
 Watches two RTSP camera streams for hand gestures and fires
 Home Assistant events you can use in any automation.
 
