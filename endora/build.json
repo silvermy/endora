@@ -5,7 +5,7 @@
   },
   "squash": false,
   "labels": {
-    "io.hass.version": "1.6.13",
+    "io.hass.version": "1.6.14",
     "io.hass.arch": "aarch64|amd64",
     "io.hass.type": "addon"
   }
