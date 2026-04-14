@@ -244,29 +244,38 @@ class CameraAnalyser(threading.Thread):
             rgb.flags.writeable = True
 
             # ── Furniture / false-pose filter ─────────────────────────────
-            # If the detected skeleton's shoulders are too low in the frame
-            # it's almost certainly furniture or floor geometry, not a person.
-            # We reject it, and after FURNITURE_RESET_FRAMES consecutive
-            # rejections we recreate the Pose model to break the tracking lock
-            # (MediaPipe tracking keeps latching back to the same object).
+            # Uses MediaPipe landmark VISIBILITY scores rather than Y-position.
+            # A real person has decent visibility on shoulders+hips even from
+            # overhead. Furniture false-detections score near 0.0 on all of
+            # these because MediaPipe has no confidence in any body landmark.
+            #
+            # After FURNITURE_RESET_FRAMES consecutive rejections the Pose
+            # model is recreated to break the tracking lock — otherwise
+            # MediaPipe keeps re-latching onto the same object each frame.
             if pose_res and pose_res.pose_landmarks:
                 _lm_f = pose_res.pose_landmarks.landmark
                 _PL_f = mp.solutions.pose.PoseLandmark
-                _ls_y = _lm_f[_PL_f.LEFT_SHOULDER].y
-                _rs_y = _lm_f[_PL_f.RIGHT_SHOULDER].y
-                _avg_sh_y = (_ls_y + _rs_y) / 2.0
-                _max_sh_y = float(getattr(self.s, 'pose_shoulder_max_y', 0.85))
-                if _avg_sh_y > _max_sh_y:
+                # Average visibility of the four torso anchor points
+                _vis_scores = [
+                    _lm_f[_PL_f.LEFT_SHOULDER].visibility,
+                    _lm_f[_PL_f.RIGHT_SHOULDER].visibility,
+                    _lm_f[_PL_f.LEFT_HIP].visibility,
+                    _lm_f[_PL_f.RIGHT_HIP].visibility,
+                ]
+                _avg_vis = sum(_vis_scores) / 4.0
+                _min_vis = float(getattr(self.s, 'pose_visibility_min', 0.35))
+                if _avg_vis < _min_vis:
                     _furniture_rejection_streak += 1
                     log.debug(
-                        "[%s] pose rejected: avg_shoulder_y=%.2f > max=%.2f "
+                        "[%s] pose rejected: avg_torso_visibility=%.2f < min=%.2f "
                         "(furniture? streak=%d)",
-                        self.label, _avg_sh_y, _max_sh_y, _furniture_rejection_streak,
+                        self.label, _avg_vis, _min_vis, _furniture_rejection_streak,
                     )
                     if _furniture_rejection_streak >= FURNITURE_RESET_FRAMES:
                         log.info(
-                            "[%s] Breaking furniture tracking lock — recreating pose model",
-                            self.label,
+                            "[%s] Breaking furniture tracking lock — recreating pose model "
+                            "(avg_vis=%.2f)",
+                            self.label, _avg_vis,
                         )
                         pose.close()
                         pose = mp_pose.Pose(
