@@ -23,55 +23,46 @@ class Settings:
     # ── RTSP ──────────────────────────────────────────────────────────────
     rtsp_url_a: str = "rtsp://user:pass@192.168.1.100:554/stream1"
     rtsp_url_b: str = "rtsp://user:pass@192.168.1.101:554/stream1"
+    # Advanced: override in settings.yaml if needed
     rtsp_transport: str = "tcp"
     rtsp_reconnect_delay_s: float = 5.0
 
     # ── Frame ─────────────────────────────────────────────────────────────
+    # Advanced: override in settings.yaml if needed
     frame_width: int = 640
     frame_height: int = 640
-    # Crop to central N% of frame before processing — removes fisheye edge distortion
-    # 100 = no crop, 70 = use central 70% of image
     frame_crop_pct: float = 100.0
-    # Asymmetric crop — % to remove from each edge independently
-    # e.g. frame_crop_bottom: 20 removes bottom 20% (floor/furniture ghosts)
     frame_crop_top: float = 0.0
     frame_crop_bottom: float = 0.0
     frame_crop_left: float = 0.0
     frame_crop_right: float = 0.0
 
     # ── Pose (arm-raise detection) ────────────────────────────────────────
-    # Lite model (0) is fast enough now that hands runs separately
-    pose_model_complexity: int = 1
-    pose_min_detection_confidence: float = 0.6
-    pose_min_tracking_confidence: float = 0.5
-
-    # Wrist must be this far above the shoulder (negative = above).
-    # Resting: diff +0.05 to +0.15. Raised: diff -0.05 to -0.25.
-    # -0.10 sits cleanly between resting and raised for most setups.
-    arm_above_head_tolerance: float = 0.86
+    # Advanced: override in settings.yaml if needed
+    # Complexity 2 gives best detection; 0 is fastest. Max valid value is 2.
+    pose_model_complexity: int = 2
+    pose_min_detection_confidence: float = 0.3
+    pose_min_tracking_confidence: float = 0.3
+    arm_above_head_tolerance: float = 0.80
 
     # ── Hands (gesture classification) ───────────────────────────────────
+    # Advanced: override in settings.yaml if needed
     hand_model_max_hands: int = 1
     hand_min_detection_confidence: float = 0.3
     hand_min_tracking_confidence: float = 0.1
-
-    # ── Palm orientation ──────────────────────────────────────────────────
-    # Z-depth difference threshold between wrist and MCP knuckles.
-    # Larger = requires more extreme wrist bend to register palm_up/down.
-    # Start at 0.05 — lower to 0.03 if palm gestures aren't triggering.
     palm_orientation_threshold: float = 0.05
 
     # ── Gesture thresholds ────────────────────────────────────────────────
-    # Set mirror_camera: true if left/right gestures are reversed
-    # (e.g. camera mounted facing you, mirroring the scene horizontally)
     mirror_camera: bool = True
-    wave_velocity_threshold_px: float = 15.0
-    wave_sustain_frames: int = 1
+    wave_velocity_threshold_px: float = 20.0
+    wave_sustain_frames: int = 3
+    # Advanced: override in settings.yaml if needed
     vertical_velocity_threshold_px: float = 20.0
     vertical_sustain_frames: int = 1
     fist_curl_threshold: float = 0.75
 
     # ── Fusion ────────────────────────────────────────────────────────────
+    # Advanced: override in settings.yaml if needed
     fusion_agreement_window_s: float = 1.0
     cooldown_s: float = 2.0
     single_camera_mode: bool = False

@@ -1,75 +1,64 @@
-# Endora v1.6.12
-
-# Arm above head + wrist gestures
-# Tuned for wall-mounted Reolink fisheye with internal dewarping.
+# Endora v1.6.13
+# ── Essential settings ───────────────────────────────────────────────────────
+# These mirror the add-on Configuration tab.
+# Changes here are overridden by the HA UI — edit in the UI instead.
 
 rtsp_url_a: "rtsp://admin:YOUR_PASSWORD@10.0.0.178:554/h264Preview_01_sub"
 rtsp_url_b: "rtsp://admin:YOUR_PASSWORD@10.0.0.178:554/h264Preview_01_sub"
-rtsp_transport: tcp
-rtsp_reconnect_delay_s: 5.0
-frame_width: 640
-frame_height: 480
+debug_port: 8765
+log_level: debug
+ha_event_name: gesture_detected
 
-# Pose — use complexity 2 for best detection at ~12 ft distance
-pose_model_complexity: 2
-pose_min_detection_confidence: 0.3
-pose_min_tracking_confidence: 0.3
-
-# Arm-raise threshold: wrist Y must be below this fraction of frame height.
-# With dewarped flat image and user sitting, 0.80 gives generous headroom.
-# Lower this (e.g. 0.70) if sitting triggers false positives.
+# How high the wrist must appear in the frame to count as "arm raised".
+# 0.80 = wrist must be in the top 80% of the frame. Lower = stricter.
 arm_above_head_tolerance: 0.80
 
-# Hands — gesture classification
-hand_model_max_hands: 1
-hand_min_detection_confidence: 0.3
-hand_min_tracking_confidence: 0.1
-palm_orientation_threshold: 0.05
+# Minimum peak wrist velocity (pixels) required to register a wave.
+# Watch the pvx value on the debug page while waving to calibrate.
+wave_velocity_threshold_px: 20.0
 
-# Velocity thresholds — lowered from 25 to catch waves from the sofa.
-# The debug page pvx readout will tell you the actual values you're producing.
-wave_velocity_threshold_px: 15.0
-wave_sustain_frames: 1
-vertical_velocity_threshold_px: 15.0
-vertical_sustain_frames: 1
+# How many consecutive frames the gesture must appear before firing.
+# Higher = fewer false positives but slightly more latency.
+wave_sustain_frames: 3
+
+# 0.75 = 3 of 4 fingers must be curled to count as a fist.
 fist_curl_threshold: 0.75
 
-# Crop — disable once defisheye is on (flat image fills the frame cleanly).
-# Re-enable with frame_crop_top: 55 if still using circular fisheye.
-# frame_crop_top: 55
+# Reverse left/right gesture interpretation (for cameras facing you).
+mirror_camera: true
 
+# Minimum pause between fired gestures (seconds).
 cooldown_s: 2.0
-fusion_agreement_window_s: 1.0
-ha_event_name: gesture_detected
-log_level: debug
-debug_port: 8765
 
-# ── Internal fisheye dewarping ────────────────────────────────────────────
-# Switch dewarp_enable to true AND switch your RTSP URL to the RAW fisheye
-# stream (set the Reolink camera to "Fisheye" mode, not "Defisheye").
-# The dewarping happens entirely inside Endora — no Reolink app needed.
-#
-# Tuning workflow:
-#  1. Enable dewarp, restart the add-on.
-#  2. Open the debug page — you should see a flat perspective view.
-#  3. Adjust dewarp_tilt until the floor/ceiling split looks right.
-#  4. Adjust dewarp_pan if you need to shift left/right.
-#  5. Lower dewarp_vfov if you want less wide-angle distortion at the edges.
-#
-dewarp_enable: false
-dewarp_fov: 180.0        # total lens FOV in degrees (Reolink FE = 180)
-dewarp_pan: 0.0          # + = right, - = left  (degrees)
-dewarp_tilt: 30.0        # + = down toward floor, - = upward. Start at 30-50.
-dewarp_roll: 0.0         # levels a tilted horizon. If scene leans right use negative.
-dewarp_vfov: 75.0        # virtual camera FOV — wider = more room visible
-dewarp_out_width: 640
+# Night-vision / IR enhancement.
+low_light_enhance: true
+
+# ── Fisheye dewarping ─────────────────────────────────────────────────────────
+# Enable this when using the raw fisheye RTSP stream (no in-camera dewarping).
+# Set the Reolink camera to "Fisheye" mode in the app, then tune tilt/pan/roll.
+dewarp_enable: true
+dewarp_fov: 180.0        # total lens FOV in degrees
+dewarp_tilt: 30.0        # + = down toward floor
+dewarp_pan: 5.0          # + = right, - = left
+dewarp_roll: 0.0         # levels a tilted horizon (+ = CW, - = CCW)
+dewarp_vfov: 50.0        # vertical FOV of output (narrower = more zoomed in)
+dewarp_out_width: 1920   # wider = more horizontal FOV
 dewarp_out_height: 480
+
+# ── Advanced (rarely needed — leave at defaults unless you know why) ──────────
+# pose_model_complexity: 2        # 0=fastest 1=balanced 2=most accurate (max)
+# pose_min_detection_confidence: 0.3
+# pose_min_tracking_confidence: 0.3
+# hand_min_detection_confidence: 0.3
+# hand_min_tracking_confidence: 0.1
+# palm_orientation_threshold: 0.05
+# vertical_velocity_threshold_px: 20.0
+# fusion_agreement_window_s: 1.0
+# rtsp_transport: tcp
+# frame_width: 640
+# frame_height: 640
+# frame_crop_top: 0
+# frame_crop_bottom: 0
 # dewarp_cx: -1          # fisheye circle centre X (default = frame centre)
 # dewarp_cy: -1          # fisheye circle centre Y (default = frame centre)
-
-# Night-vision / low-light enhancement (CLAHE).
-# Enable this when IR night vision makes pose detection unreliable.
-# The debug page will show the enhanced frame so you can see what MediaPipe sees.
-# Raise low_light_clip (e.g. 3.0) for very dark scenes.
-low_light_enhance: true
-low_light_clip: 2.0
+# low_light_clip: 2.0
