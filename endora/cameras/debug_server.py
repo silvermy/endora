@@ -28,19 +28,22 @@ _settings = None
 
 # ── Tunable parameter definitions ────────────────────────────────────────────
 # (key, label, min, max, step, group)
+# Trimmed to the sliders you actually reach for during live tuning.
 _PARAMS = [
-    ("wave_velocity_threshold_px", "Wave velocity (px)",          1,    60,   1,    "Gesture"),
-    ("wave_sustain_frames",        "Sustain frames",              1,    10,   1,    "Gesture"),
-    ("arm_above_head_tolerance",   "Arm height tolerance",        0.30, 1.0,  0.01, "Gesture"),
-    ("cooldown_s",                 "Cooldown (s)",                0,    10,   0.25, "Gesture"),
-    ("fist_curl_threshold",        "Fist curl threshold",         0.25, 1.0,  0.05, "Gesture"),
-    ("pose_visibility_min",        "Min visibility (furniture)",  0.05, 0.8,  0.01, "Body"),
-    ("frame_crop_bottom",          "Crop bottom (%)",             0,    60,   1,    "Body"),
-    ("frame_crop_top",             "Crop top (%)",                0,    30,   1,    "Body"),
-    ("dewarp_tilt",                "Tilt (° down)",              -10,   80,   1,    "Dewarp"),
-    ("dewarp_pan",                 "Pan (° right)",              -30,   30,   1,    "Dewarp"),
-    ("dewarp_roll",                "Roll (° CW)",                -45,   45,   1,    "Dewarp"),
-    ("dewarp_vfov",                "Vertical FOV (°)",            20,   100,  1,    "Dewarp"),
+    ("wave_velocity_threshold_px", "Wave velocity (px)",         1,    60,   1,    "Gesture"),
+    ("arm_above_head_tolerance",   "Arm height tolerance",       0.30, 1.0,  0.01, "Gesture"),
+    ("cooldown_s",                 "Cooldown (s)",               0,    10,   0.25, "Gesture"),
+    ("pose_visibility_min",        "Min visibility (furniture)", 0.05, 0.8,  0.01, "Body"),
+    ("frame_crop_bottom",          "Crop bottom (%)",            0,    60,   1,    "Body"),
+    ("dewarp_tilt",                "Tilt (° down)",             -10,   80,   1,    "Dewarp"),
+    ("dewarp_pan",                 "Pan (° right)",             -30,   30,   1,    "Dewarp"),
+    ("dewarp_vfov",                "Vertical FOV (°)",           20,   100,  1,    "Dewarp"),
+]
+
+# Boolean toggles shown as switches above the sliders
+# (key, label, description)
+_TOGGLES = [
+    ("low_light_enhance", "CLAHE enhance", "Boost local contrast before pose inference — helps dark clothing on dark backgrounds"),
 ]
 
 
@@ -132,6 +135,10 @@ def _current_values() -> dict:
               if getattr(_settings, key, None) is not None}
     if hasattr(_settings, 'log_level'):
         result['log_level'] = _settings.log_level
+    for key, *_ in _TOGGLES:
+        v = getattr(_settings, key, None)
+        if v is not None:
+            result[key] = v
     return result
 
 
@@ -228,12 +235,12 @@ h3{font-size:11px;letter-spacing:3px;color:#555;font-weight:500;text-transform:u
   padding:12px;display:flex;flex-direction:column;gap:12px;
   max-height:92vh;overflow-y:auto
 }
-/* ── log toggle ── */
-#logrow{
+/* ── toggles ── */
+.togrow{
   display:flex;align-items:center;justify-content:space-between;
   padding:7px 10px;background:#161616;border-radius:6px;border:1px solid #222
 }
-#logrow .rowlabel{font-size:13px;color:#999;font-weight:500}
+.togrow .rowlabel{font-size:13px;color:#999;font-weight:500}
 .tog-wrap{display:flex;align-items:center;gap:8px}
 #loglabel{font-size:11px;font-weight:600;color:#555;min-width:38px;text-align:right}
 .toggle{position:relative;display:inline-block;width:42px;height:22px}
@@ -301,7 +308,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     <div id="legend">cyan&nbsp;=&nbsp;ready &nbsp;·&nbsp; orange&nbsp;=&nbsp;warming &nbsp;·&nbsp; arrow&nbsp;=&nbsp;peak&nbsp;velocity</div>
   </div>
   <div id="panel">
-    <div id="logrow">
+    <div class="togrow">
       <span class="rowlabel">Debug logging</span>
       <div class="tog-wrap">
         <span id="loglabel">INFO</span>
@@ -311,6 +318,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
         </label>
       </div>
     </div>
+    <div id="booltoggles"></div>
     <div id="sliders"></div>
     <button id="savebtn" onclick="doSave()">&#128190;&nbsp; Save to settings.yaml</button>
     <div id="savemsg"></div>
@@ -318,6 +326,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 </div>
 <script>
 const PARAMS = __PARAMS_JSON__;
+const TOGGLES = __TOGGLES_JSON__;
 
 function fmt(v, step) {
   const n = +v;
@@ -326,6 +335,26 @@ function fmt(v, step) {
 }
 
 function build(vals) {
+  // ── Bool toggles ──
+  const tc = document.getElementById('booltoggles');
+  tc.innerHTML = '';
+  TOGGLES.forEach(([key, label, desc]) => {
+    const on = vals[key] === true || vals[key] === 'true';
+    const id = 'tog_' + key;
+    const row = document.createElement('div');
+    row.className = 'togrow';
+    row.title = desc;
+    row.innerHTML =
+      `<span class="rowlabel">${label}</span>` +
+      `<div class="tog-wrap">` +
+      `<span id="lbl_${key}" style="font-size:11px;font-weight:600;min-width:28px;text-align:right;color:${on?'#e8c040':'#555'}">${on?'ON':'OFF'}</span>` +
+      `<label class="toggle">` +
+      `<input type="checkbox" id="${id}" ${on?'checked':''} onchange="setBool('${key}',this.checked)">` +
+      `<span class="tog-track"></span></label></div>`;
+    tc.appendChild(row);
+  });
+
+  // ── Sliders ──
   const c = document.getElementById('sliders');
   c.innerHTML = '';
   let grp = null;
@@ -347,7 +376,8 @@ function build(vals) {
       ` onchange="onCom('${key}',this.value)">`;
     c.appendChild(row);
   });
-  // Sync log toggle
+
+  // ── Log toggle ──
   const ll = vals.log_level || 'info';
   const isDbg = ll === 'debug';
   document.getElementById('logtoggle').checked = isDbg;
@@ -365,6 +395,13 @@ function onCom(key, value) {
   _t[key] = setTimeout(() =>
     fetch('/set?key='+encodeURIComponent(key)+'&value='+encodeURIComponent(value))
       .catch(e => console.warn('set', e)), 60);
+}
+
+function setBool(key, on) {
+  const lbl = document.getElementById('lbl_' + key);
+  if (lbl) { lbl.textContent = on ? 'ON' : 'OFF'; lbl.style.color = on ? '#e8c040' : '#555'; }
+  fetch('/set?key='+encodeURIComponent(key)+'&value='+(on?'true':'false'))
+    .catch(e => console.warn(e));
 }
 
 function setLog(isDebug) {
@@ -406,7 +443,9 @@ class _Handler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         if parsed.path == "/":
-            html = _HTML_TEMPLATE.replace("__PARAMS_JSON__", json.dumps(_PARAMS))
+            html = (_HTML_TEMPLATE
+                    .replace("__PARAMS_JSON__", json.dumps(_PARAMS))
+                    .replace("__TOGGLES_JSON__", json.dumps(_TOGGLES)))
             body = html.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
