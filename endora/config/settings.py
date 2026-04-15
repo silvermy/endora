@@ -65,6 +65,11 @@ class Settings:
     vertical_velocity_threshold_px: float = 20.0
     vertical_sustain_frames: int = 1
     fist_curl_threshold: float = 0.75
+    # Minimum peak single-frame swing in 2D hand_roll to register a snap.
+    # hand_roll = (index_mcp.x − pinky_mcp.x) / hand_width; ranges ±1.
+    # A full palm flip ≈ 0.8–1.2 swing.  0.40 catches deliberate snaps
+    # while ignoring small lateral sways.
+    palm_twist_threshold: float = 0.40
 
     # ── Fusion ────────────────────────────────────────────────────────────
     # Advanced: override in settings.yaml if needed
