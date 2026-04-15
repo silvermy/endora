@@ -143,6 +143,24 @@ class Settings:
             except Exception as e:
                 log.warning("Could not parse %s: %s", HA_OPTIONS_PATH, e)
 
+        # Runtime overrides — written by the debug page Save button.
+        # Loaded last so they take priority over both settings.yaml and
+        # options.json (which the HA Supervisor regenerates on every restart,
+        # making direct patches to options.json non-persistent).
+        runtime_path = Path("/data/runtime_overrides.yaml")
+        if runtime_path.exists():
+            try:
+                import yaml
+                with open(runtime_path) as f:
+                    overrides = yaml.safe_load(f) or {}
+                data.update(overrides)
+                log.info(
+                    "Loaded runtime overrides from %s (%d keys)",
+                    runtime_path, len(overrides),
+                )
+            except Exception as e:
+                log.warning("Could not parse %s: %s", runtime_path, e)
+
         try:
             hints = typing.get_type_hints(cls)
         except Exception:
