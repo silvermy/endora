@@ -96,17 +96,17 @@ class VelocityTracker:
 
 class PalmTwistTracker:
     """
-    Detects a rapid palm snap by tracking the 2D hand_roll over a short
-    rolling window.
+    Detects a palm snap by tracking 2D hand_roll over a rolling window.
 
     hand_roll = (index_mcp.x - pinky_mcp.x) / distance(index_mcp, pinky_mcp)
     Ranges roughly −1 to +1 based on how the knuckle line is oriented in the
     2D image.  Works at any camera angle — no z-depth estimation required.
 
-    A snap flips hand_roll rapidly; the peak single-frame swing exceeding
-    palm_twist_threshold fires the SNAP gesture.
+    Swing = max(window) − min(window): captures both sharp snaps (large
+    single-frame jump) and smooth twists spread over several frames.
+    A full palm flip produces a swing of ~1.2–1.6; natural arm sway ~0.1–0.2.
     """
-    HISTORY = 5
+    HISTORY = 8   # ~800 ms at 10 fps — wide enough for a deliberate twist
 
     def __init__(self):
         self._samples: Deque[float] = collections.deque(maxlen=self.HISTORY)
@@ -115,17 +115,17 @@ class PalmTwistTracker:
         self._samples.append(hand_roll)
 
     def peak_swing(self) -> tuple[float, str]:
-        """Returns (magnitude, direction) of largest single-frame z_diff change."""
+        """
+        Returns (range, direction) over the history window.
+        range = max(samples) − min(samples).
+        direction: 'up' if the window ended higher than it started, else 'down'.
+        """
         if len(self._samples) < 2:
             return 0.0, "none"
         s = list(self._samples)
-        max_delta = 0.0
-        for i in range(1, len(s)):
-            d = s[i] - s[i - 1]
-            if abs(d) > abs(max_delta):
-                max_delta = d
-        direction = "up" if max_delta < 0 else "down"
-        return abs(max_delta), direction
+        swing = max(s) - min(s)
+        direction = "up" if s[-1] > s[0] else "down"
+        return swing, direction
 
     def reset(self):
         self._samples.clear()
@@ -178,7 +178,10 @@ class CameraAnalyser(threading.Thread):
             max_num_hands=int(self.s.hand_model_max_hands),
             min_detection_confidence=float(self.s.hand_min_detection_confidence),
             min_tracking_confidence=float(self.s.hand_min_tracking_confidence),
-            static_image_mode=False,
+            # static_image_mode=True: run full detection on every crop frame.
+            # We feed a freshly-cropped patch each frame (centred on the Pose
+            # wrist) so tracking mode breaks; static mode is more reliable here.
+            static_image_mode=True,
         )
 
         palm_twists = PalmTwistTracker()
