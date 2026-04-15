@@ -1,7 +1,8 @@
-# Endora v1.6.27
+# Endora v1.6.29
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
-# Changes here are overridden by the HA UI — edit in the UI instead.
+# After saving from the debug page, values are written here AND to
+# /data/options.json so they survive add-on restarts.
 
 rtsp_url_a: "rtsp://admin:rarcy1-hyfder-bubvuK@10.0.0.178:554/h264Preview_01_sub"
 rtsp_url_b: "rtsp://admin:rarcy1-hyfder-bubvuK@10.0.0.178:554/h264Preview_01_sub"
@@ -9,12 +10,12 @@ debug_port: 8765
 log_level: debug
 ha_event_name: gesture_detected
 
-# How far above the shoulder the wrist must be to count as "arm raised".
-# Shoulder-relative (camera-angle-independent):
-# 0.10 = wrist must be 10% of frame height above shoulder (default)
-# 0.05 = wrist must be 5% above shoulder (more permissive — easier to trigger)
-# 0.15 = wrist must be 15% above shoulder (stricter — arm must be clearly raised)
-arm_above_head_tolerance: 0.10
+# How far above the elbow the wrist must be (normalised frame height).
+# The margin is applied to the wrist-elbow gap, not elbow-shoulder,
+# because overhead cameras compress the elbow-shoulder distance.
+# 0.05 = wrist must be 5% of frame height above elbow (permissive, good start)
+# 0.10 = 10% above elbow (stricter)
+arm_above_head_tolerance: 0.05
 
 # Minimum peak wrist velocity (pixels) required to register a wave.
 # Watch the pvx value on the debug page while waving to calibrate.
@@ -66,9 +67,11 @@ pose_model_complexity: 1          # 0=fastest 1=balanced 2=most accurate (max)
 # pose_min_tracking_confidence: 0.3
 # hand_min_detection_confidence: 0.3
 # hand_min_tracking_confidence: 0.1
-# Minimum z_diff swing to register a palm twist (wrist snap) gesture.
-# 0.12 = requires a fairly deliberate snap. Lower = more sensitive.
-palm_twist_threshold: 0.12
+# Minimum single-frame swing in 2D hand_roll to register a snap.
+# hand_roll = (index_mcp.x − pinky_mcp.x) / hand_width, ranges ±1.
+# A full palm flip produces a swing of ~0.8–1.2.
+# 0.40 catches deliberate snaps. Lower = more sensitive.
+palm_twist_threshold: 0.40
 # palm_orientation_threshold: 0.05
 # vertical_velocity_threshold_px: 20.0
 # fusion_agreement_window_s: 1.0

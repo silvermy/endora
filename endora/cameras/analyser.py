@@ -96,26 +96,23 @@ class VelocityTracker:
 
 class PalmTwistTracker:
     """
-    Detects a rapid palm rotation (wrist snap) by tracking the z_diff of the
-    palm over a short rolling window.
+    Detects a rapid palm snap by tracking the 2D hand_roll over a short
+    rolling window.
 
-    z_diff = avg_knuckle_z - wrist_z (from MediaPipe Hands):
-      negative → palm faces up (toward ceiling)
-      near 0   → palm faces camera
-      positive → palm faces down (toward floor)
+    hand_roll = (index_mcp.x - pinky_mcp.x) / distance(index_mcp, pinky_mcp)
+    Ranges roughly −1 to +1 based on how the knuckle line is oriented in the
+    2D image.  Works at any camera angle — no z-depth estimation required.
 
-    A 'twist' fires when the peak single-frame swing in z_diff exceeds the
-    threshold.  Direction:
-      TWIST_UP   — z_diff dropped sharply (palm snapped toward ceiling)
-      TWIST_DOWN — z_diff rose sharply (palm snapped toward floor)
+    A snap flips hand_roll rapidly; the peak single-frame swing exceeding
+    palm_twist_threshold fires the SNAP gesture.
     """
     HISTORY = 5
 
     def __init__(self):
         self._samples: Deque[float] = collections.deque(maxlen=self.HISTORY)
 
-    def update(self, z_diff: float):
-        self._samples.append(z_diff)
+    def update(self, hand_roll: float):
+        self._samples.append(hand_roll)
 
     def peak_swing(self) -> tuple[float, str]:
         """Returns (magnitude, direction) of largest single-frame z_diff change."""
@@ -188,23 +185,25 @@ class CameraAnalyser(threading.Thread):
         sustain_counts: dict[Gesture, int] = {g: 0 for g in Gesture}
         last_arm_raised = False
         consecutive_no_pose = 0
-        NO_POSE_TOLERANCE = 4
+        NO_POSE_TOLERANCE = 2   # frames of arm-down before resetting state
         arm_raised_since: float = 0.0
         # Reset tracking if arm held still for this many seconds
         ARM_HELD_TIMEOUT_S = 5.0
         # Arm must be raised for this many consecutive frames before
-        # gestures can fire — filters phantom 1-2 frame detections
+        # gestures can fire.  1 = respond on the very first detected frame,
+        # giving a fluid raise → gesture → lower flow.  Increase to 2 only
+        # if phantom detections are a problem.
         consecutive_arm_raised = 0
-        ARM_RAISE_MIN_FRAMES = 3
+        ARM_RAISE_MIN_FRAMES = 1
         # Furniture-lock breaker: if pose keeps landing on furniture
         # (shoulders too low) for this many frames, recreate the model
         _furniture_rejection_streak = 0
         FURNITURE_RESET_FRAMES = 12
         # Multi-person / idle-lock breaker: if no arm has been raised for
         # this many seconds, recreate the pose model so MediaPipe rescans
-        # the whole scene.  Whoever next raises their arm gets tracked —
-        # "first-to-raise-arm wins" instead of startup-lock.
-        IDLE_RESET_S = 6.0
+        # the whole scene.  Set high (60 s) so brief pauses between gestures
+        # don't cause a model re-init stall mid-session.
+        IDLE_RESET_S = 60.0
         _last_arm_up_time: float = 0.0
         _idle_reset_done: bool = False
 
@@ -467,13 +466,13 @@ class CameraAnalyser(threading.Thread):
                 log.debug("[%s] arm held still — resetting gesture state", self.label)
 
             # ── 2. Hand shape and orientation ────────────────────────────
-            is_fist, palm_facing, z_diff, hand_conf = _classify_hand_full(
+            is_fist, palm_facing, hand_roll, hand_conf = _classify_hand_full(
                 hand_res, self.s
             )
 
-            # Update palm twist tracker with current z_diff
+            # Update palm twist tracker with 2D hand roll when hand detected
             if palm_facing != "unknown":
-                palm_twists.update(z_diff)
+                palm_twists.update(hand_roll)
             twist_swing, twist_dir = palm_twists.peak_swing()
 
             # ── 3. Pick candidate ─────────────────────────────────────────
@@ -484,9 +483,9 @@ class CameraAnalyser(threading.Thread):
             if log.isEnabledFor(logging.DEBUG):
                 log.debug(
                     "[%s] arm up | wrist=(%.0f,%.0f) fist=%s palm=%s "
-                    "zdiff=%.3f twist=%.3f/%s candidate=%s sustain=%s",
+                    "roll=%.3f twist=%.3f/%s candidate=%s sustain=%s",
                     self.label, wx, wy,
-                    is_fist, palm_facing, z_diff,
+                    is_fist, palm_facing, hand_roll,
                     twist_swing, twist_dir,
                     str(candidate) if candidate else "none",
                     {g.name: sustain_counts[g] for g in Gesture
@@ -536,17 +535,17 @@ def _arm_above_head(
     """
     Returns (raised, (wrist_x, wrist_y), side).
 
-    Uses shoulder-relative wrist position — works at any camera angle.
+    "Extended above head": elbow above shoulder AND wrist above elbow
+    by at least arm_above_head_tolerance (fraction of frame height).
 
-    arm_above_head_tolerance is the margin ABOVE the shoulder in normalised
-    frame-Y coords (0 = top of frame, 1 = bottom):
-      0.10 = wrist must be 10% of frame height above shoulder  (default)
-      0.05 = wrist must be 5% above shoulder (more permissive)
-      0.15 = wrist must be 15% above shoulder (stricter)
+    Applying the margin to the wrist-elbow gap (not elbow-shoulder) means
+    the check is robust at any camera height: on a frontal eye-level mount
+    both gaps are large; on an overhead camera the elbow-shoulder gap
+    compresses but the wrist-elbow gap stays usable.
 
-    With an eye-level camera shoulder_y ≈ 0.35–0.45; a resting wrist is
-    below the shoulder (higher y), so only a genuinely raised arm satisfies
-    wrist_y < shoulder_y - margin.
+    arm_above_head_tolerance:
+      0.05 = wrist must be 5 % of frame height above elbow (permissive)
+      0.10 = 10 % (stricter — arm must be more clearly extended)
     """
     if not pose_res or not pose_res.pose_landmarks:
         return False, (0.0, 0.0), ""
@@ -595,18 +594,24 @@ def _classify_hand_full(
     hand_res, settings
 ) -> tuple[bool, str, float, float]:
     """
-    Returns (is_fist, palm_facing, confidence).
+    Returns (is_fist, palm_facing, hand_roll, confidence).
 
     palm_facing values:
-      'camera'  — palm faces the camera (neutral / waving position)
-      'up'      — palm faces ceiling (wrist bent backward)
-      'down'    — palm faces floor (wrist bent forward)
-      'unknown' — hand not detected or ambiguous
+      'camera'  — palm faces the camera (neutral position)
+      'up'      — palm faces ceiling
+      'down'    — palm faces floor
+      'unknown' — hand not detected
 
-    Palm orientation is determined by the z-depth of the middle finger MCP
-    relative to the wrist. MediaPipe Hands provides z coordinates that encode
-    depth within the hand — when the palm faces up the finger MCPs have
-    negative z relative to wrist; when facing down they have positive z.
+    hand_roll: 2D orientation of the knuckle line.
+      = (index_mcp.x − pinky_mcp.x) / distance(index_mcp, pinky_mcp)
+      Ranges −1 to +1; sign flips when palm snaps front-to-back.
+      Used by PalmTwistTracker to detect rapid rotations without needing
+      reliable z-depth (which degrades at non-frontal camera angles).
+
+    Palm up/down is still estimated from z-depth (MediaPipe Hands z
+    encodes depth within the hand, not absolute scene depth, so it is
+    useful for distinguishing palm-up vs palm-down even if snap z-values
+    are noisy).
     """
     if not hand_res or not hand_res.multi_hand_landmarks:
         return False, "unknown", 0.0, 0.0
@@ -627,16 +632,23 @@ def _classify_hand_full(
     is_fist = frac >= settings.fist_curl_threshold
     conf    = frac if is_fist else (1.0 - frac)
 
-    # ── Palm orientation ──────────────────────────────────────────────────
-    # Use the z coordinate of the middle finger MCP (landmark 9) vs wrist (0)
-    # z is normalised: negative = closer to camera, positive = further
-    # Palm up  (facing ceiling): knuckles point up, z_mcp << z_wrist
-    # Palm down (facing floor):  knuckles point down, z_mcp >> z_wrist
-    wrist_z  = lm[0].z
-    middle_z = lm[9].z   # middle finger MCP
-    index_z  = lm[5].z   # index finger MCP
-    ring_z   = lm[13].z  # ring finger MCP
-    avg_mcp_z = (middle_z + index_z + ring_z) / 3.0
+    # ── 2D hand roll (snap detection) ────────────────────────────────────
+    # The lateral angle of the index-to-pinky MCP line in image space.
+    # Works at any camera angle — no z-depth required.
+    # A wrist snap flips this sign rapidly → large peak_swing in tracker.
+    ix, iy = lm[5].x, lm[5].y   # index finger MCP
+    px, py = lm[17].x, lm[17].y  # pinky finger MCP
+    dx = ix - px
+    dy = iy - py
+    dist = (dx * dx + dy * dy) ** 0.5
+    hand_roll = dx / dist if dist > 0.01 else 0.0
+
+    # ── Palm orientation (up/down) via z-depth ────────────────────────────
+    # z is normalised within-hand depth: negative = closer to camera.
+    # Palm up (facing ceiling): knuckle MCPs are closer to camera → z_mcp < z_wrist
+    # Palm down (facing floor): knuckle MCPs are further away     → z_mcp > z_wrist
+    wrist_z   = lm[0].z
+    avg_mcp_z = (lm[9].z + lm[5].z + lm[13].z) / 3.0
     z_diff = avg_mcp_z - wrist_z
 
     palm_thresh = settings.palm_orientation_threshold
@@ -647,7 +659,7 @@ def _classify_hand_full(
     else:
         palm_facing = "camera"
 
-    return is_fist, palm_facing, z_diff, conf
+    return is_fist, palm_facing, hand_roll, conf
 
 
 def _pick_candidate(

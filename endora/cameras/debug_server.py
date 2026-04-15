@@ -31,7 +31,7 @@ _settings = None
 # Trimmed to the sliders you actually reach for during live tuning.
 _PARAMS = [
     ("arm_above_head_tolerance", "Arm raise margin",            0.0,  0.30, 0.01, "Gesture"),
-    ("palm_twist_threshold",     "Snap sensitivity",            0.04, 0.40, 0.01, "Gesture"),
+    ("palm_twist_threshold",     "Snap sensitivity",            0.10, 1.20, 0.05, "Gesture"),
     ("cooldown_s",               "Cooldown (s)",                0,    10,   0.25, "Gesture"),
     ("pose_visibility_min",      "Min visibility (furniture)",  0.05, 0.8,  0.01, "Body"),
     ("frame_crop_bottom",        "Crop bottom (%)",             0,    60,   1,    "Body"),
@@ -183,8 +183,20 @@ def _apply_log_level(level_str: str) -> None:
 
 
 def _save_to_yaml() -> tuple[bool, str]:
-    yaml_path = Path("/data/settings.yaml")
+    """
+    Persist current live settings so they survive an add-on restart.
+
+    Writes to two places:
+      /data/settings.yaml  — used by the Docker / standalone path
+      /data/options.json   — used by the HA add-on (loaded AFTER settings.yaml,
+                             so it must also be patched or it will override the
+                             saved values on the next restart)
+    """
     vals = _current_values()
+    errors: list[str] = []
+
+    # ── 1. settings.yaml (regex patch so comments are preserved) ─────────
+    yaml_path = Path("/data/settings.yaml")
     try:
         text = yaml_path.read_text() if yaml_path.exists() else ""
         for key, value in vals.items():
@@ -202,9 +214,26 @@ def _save_to_yaml() -> tuple[bool, str]:
             else:
                 text += f"\n{key}: {formatted}"
         yaml_path.write_text(text)
-        return True, ""
     except Exception as e:
-        return False, str(e)
+        errors.append(f"settings.yaml: {e}")
+
+    # ── 2. options.json (HA add-on config — overrides settings.yaml) ─────
+    # Without this, HA's stored options win on every restart and the saved
+    # values are silently ignored.
+    options_path = Path("/data/options.json")
+    if options_path.exists():
+        try:
+            with open(options_path) as f:
+                options = json.load(f)
+            options.update(vals)
+            with open(options_path, "w") as f:
+                json.dump(options, f, indent=2)
+        except Exception as e:
+            errors.append(f"options.json: {e}")
+
+    if errors:
+        return False, "; ".join(errors)
+    return True, ""
 
 
 # ── HTML page ─────────────────────────────────────────────────────────────────
