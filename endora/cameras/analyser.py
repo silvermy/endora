@@ -154,6 +154,13 @@ class CameraAnalyser(threading.Thread):
         # (shoulders too low) for this many frames, recreate the model
         _furniture_rejection_streak = 0
         FURNITURE_RESET_FRAMES = 12
+        # Multi-person / idle-lock breaker: if no arm has been raised for
+        # this many seconds, recreate the pose model so MediaPipe rescans
+        # the whole scene.  Whoever next raises their arm gets tracked —
+        # "first-to-raise-arm wins" instead of startup-lock.
+        IDLE_RESET_S = 6.0
+        _last_arm_up_time: float = 0.0
+        _idle_reset_done: bool = False
 
         log.info("[%s] Analyser running (hybrid pose+hands mode)", self.label)
 
@@ -316,6 +323,28 @@ class CameraAnalyser(threading.Thread):
                         log.debug("[%s] NO POSE DETECTED — body not found in frame", self.label)
                     else:
                         log.debug("[%s] arm not raised (pose OK, arm down)", self.label)
+
+                # ── Idle-lock breaker (multi-person support) ──────────────
+                # After IDLE_RESET_S seconds with no arm raised, recreate the
+                # pose model so MediaPipe rescans the whole scene.  This lets
+                # a different person "claim" detection by raising their arm.
+                now_idle = time.monotonic()
+                if _last_arm_up_time == 0.0:
+                    _last_arm_up_time = now_idle   # initialise on first frame
+                if now_idle - _last_arm_up_time > IDLE_RESET_S and not _idle_reset_done:
+                    log.info(
+                        "[%s] Idle %.0fs — recreating pose model for fresh person detection",
+                        self.label, now_idle - _last_arm_up_time,
+                    )
+                    pose.close()
+                    pose = mp_pose.Pose(
+                        model_complexity=_complexity,
+                        min_detection_confidence=float(self.s.pose_min_detection_confidence),
+                        min_tracking_confidence=float(self.s.pose_min_tracking_confidence),
+                        enable_segmentation=False,
+                        static_image_mode=False,
+                    )
+                    _idle_reset_done = True
                 # Debug: still render frame even when arm not raised
                 if self.debug_frame_cb is not None:
                     try:
@@ -333,6 +362,9 @@ class CameraAnalyser(threading.Thread):
             consecutive_no_pose = 0
             consecutive_arm_raised += 1
             wx, wy = wrist_xy
+            # Arm is up — reset idle timer so we don't recreate mid-gesture
+            _last_arm_up_time = time.monotonic()
+            _idle_reset_done = False
 
             # Don't process gestures until arm has been raised for
             # enough consecutive frames to rule out phantom detections
