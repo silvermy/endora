@@ -149,7 +149,7 @@ class CameraAnalyser(threading.Thread):
         # Arm must be raised for this many consecutive frames before
         # gestures can fire — filters phantom 1-2 frame detections
         consecutive_arm_raised = 0
-        ARM_RAISE_MIN_FRAMES = 5
+        ARM_RAISE_MIN_FRAMES = 3
         # Furniture-lock breaker: if pose keeps landing on furniture
         # (shoulders too low) for this many frames, recreate the model
         _furniture_rejection_streak = 0
@@ -631,7 +631,7 @@ def _pick_candidate(
         abs_pvy = abs(pvy)
         abs_vx  = abs(vx)
 
-        if abs_pvx > wh and abs_pvx > abs_pvy and abs_vx > wh * 0.2:
+        if abs_pvx > wh and abs_vx > wh * 0.2:
             # If camera is mirrored, flip left/right interpretation
             effective_pvx = -pvx if settings.mirror_camera else pvx
             return Gesture.WAVE_LEFT if effective_pvx < 0 else Gesture.WAVE_RIGHT
