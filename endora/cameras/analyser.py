@@ -315,7 +315,24 @@ class CameraAnalyser(threading.Thread):
                     (_rel_y < _rsh_y and _rw_y < (_rel_y - _marg)) or
                     (_lel_y < _lsh_y and _lw_y < (_lel_y - _marg))
                 )
-            hand_res = hands.process(rgb) if _run_hands else None
+            if _run_hands:
+                # MediaPipe Hands fails on wide frames (1280+) because the
+                # hand is a tiny fraction of the image and palm detection
+                # misses it.  Resize to ≤640 px wide so the hand occupies
+                # a useful portion.  Landmarks come back as normalised [0,1]
+                # coordinates so nothing downstream needs adjustment.
+                _HANDS_MAX_W = 640
+                if pw > _HANDS_MAX_W:
+                    _hs = _HANDS_MAX_W / pw
+                    _hands_rgb = cv2.resize(
+                        rgb, (_HANDS_MAX_W, int(ph * _hs)),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
+                else:
+                    _hands_rgb = rgb
+                hand_res = hands.process(_hands_rgb)
+            else:
+                hand_res = None
 
             rgb.flags.writeable = True
 
