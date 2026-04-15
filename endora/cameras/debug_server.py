@@ -30,14 +30,14 @@ _settings = None
 # (key, label, min, max, step, group)
 # Trimmed to the sliders you actually reach for during live tuning.
 _PARAMS = [
-    ("wave_velocity_threshold_px", "Wave velocity (px)",         1,    60,   1,    "Gesture"),
-    ("arm_above_head_tolerance",   "Arm height tolerance",       0.30, 1.0,  0.01, "Gesture"),
-    ("cooldown_s",                 "Cooldown (s)",               0,    10,   0.25, "Gesture"),
-    ("pose_visibility_min",        "Min visibility (furniture)", 0.05, 0.8,  0.01, "Body"),
-    ("frame_crop_bottom",          "Crop bottom (%)",            0,    60,   1,    "Body"),
-    ("dewarp_tilt",                "Tilt (° down)",             -10,   80,   1,    "Dewarp"),
-    ("dewarp_pan",                 "Pan (° right)",             -30,   30,   1,    "Dewarp"),
-    ("dewarp_vfov",                "Vertical FOV (°)",           20,   100,  1,    "Dewarp"),
+    ("arm_above_head_tolerance", "Arm raise margin",            0.0,  0.30, 0.01, "Gesture"),
+    ("palm_twist_threshold",     "Snap sensitivity",            0.04, 0.40, 0.01, "Gesture"),
+    ("cooldown_s",               "Cooldown (s)",                0,    10,   0.25, "Gesture"),
+    ("pose_visibility_min",      "Min visibility (furniture)",  0.05, 0.8,  0.01, "Body"),
+    ("frame_crop_bottom",        "Crop bottom (%)",             0,    60,   1,    "Body"),
+    ("dewarp_tilt",              "Tilt (° down)",              -10,   80,   1,    "Dewarp"),
+    ("dewarp_pan",               "Pan (° right)",              -30,   30,   1,    "Dewarp"),
+    ("dewarp_vfov",              "Vertical FOV (°)",            20,   100,  1,    "Dewarp"),
 ]
 
 # Boolean toggles shown as switches above the sliders
