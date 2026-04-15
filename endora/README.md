@@ -1,28 +1,27 @@
 # Endora
 
-Watches two RTSP camera streams for hand gestures and fires
-Home Assistant events you can use in any automation.
+Wave your hand to control Home Assistant — lights, TV, volume, anything.
 
-Runs as a Docker container — either as a **Home Assistant Add-on** (HA OS /
-Supervised) or as a **standalone Docker container** alongside HA Container/Core.
+Watches an RTSP camera stream for hand gestures and fires HA events you can use in any automation. Runs as a **Home Assistant Add-on** (HA OS / Supervised) or as a **standalone Docker container**.
+
+**Debug page:** `http://homeassistant.local:8765/` — live camera overlay, gesture state, and tuning sliders. Enable by setting `debug_port: 8765` in Configuration.
 
 ---
 
 ## Gestures
 
-| Event data value | Movement | Hand |
-|---|---|---|
-| `wave_left` | Wrist flicks left | Open palm, arm raised |
-| `wave_right` | Wrist flicks right | Open palm, arm raised |
-| `palm_up` | Palm facing ceiling | Flat palm, arm raised |
-| `palm_down` | Palm facing floor | Flat palm, arm raised |
-| `fist_pump` | Upward punch | Closed fist, arm raised |
+All gestures require the arm to be **fully extended above head** — elbow above shoulder, wrist above elbow.
 
-All gestures require the arm to be raised above head level first.
+| HA event data | Motion | Hand shape |
+|---|---|---|
+| `endora-snap` | Wrist snap — flip palm from facing forward to backward (or vice versa) | Open hand |
+| `endora-fist` | Raise arm, close fist | Closed fist |
+| `endora-up` | Raise arm, hold palm facing ceiling | Open, palm up |
+| `endora-down` | Raise arm, hold palm facing floor | Open, palm down |
 
 ---
 
-## Installation — HA Add-on (HA OS or Supervised)
+## Installation — HA Add-on
 
 ### 1. Add the repository
 
@@ -30,10 +29,9 @@ All gestures require the arm to be raised above head level first.
 
 Add: `https://github.com/silvermy/endora`
 
-Or install as a local add-on:
+Or as a local add-on:
 
 ```bash
-# SSH into your HA host
 cd /addons
 git clone https://github.com/silvermy/endora endora
 ```
@@ -46,26 +44,26 @@ In the add-on **Configuration** tab:
 
 ```yaml
 rtsp_url_a: "rtsp://admin:password@192.168.1.100:554/stream1"
-rtsp_url_b: "rtsp://admin:password@192.168.1.101:554/stream1"
 ha_event_name: gesture_detected
+debug_port: 8765
 log_level: info
 ```
 
+Set `rtsp_url_b` to the same value as `rtsp_url_a` for single-camera mode.
+
 ### 3. Start
 
-Click **Start** → check the **Log** tab for both streams connecting.
+Click **Start** → check the **Log** tab for the stream connecting.
+
+Open the debug page at `http://homeassistant.local:8765/` to verify the camera view and tune settings.
 
 ---
 
-## Installation — Standalone Docker (HA Container or Core)
-
-Use this path if you have no Add-on Store.
+## Installation — Standalone Docker
 
 ### 1. Get a Long-Lived Access Token
 
-**HA → Profile (your name, bottom-left) → Long-Lived Access Tokens → Create Token**
-
-Copy the token — you only see it once.
+**HA → Profile → Long-Lived Access Tokens → Create Token**
 
 ### 2. Configure
 
@@ -79,66 +77,17 @@ Edit `.env`:
 
 ```env
 RTSP_URL_A=rtsp://admin:password@192.168.1.100:554/stream1
-RTSP_URL_B=rtsp://admin:password@192.168.1.101:554/stream1
+RTSP_URL_B=rtsp://admin:password@192.168.1.100:554/stream1
 HA_TOKEN=your_long_lived_token_here
-HA_URL=http://localhost:8123/api
+HA_URL=http://homeassistant.local:8123/api
 ```
 
-### 3. Build and run
+### 3. Run
 
 ```bash
 docker compose up -d --build
 docker compose logs -f endora
 ```
-
----
-
-## Debug web page
-
-Endora includes a live MJPEG debug stream that lets you see exactly what the
-gesture engine sees — skeleton overlay, wrist tracking, velocity readout, and
-gesture state — all in your browser, in real time.
-
-### Enable it
-
-Set `debug_port` in your configuration:
-
-```yaml
-debug_port: 8765
-```
-
-For the HA add-on, also expose the port in `config.json` (already present) and
-open it in your firewall if needed.
-
-### Open it
-
-Navigate to:
-
-```
-http://<your-ha-ip>:8765/
-```
-
-### What you'll see
-
-The page shows a side-by-side MJPEG stream from both cameras (Cam A left,
-Cam B right). Each camera panel overlays:
-
-| Overlay element | Meaning |
-|---|---|
-| **Green skeleton** | MediaPipe Pose detected your body — landmarks and connections drawn |
-| **`NO POSE DETECTED`** (red banner) | MediaPipe cannot find a body in the frame — check lighting, camera angle, or try a higher `pose_model_complexity` |
-| **Cyan dot on wrist** | Arm is raised and ready — gestures can fire |
-| **Orange dot on wrist** | Arm is raised but warming up (not enough consecutive frames yet) |
-| **Magenta arrow** | Peak wrist velocity vector — shows direction and magnitude of last movement |
-| **Bottom-left panel** | Live readout: arm state, vx/pvx, vy/pvy, fist flag, palm orientation, current candidate gesture |
-| **Green banner (center-bottom)** | Gesture fired — shows the gesture name for 2 seconds |
-
-### Tuning workflow
-
-1. Open the debug page and stand in front of the camera.
-2. If you see **"NO POSE DETECTED"**: MediaPipe can't find you. Try `pose_model_complexity: 2`, lower `pose_min_detection_confidence`, improve lighting, or move closer.
-3. If the skeleton appears but gestures don't fire: watch the bottom-left panel. Raise your arm and check that the wrist dot appears (cyan). Then wave and observe the `pvx` value — if it stays below `wave_velocity_threshold_px`, lower that threshold.
-4. If gestures fire too easily: raise `wave_velocity_threshold_px` or `arm_above_head_tolerance`.
 
 ---
 
@@ -148,33 +97,33 @@ Every gesture fires event type `gesture_detected`:
 
 ```json
 {
-  "gesture": "wave_right",
-  "confidence": 0.91,
-  "source_cameras": ["A", "B"],
-  "timestamp": "2024-04-05T14:32:01.123456+00:00"
+  "gesture":        "endora-snap",
+  "confidence":     0.91,
+  "source_cameras": ["A"],
+  "timestamp":      "2024-04-05T14:32:01.123456+00:00"
 }
 ```
 
 ### Lights on/off
 
 ```yaml
-- alias: "Endora — wave right → lights on"
+- alias: "Endora — snap → lights toggle"
   trigger:
     platform: event
     event_type: gesture_detected
     event_data:
-      gesture: wave_right
+      gesture: endora-snap
   action:
-    service: light.turn_on
+    service: light.toggle
     target:
       area_id: living_room
 
-- alias: "Endora — wave left → lights off"
+- alias: "Endora — fist → lights off"
   trigger:
     platform: event
     event_type: gesture_detected
     event_data:
-      gesture: wave_left
+      gesture: endora-fist
   action:
     service: light.turn_off
     target:
@@ -189,7 +138,7 @@ Every gesture fires event type `gesture_detected`:
     platform: event
     event_type: gesture_detected
     event_data:
-      gesture: palm_up
+      gesture: endora-up
   action:
     service: media_player.volume_up
     target:
@@ -200,41 +149,60 @@ Every gesture fires event type `gesture_detected`:
     platform: event
     event_type: gesture_detected
     event_data:
-      gesture: palm_down
+      gesture: endora-down
   action:
     service: media_player.volume_down
     target:
       entity_id: media_player.living_room_tv
 ```
 
-### Fist pump — toggle TV
+---
 
-```yaml
-- alias: "Endora — fist pump → TV toggle"
-  trigger:
-    platform: event
-    event_type: gesture_detected
-    event_data:
-      gesture: fist_pump
-  action:
-    service: media_player.toggle
-    target:
-      entity_id: media_player.living_room_tv
-```
+## Debug page
+
+Navigate to `http://homeassistant.local:8765/` after enabling `debug_port: 8765`.
+
+The page shows a live camera view with skeleton overlay and a right-side panel with live tuning sliders. Changes take effect immediately — no restart needed. Use **Save to settings.yaml** to persist them.
+
+| Overlay | Meaning |
+|---|---|
+| Green skeleton | Body detected |
+| `NO POSE DETECTED` (red) | Body not found — check lighting, camera angle |
+| Cyan dot on wrist | ARM READY — gestures can fire |
+| Orange dot on wrist | Warming up (not enough consecutive frames yet) |
+| Bottom-left panel | Arm state, twist swing value, palm orientation, current candidate |
+| Green banner | Gesture fired |
+
+### Tuning
+
+1. Open debug page and raise your arm — look for the cyan wrist dot (ARM READY).
+2. If arm isn't triggering: lower **Arm raise margin** slider.
+3. If arm triggers when it shouldn't: raise **Arm raise margin** slider.
+4. For snap gesture: watch `twist=` value while snapping. If it doesn't exceed **Snap sensitivity**, lower that slider.
+5. Use **CLAHE enhance** toggle if detection is poor in low light or dark clothing against dark background.
 
 ---
 
-## Tuning
+## Camera placement
+
+An **eye-level mount at 4–4.5 ft** (e.g., on a mantel shelf or TV console) gives the best results. MediaPipe Pose was trained on frontal views — overhead mounting degrades accuracy significantly.
+
+Point the camera at your typical sitting/standing position. With a fisheye lens the field of view is wide enough to cover a couch + a few feet either side without issue.
+
+---
+
+## Tuning reference
 
 | Problem | Fix |
 |---|---|
-| No skeleton on debug page | Check lighting; try `pose_model_complexity: 2`; lower `pose_min_detection_confidence` to `0.3` |
-| False triggers | Raise `wave_velocity_threshold_px`; raise `arm_above_head_tolerance` |
-| Gesture not detecting | Lower `wave_velocity_threshold_px`; check the debug page pvx readout |
-| High CPU | Set `frame_width: 320`, `frame_height: 240`; use `pose_model_complexity: 0` |
-| Stream dropping | Switch `rtsp_transport` to `udp` on wired LAN |
-| 401 from HA | Check token; for add-on ensure `homeassistant_api: true` in config.json |
-| Left/right reversed | Set `mirror_camera: true` |
+| No skeleton | Check lighting; try `pose_model_complexity: 2`; lower `pose_min_detection_confidence` to `0.3` |
+| ARM READY triggers too easily | Raise **Arm raise margin** (`arm_above_head_tolerance`) |
+| ARM READY never triggers | Lower **Arm raise margin** |
+| Snap not detecting | Lower **Snap sensitivity** (`palm_twist_threshold`); watch `twist=` on debug page |
+| False fist triggers | Raise `fist_curl_threshold` toward `0.9` |
+| High CPU on Pi | Set `pose_model_complexity: 0`; `frame_width: 320` |
+| Stream dropping | Switch `rtsp_transport: udp` on wired LAN |
+| 401 from HA | Check token; for add-on ensure `homeassistant_api: true` |
 
 ---
 
@@ -242,53 +210,21 @@ Every gesture fires event type `gesture_detected`:
 
 | Option | Default | Description |
 |---|---|---|
-| `rtsp_url_a` | — | RTSP URL for camera A (required) |
-| `rtsp_url_b` | — | RTSP URL for camera B (required) |
-| `rtsp_transport` | `tcp` | `tcp` (reliable) or `udp` (lower latency) |
-| `rtsp_reconnect_delay_s` | `5.0` | Seconds before reconnect on stream loss |
-| `frame_width` | `640` | Processing frame width |
-| `frame_height` | `480` | Processing frame height |
-| `pose_model_complexity` | `0` | 0=fastest, 1=balanced, 2=accurate |
-| `pose_min_detection_confidence` | `0.4` | Lower = detects more; raises false positives |
-| `arm_above_head_tolerance` | `0.86` | Absolute Y threshold (0–1); wrist must be above this Y in frame |
-| `wave_velocity_threshold_px` | `15.0` | px/frame needed for a wave |
-| `wave_sustain_frames` | `1` | Consistent frames before firing |
-| `fist_curl_threshold` | `0.65` | Curl fraction = fist (0–1) |
-| `palm_orientation_threshold` | `0.05` | z-depth sensitivity for palm up/down |
-| `mirror_camera` | `true` | Flip left/right if camera faces you |
-| `fusion_agreement_window_s` | `1.0` | Agreement window between cameras |
-| `cooldown_s` | `2.0` | Min seconds between same gesture |
-| `ha_event_name` | `gesture_detected` | HA event type name |
-| `debug_port` | `0` | Set to e.g. `8765` to enable debug web page; `0` = disabled |
-| `log_level` | `info` | `debug` \| `info` \| `warning` \| `error` |
-
----
-
-## Project structure
-
-```
-endora/
-├── Dockerfile
-├── docker-compose.yml     # For standalone (non-add-on) deployment
-├── .env.example           # Copy to .env for standalone mode
-├── build.json             # Multi-arch build config (add-on mode)
-├── config.json            # HA add-on manifest
-├── repository.yaml        # HA add-on repository descriptor
-├── run.sh                 # S6 Stage 2 startup script
-├── requirements.txt
-├── main.py
-├── config/
-│   ├── settings.py        # Settings dataclass + options.json loader
-│   └── settings.yaml      # Dev-only config override
-├── cameras/
-│   ├── capture.py         # RTSP capture thread (auto-reconnect)
-│   ├── analyser.py        # MediaPipe pose + hands → gesture candidates
-│   └── debug_server.py    # MJPEG debug stream (http://<ip>:<debug_port>/)
-├── core/
-│   ├── system.py          # Orchestrator
-│   └── fusion.py          # Two-camera agreement + cooldown
-├── output/
-│   └── backends.py        # HABackend (Supervisor + Long-Lived Token) / PrintBackend
-└── translations/
-    └── en.json            # HA UI option labels
-```
+| `rtsp_url_a` | — | RTSP URL (required) |
+| `rtsp_url_b` | same as A | Second camera; set equal to A for single-camera mode |
+| `debug_port` | `8765` | Debug web page port; `0` = disabled |
+| `ha_event_name` | `gesture_detected` | HA event type |
+| `log_level` | `info` | `debug` / `info` / `warning` / `error` |
+| `arm_above_head_tolerance` | `0.10` | How far above shoulder the elbow must be (frame fraction) |
+| `palm_twist_threshold` | `0.12` | z-depth swing required for snap gesture |
+| `fist_curl_threshold` | `0.75` | Curl fraction to count as fist (0–1) |
+| `cooldown_s` | `2.0` | Min seconds between gestures |
+| `pose_visibility_min` | `0.35` | Shoulder visibility threshold (filters furniture) |
+| `frame_crop_bottom` | `0` | % of frame to crop from bottom |
+| `pose_model_complexity` | `1` | 0=fastest, 1=balanced, 2=accurate |
+| `low_light_enhance` | `false` | CLAHE contrast boost before inference |
+| `mirror_camera` | `true` | Flip left/right for forward-facing camera |
+| `dewarp_enable` | `false` | Enable fisheye dewarping |
+| `dewarp_tilt` | `30.0` | Camera tilt angle (° down) |
+| `dewarp_pan` | `0.0` | Camera pan angle (° right) |
+| `dewarp_vfov` | `75.0` | Vertical FOV of output (°) |

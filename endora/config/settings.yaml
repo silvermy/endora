@@ -1,4 +1,4 @@
-# Endora v1.6.24
+# Endora v1.6.25
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # Changes here are overridden by the HA UI — edit in the UI instead.
@@ -9,9 +9,12 @@ debug_port: 8765
 log_level: debug
 ha_event_name: gesture_detected
 
-# How high the wrist must appear in the frame to count as "arm raised".
-# 0.80 = wrist must be in the top 80% of the frame. Lower = stricter.
-arm_above_head_tolerance: 0.80
+# How far above the shoulder the wrist must be to count as "arm raised".
+# Shoulder-relative (camera-angle-independent):
+# 0.10 = wrist must be 10% of frame height above shoulder (default)
+# 0.05 = wrist must be 5% above shoulder (more permissive — easier to trigger)
+# 0.15 = wrist must be 15% above shoulder (stricter — arm must be clearly raised)
+arm_above_head_tolerance: 0.10
 
 # Minimum peak wrist velocity (pixels) required to register a wave.
 # Watch the pvx value on the debug page while waving to calibrate.
@@ -63,6 +66,9 @@ pose_model_complexity: 1          # 0=fastest 1=balanced 2=most accurate (max)
 # pose_min_tracking_confidence: 0.3
 # hand_min_detection_confidence: 0.3
 # hand_min_tracking_confidence: 0.1
+# Minimum z_diff swing to register a palm twist (wrist snap) gesture.
+# 0.12 = requires a fairly deliberate snap. Lower = more sensitive.
+palm_twist_threshold: 0.12
 # palm_orientation_threshold: 0.05
 # vertical_velocity_threshold_px: 20.0
 # fusion_agreement_window_s: 1.0

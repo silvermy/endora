@@ -106,7 +106,7 @@ class HABackend(BaseBackend):
             return
 
         payload = json.dumps({
-            "gesture":        gesture.name.lower(),
+            "gesture":        gesture.event_name,
             "confidence":     round(confidence, 3),
             "source_cameras": sorted(sources or []),
             "timestamp":      datetime.now(timezone.utc).isoformat(),
@@ -141,11 +141,10 @@ class HABackend(BaseBackend):
 
 class PrintBackend(BaseBackend):
     SYMBOLS = {
-        Gesture.WAVE_LEFT:    "← WAVE LEFT ",
-        Gesture.WAVE_RIGHT:   "→ WAVE RIGHT",
-        Gesture.PALM_UP:      "↑ PALM UP   ",
-        Gesture.PALM_DOWN:    "↓ PALM DOWN ",
-        Gesture.FIST_PUMP:    "✊ FIST PUMP ",
+        Gesture.SNAP: "✋ endora-snap",
+        Gesture.FIST: "✊ endora-fist",
+        Gesture.UP:   "☝  endora-up  ",
+        Gesture.DOWN: "👇 endora-down",
     }
 
     def __init__(self):
