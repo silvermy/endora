@@ -1,4 +1,4 @@
-# Endora v1.6.21
+# Endora v1.6.22
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # Changes here are overridden by the HA UI — edit in the UI instead.
@@ -19,7 +19,7 @@ wave_velocity_threshold_px: 8.0
 
 # How many consecutive frames the gesture must appear before firing.
 # Higher = fewer false positives but slightly more latency.
-wave_sustain_frames: 3
+wave_sustain_frames: 1
 
 # 0.75 = 3 of 4 fingers must be curled to count as a fist.
 fist_curl_threshold: 0.75
