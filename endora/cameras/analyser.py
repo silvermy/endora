@@ -499,7 +499,7 @@ class CameraAnalyser(threading.Thread):
                 else:
                     sustain_counts[g] = max(0, sustain_counts[g] - 1)
 
-            needed = self.s.wave_sustain_frames
+            needed = 1  # fire on first confirmed frame — responsive for all gesture types
 
             if candidate and sustain_counts.get(candidate, 0) >= needed:
                 confidence = min(1.0, sustain_counts[candidate] / (needed * 2))
