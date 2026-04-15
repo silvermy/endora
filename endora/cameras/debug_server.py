@@ -187,15 +187,39 @@ def _save_to_yaml() -> tuple[bool, str]:
     Persist current live settings so they survive an add-on restart.
 
     Writes to two places:
-      /data/settings.yaml  — used by the Docker / standalone path
-      /data/options.json   — used by the HA add-on (loaded AFTER settings.yaml,
-                             so it must also be patched or it will override the
-                             saved values on the next restart)
+      /data/runtime_overrides.yaml  — loaded by settings.py AFTER options.json,
+                                      so these values win on every restart.
+                                      The HA Supervisor never touches this file.
+      /data/settings.yaml           — patched in-place (Docker / standalone path)
     """
     vals = _current_values()
     errors: list[str] = []
 
-    # ── 1. settings.yaml (regex patch so comments are preserved) ─────────
+    # ── 1. runtime_overrides.yaml (survives HA Supervisor regeneration) ──
+    # The Supervisor regenerates options.json from its stored config on every
+    # restart, so patching options.json directly is not persistent.  This
+    # file is loaded last in settings.py and takes the highest priority.
+    overrides_path = Path("/data/runtime_overrides.yaml")
+    try:
+        lines = [
+            "# Endora runtime overrides — written by debug page Save button.\n",
+            "# Loaded after options.json; takes priority over HA UI values.\n",
+            "# Delete this file to revert to the HA Configuration tab values.\n",
+            "\n",
+        ]
+        for key, value in vals.items():
+            if isinstance(value, float):
+                formatted = f"{value:.4g}"
+            elif isinstance(value, bool):
+                formatted = str(value).lower()
+            else:
+                formatted = str(value)
+            lines.append(f"{key}: {formatted}\n")
+        overrides_path.write_text("".join(lines))
+    except Exception as e:
+        errors.append(f"runtime_overrides.yaml: {e}")
+
+    # ── 2. settings.yaml (regex patch so comments are preserved) ─────────
     yaml_path = Path("/data/settings.yaml")
     try:
         text = yaml_path.read_text() if yaml_path.exists() else ""
@@ -216,20 +240,6 @@ def _save_to_yaml() -> tuple[bool, str]:
         yaml_path.write_text(text)
     except Exception as e:
         errors.append(f"settings.yaml: {e}")
-
-    # ── 2. options.json (HA add-on config — overrides settings.yaml) ─────
-    # Without this, HA's stored options win on every restart and the saved
-    # values are silently ignored.
-    options_path = Path("/data/options.json")
-    if options_path.exists():
-        try:
-            with open(options_path) as f:
-                options = json.load(f)
-            options.update(vals)
-            with open(options_path, "w") as f:
-                json.dump(options, f, indent=2)
-        except Exception as e:
-            errors.append(f"options.json: {e}")
 
     if errors:
         return False, "; ".join(errors)

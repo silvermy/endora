@@ -316,21 +316,38 @@ class CameraAnalyser(threading.Thread):
                     (_lel_y < _lsh_y and _lw_y < (_lel_y - _marg))
                 )
             if _run_hands:
-                # MediaPipe Hands fails on wide frames (1280+) because the
-                # hand is a tiny fraction of the image and palm detection
-                # misses it.  Resize to ≤640 px wide so the hand occupies
-                # a useful portion.  Landmarks come back as normalised [0,1]
-                # coordinates so nothing downstream needs adjustment.
-                _HANDS_MAX_W = 640
-                if pw > _HANDS_MAX_W:
-                    _hs = _HANDS_MAX_W / pw
+                # Crop a 300×300 patch centred on the raised wrist before
+                # running Hands.  On a 1280-wide dewarped frame the hand is
+                # only ~50 px across; MediaPipe's palm detector needs the
+                # hand to fill a meaningful fraction of the image.
+                # Cropping around the wrist (already known from Pose) gives
+                # a hand-centric view and makes detection rock-solid.
+                # Landmarks are returned as normalised [0,1] coords within
+                # the crop — that's fine because we only use relative
+                # positions between landmarks, never absolute frame coords.
+                _rw_raised = (_rel_y < _rsh_y and _rw_y < (_rel_y - _marg))
+                if _rw_raised:
+                    _wx_n = _lm_q[_PL_q.RIGHT_WRIST].x
+                    _wy_n = _lm_q[_PL_q.RIGHT_WRIST].y
+                else:
+                    _wx_n = _lm_q[_PL_q.LEFT_WRIST].x
+                    _wy_n = _lm_q[_PL_q.LEFT_WRIST].y
+                _wx_px = int(_wx_n * pw)
+                _wy_px = int(_wy_n * ph)
+                _ch = 150   # half-side of crop in pixels
+                _cx1 = max(0, _wx_px - _ch)
+                _cx2 = min(pw, _wx_px + _ch)
+                _cy1 = max(0, _wy_px - _ch)
+                _cy2 = min(ph, _wy_px + _ch)
+                _hands_crop = rgb[_cy1:_cy2, _cx1:_cx2]
+                if _hands_crop.size > 0:
                     _hands_rgb = cv2.resize(
-                        rgb, (_HANDS_MAX_W, int(ph * _hs)),
+                        _hands_crop, (256, 256),
                         interpolation=cv2.INTER_LINEAR,
                     )
+                    hand_res = hands.process(_hands_rgb)
                 else:
-                    _hands_rgb = rgb
-                hand_res = hands.process(_hands_rgb)
+                    hand_res = None
             else:
                 hand_res = None
 
