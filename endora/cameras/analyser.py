@@ -609,7 +609,7 @@ def _classify_hand_full(
     negative z relative to wrist; when facing down they have positive z.
     """
     if not hand_res or not hand_res.multi_hand_landmarks:
-        return False, "unknown", 0.0
+        return False, "unknown", 0.0, 0.0
 
     lm = hand_res.multi_hand_landmarks[0].landmark
 
