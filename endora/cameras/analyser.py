@@ -183,12 +183,23 @@ class CameraAnalyser(threading.Thread):
 
         palm_twists = PalmTwistTracker()
         sustain_counts: dict[Gesture, int] = {g: 0 for g in Gesture}
+        # Frames each gesture must appear consecutively before firing.
+        # SNAP is dynamic (brief peak) — grab it on the first qualifying frame.
+        # Static poses (FIST/UP/DOWN) need 2 frames to rule out transient
+        # mis-classifications during hand-shape transitions.
+        SUSTAIN_NEEDED: dict[Gesture, int] = {
+            Gesture.SNAP: 1,
+            Gesture.FIST: 2,
+            Gesture.UP:   2,
+            Gesture.DOWN: 2,
+        }
         last_arm_raised = False
+        last_is_fist = False          # track fist→open transitions
         consecutive_no_pose = 0
         NO_POSE_TOLERANCE = 2   # frames of arm-down before resetting state
         arm_raised_since: float = 0.0
         # Reset tracking if arm held still for this many seconds
-        ARM_HELD_TIMEOUT_S = 5.0
+        ARM_HELD_TIMEOUT_S = 10.0
         # Arm must be raised for this many consecutive frames before
         # gestures can fire.  1 = respond on the very first detected frame,
         # giving a fluid raise → gesture → lower flow.  Increase to 2 only
@@ -504,8 +515,14 @@ class CameraAnalyser(threading.Thread):
                 hand_res, self.s
             )
 
-            # Update palm twist tracker with 2D hand roll when hand detected
-            if palm_facing != "unknown":
+            # Update palm twist tracker — only when hand is open.
+            # Fist→open transitions produce a large hand_roll swing that
+            # looks identical to a snap; resetting on fist state change and
+            # skipping updates while fist is active prevents those false fires.
+            if is_fist != last_is_fist:
+                palm_twists.reset()   # clean slate on every fist state change
+            last_is_fist = is_fist
+            if palm_facing != "unknown" and not is_fist:
                 palm_twists.update(hand_roll)
             twist_swing, twist_dir = palm_twists.peak_swing()
 
@@ -533,7 +550,7 @@ class CameraAnalyser(threading.Thread):
                 else:
                     sustain_counts[g] = max(0, sustain_counts[g] - 1)
 
-            needed = 1  # fire on first confirmed frame — responsive for all gesture types
+            needed = SUSTAIN_NEEDED.get(candidate, 1) if candidate else 1
 
             if candidate and sustain_counts.get(candidate, 0) >= needed:
                 confidence = min(1.0, sustain_counts[candidate] / (needed * 2))

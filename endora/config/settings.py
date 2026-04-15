@@ -53,7 +53,7 @@ class Settings:
     # ── Hands (gesture classification) ───────────────────────────────────
     # Advanced: override in settings.yaml if needed
     hand_model_max_hands: int = 1
-    hand_min_detection_confidence: float = 0.3
+    hand_min_detection_confidence: float = 0.1   # low = faster first-frame detect
     hand_min_tracking_confidence: float = 0.1
     palm_orientation_threshold: float = 0.05
 
