@@ -1,4 +1,4 @@
-# Endora v1.6.20
+# Endora v1.6.21
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # Changes here are overridden by the HA UI — edit in the UI instead.
@@ -58,7 +58,7 @@ pose_visibility_min: 0.35
 # 15 is a good starting point; only increase if the table still appears.
 frame_crop_bottom: 15
 
-# pose_model_complexity: 2        # 0=fastest 1=balanced 2=most accurate (max)
+pose_model_complexity: 1          # 0=fastest 1=balanced 2=most accurate (max)
 # pose_min_detection_confidence: 0.3
 # pose_min_tracking_confidence: 0.3
 # hand_min_detection_confidence: 0.3

@@ -246,8 +246,21 @@ class CameraAnalyser(threading.Thread):
 
             rgb = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2RGB)
             rgb.flags.writeable = False
-            pose_res  = pose.process(rgb)
-            hand_res  = hands.process(rgb)
+            pose_res = pose.process(rgb)
+
+            # ── Lazy Hands: only run when wrist looks raised ──────────────
+            # Hands model costs as much as Pose — skip it when the arm is
+            # clearly down to roughly double throughput on slow hardware.
+            _run_hands = False
+            if pose_res and pose_res.pose_landmarks:
+                _lm_q = pose_res.pose_landmarks.landmark
+                _PL_q = mp.solutions.pose.PoseLandmark
+                _tol_q = float(self.s.arm_above_head_tolerance)
+                _rw_y = _lm_q[_PL_q.RIGHT_WRIST].y
+                _lw_y = _lm_q[_PL_q.LEFT_WRIST].y
+                _run_hands = min(_rw_y, _lw_y) < _tol_q
+            hand_res = hands.process(rgb) if _run_hands else None
+
             rgb.flags.writeable = True
 
             # ── Furniture / false-pose filter ─────────────────────────────
@@ -350,7 +363,7 @@ class CameraAnalyser(threading.Thread):
                     try:
                         _debug_frame_counter = getattr(self, '_dfc', 0) + 1
                         self._dfc = _debug_frame_counter
-                        if _debug_frame_counter % 3 == 0:
+                        if True:  # send every processed frame
                             dbg = _draw_debug(proc_frame, pose_res, None,
                                               0, 0, 0, 0, None, False, "unknown",
                                               consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
@@ -377,7 +390,7 @@ class CameraAnalyser(threading.Thread):
                     try:
                         _debug_frame_counter = getattr(self, '_dfc', 0) + 1
                         self._dfc = _debug_frame_counter
-                        if _debug_frame_counter % 3 == 0:
+                        if True:  # send every processed frame
                             dbg = _draw_debug(proc_frame, pose_res, wrist_xy,
                                               0, 0, 0, 0, None, False, "unknown",
                                               consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
@@ -451,7 +464,7 @@ class CameraAnalyser(threading.Thread):
                 try:
                     _debug_frame_counter = getattr(self, '_dfc', 0) + 1
                     self._dfc = _debug_frame_counter
-                    if _debug_frame_counter % 3 == 0:
+                    if True:  # send every processed frame
                         dbg = _draw_debug(
                             proc_frame, pose_res,
                             wrist_xy if arm_raised else None,
