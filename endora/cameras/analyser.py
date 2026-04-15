@@ -305,11 +305,16 @@ class CameraAnalyser(threading.Thread):
                 _marg  = float(self.s.arm_above_head_tolerance)
                 _rsh_y = _lm_q[_PL_q.RIGHT_SHOULDER].y
                 _lsh_y = _lm_q[_PL_q.LEFT_SHOULDER].y
+                _rel_y = _lm_q[_PL_q.RIGHT_ELBOW].y
+                _lel_y = _lm_q[_PL_q.LEFT_ELBOW].y
                 _rw_y  = _lm_q[_PL_q.RIGHT_WRIST].y
                 _lw_y  = _lm_q[_PL_q.LEFT_WRIST].y
+                # Mirror _arm_above_head: elbow above shoulder, wrist clearly above elbow.
+                # This avoids running the expensive Hands model on overhead cameras where
+                # the shoulder-wrist gap alone is a poor predictor.
                 _run_hands = (
-                    _rw_y < (_rsh_y - _marg) or
-                    _lw_y < (_lsh_y - _marg)
+                    (_rel_y < _rsh_y and _rw_y < (_rel_y - _marg)) or
+                    (_lel_y < _lsh_y and _lw_y < (_lel_y - _marg))
                 )
             hand_res = hands.process(rgb) if _run_hands else None
 
@@ -562,18 +567,21 @@ def _arm_above_head(
         el = lm[el_id]
         wr = lm[wr_id]
 
-        # "Extended above head": full arm chain must go progressively higher.
-        # elbow above shoulder (margin = strictness), wrist above elbow.
+        # "Extended above head": elbow above shoulder AND wrist clearly above elbow.
+        # The elbow-shoulder gap is tiny on an overhead camera (the arm foreshortens
+        # badly in top-down projection) so we only require el.y < sh.y there.
+        # The wrist-elbow gap is larger and carries the 'margin' strictness so
+        # a half-raised forearm doesn't qualify.
         # Camera-angle-independent — works at any mounting height.
-        elbow_above_shoulder = el.y < (sh.y - margin)
-        wrist_above_elbow    = wr.y < el.y
+        elbow_above_shoulder = el.y < sh.y
+        wrist_above_elbow    = wr.y < (el.y - margin)
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
                 "  [arm-check] %s sh_y=%.3f el_y=%.3f wr_y=%.3f margin=%.3f "
-                "→ elbow_up=%s wrist_up=%s",
+                "→ elbow_up=%s wrist_ext=%s (el-wr gap=%.3f)",
                 side, sh.y, el.y, wr.y, margin,
-                elbow_above_shoulder, wrist_above_elbow,
+                elbow_above_shoulder, wrist_above_elbow, el.y - wr.y,
             )
 
         if elbow_above_shoulder and wrist_above_elbow:
@@ -585,7 +593,7 @@ def _arm_above_head(
 
 def _classify_hand_full(
     hand_res, settings
-) -> tuple[bool, str, float]:
+) -> tuple[bool, str, float, float]:
     """
     Returns (is_fist, palm_facing, confidence).
 
