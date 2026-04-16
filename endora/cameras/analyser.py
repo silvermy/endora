@@ -37,15 +37,15 @@ log = logging.getLogger(__name__)
 # ── Gesture enum ──────────────────────────────────────────────────────────────
 
 class Gesture(Enum):
-    SNAP = auto()  # arm extended above head, palm snaps (wrist rotation, any direction)
-    FIST = auto()  # arm extended above head, closed fist (static)
-    UP   = auto()  # arm extended above head, palm faces ceiling (static)
-    DOWN = auto()  # arm extended above head, palm faces floor (static)
+    SNAP       = auto()  # arm raised, rapid wrist snap/rotation
+    FIST       = auto()  # arm raised, closed fist (static)
+    WAVE_LEFT  = auto()  # arm raised, sweep wrist to the left
+    WAVE_RIGHT = auto()  # arm raised, sweep wrist to the right
 
     @property
     def event_name(self) -> str:
-        """HA event data value, e.g. 'endora-snap'."""
-        return f"endora-{self.name.lower()}"
+        """HA event data value, e.g. 'endora-wave-left'."""
+        return f"endora-{self.name.lower().replace('_', '-')}"
 
     def __str__(self) -> str:
         return self.event_name
@@ -184,7 +184,9 @@ class CameraAnalyser(threading.Thread):
             static_image_mode=True,
         )
 
-        palm_twists = PalmTwistTracker()
+        palm_twists  = PalmTwistTracker()
+        wrist_tracker = VelocityTracker()   # tracks wrist pixel position for wave
+        last_peak_vx  = 0.0                 # most recent peak horizontal velocity
         # Approach cache: collects hand_roll samples while the wrist is above
         # the shoulder but BEFORE the arm officially passes the raise check.
         # On the first arm-ready frame this data seeds the main tracker so a
@@ -192,14 +194,12 @@ class CameraAnalyser(threading.Thread):
         _approach_cache: collections.deque = collections.deque(maxlen=50)  # ~5 s
         sustain_counts: dict[Gesture, int] = {g: 0 for g in Gesture}
         # Frames each gesture must appear consecutively before firing.
-        # All set to 1: the 3-D distance fist check is reliable enough that
-        # we no longer need an extra frame to rule out transients, and
-        # single-frame sustain gives the fastest possible response.
+        # All set to 1: single-frame sustain for fastest possible response.
         SUSTAIN_NEEDED: dict[Gesture, int] = {
-            Gesture.SNAP: 1,
-            Gesture.FIST: 1,
-            Gesture.UP:   1,
-            Gesture.DOWN: 1,
+            Gesture.SNAP:       1,
+            Gesture.FIST:       1,
+            Gesture.WAVE_LEFT:  1,
+            Gesture.WAVE_RIGHT: 1,
         }
         last_arm_raised = False
         last_is_fist = False          # track fist→open transitions
@@ -451,6 +451,7 @@ class CameraAnalyser(threading.Thread):
                 if consecutive_no_pose >= NO_POSE_TOLERANCE:
                     consecutive_arm_raised = 0
                     palm_twists.reset()
+                    wrist_tracker.reset()
                     _approach_cache.clear()
                 if consecutive_no_pose >= NO_POSE_TOLERANCE:
                     if last_arm_raised:
@@ -492,7 +493,7 @@ class CameraAnalyser(threading.Thread):
                         self._dfc = _debug_frame_counter
                         if True:  # send every processed frame
                             dbg = _draw_debug(proc_frame, pose_res, None,
-                                              0.0, "unknown", False, None,
+                                              0.0, 0.0, False, None,
                                               consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
                             self.debug_frame_cb(self.label, dbg)
                     except Exception as e:
@@ -514,7 +515,7 @@ class CameraAnalyser(threading.Thread):
                 if self.debug_frame_cb is not None:
                     try:
                         dbg = _draw_debug(proc_frame, pose_res, wrist_xy,
-                                          0.0, "unknown", False, None,
+                                          0.0, 0.0, False, None,
                                           consecutive_arm_raised, ARM_RAISE_MIN_FRAMES)
                         self.debug_frame_cb(self.label, dbg)
                     except Exception as e:
@@ -534,9 +535,11 @@ class CameraAnalyser(threading.Thread):
                 # Seed the twist tracker from the approach cache so a fluid
                 # raise→snap is detected immediately.  The cache holds up to
                 # ~5 s of hand_roll samples collected while the wrist was
-                # above the shoulder but before the elbow cleared.
+                # above the shoulder but before the arm officially raised.
                 _n_seed = len(_approach_cache)
                 palm_twists.reset()
+                wrist_tracker.reset()
+                last_peak_vx = 0.0
                 for _sv in list(_approach_cache)[-palm_twists.HISTORY:]:
                     palm_twists._samples.append(_sv)
                 _approach_cache.clear()
@@ -552,7 +555,7 @@ class CameraAnalyser(threading.Thread):
                 arm_raised_since = time.monotonic()
             else:
                 # ── Subsequent arm-raised frames ──────────────────────────
-                # Update tracker normally.  Fist→open transitions produce a
+                # Update trackers normally.  Fist→open transitions produce a
                 # large hand_roll swing that looks like a snap; reset on
                 # every fist state change to prevent those false fires.
                 if is_fist != last_is_fist:
@@ -575,12 +578,17 @@ class CameraAnalyser(threading.Thread):
                 else:
                     last_hand_roll_age += 1
                 twist_swing, twist_dir = palm_twists.peak_swing()
+                # Track wrist pixel position for wave detection
+                wrist_tracker.update(wx, wy)
+                last_peak_vx, _ = wrist_tracker.peak_velocity()
             last_arm_raised = True
 
             # Reset stale gesture state if arm held still for too long
             now = time.monotonic()
             if now - arm_raised_since > ARM_HELD_TIMEOUT_S:
                 palm_twists.reset()
+                wrist_tracker.reset()
+                last_peak_vx = 0.0
                 _approach_cache.clear()
                 sustain_counts = {g: 0 for g in Gesture}
                 arm_raised_since = now
@@ -588,16 +596,16 @@ class CameraAnalyser(threading.Thread):
 
             # ── 3. Pick candidate ─────────────────────────────────────────
             candidate = _pick_candidate(
-                is_fist, palm_facing, twist_swing, self.s
+                is_fist, twist_swing, last_peak_vx, self.s
             )
 
             if log.isEnabledFor(logging.DEBUG):
                 log.debug(
-                    "[%s] arm up | wrist=(%.0f,%.0f) fist=%s palm=%s "
-                    "roll=%.3f twist=%.3f/%s candidate=%s sustain=%s",
+                    "[%s] arm up | wrist=(%.0f,%.0f) fist=%s "
+                    "roll=%.3f twist=%.3f/%s pvx=%.1f candidate=%s sustain=%s",
                     self.label, wx, wy,
-                    is_fist, palm_facing, hand_roll,
-                    twist_swing, twist_dir,
+                    is_fist, hand_roll,
+                    twist_swing, twist_dir, last_peak_vx,
                     str(candidate) if candidate else "none",
                     {g.name: sustain_counts[g] for g in Gesture
                      if sustain_counts[g] > 0},
@@ -618,6 +626,8 @@ class CameraAnalyser(threading.Thread):
                 self.on_candidate(candidate, confidence, self.label)
                 sustain_counts = {g: 0 for g in Gesture}
                 palm_twists.reset()
+                wrist_tracker.reset()
+                last_peak_vx = 0.0
                 consecutive_arm_raised = 0
 
             # ── Debug overlay ─────────────────────────────────────────────
@@ -626,7 +636,7 @@ class CameraAnalyser(threading.Thread):
                     dbg = _draw_debug(
                         proc_frame, pose_res,
                         wrist_xy if arm_raised else None,
-                        twist_swing, palm_facing, is_fist, candidate,
+                        twist_swing, last_peak_vx, is_fist, candidate,
                         consecutive_arm_raised, ARM_RAISE_MIN_FRAMES,
                     )
                     self.debug_frame_cb(self.label, dbg)
@@ -721,22 +731,15 @@ def _classify_hand_full(
     """
     Returns (is_fist, palm_facing, hand_roll, confidence).
 
-    palm_facing values:
-      'camera'  — palm faces the camera (neutral position)
-      'up'      — palm faces ceiling
-      'down'    — palm faces floor
+    palm_facing:
+      'camera'  — hand detected (orientation not used for gestures)
       'unknown' — hand not detected
 
     hand_roll: 2D orientation of the knuckle line.
       = (index_mcp.x − pinky_mcp.x) / distance(index_mcp, pinky_mcp)
       Ranges −1 to +1; sign flips when palm snaps front-to-back.
       Used by PalmTwistTracker to detect rapid rotations without needing
-      reliable z-depth (which degrades at non-frontal camera angles).
-
-    Palm up/down is still estimated from z-depth (MediaPipe Hands z
-    encodes depth within the hand, not absolute scene depth, so it is
-    useful for distinguishing palm-up vs palm-down even if snap z-values
-    are noisy).
+      z-depth (which is unreliable at frontal camera angles).
     """
     if not hand_res or not hand_res.multi_hand_landmarks:
         return False, "unknown", 0.0, 0.0
@@ -749,12 +752,10 @@ def _classify_hand_full(
     # than the MCP.  When curled into a fist the tip folds back and ends
     # up ≤ MCP distance from the wrist.
     #
-    # This is fully rotation-invariant: it gives the same answer whether
-    # the palm faces the camera, faces up, or faces sideways — which is
-    # critical now that the camera is frontal and the palm orientation
-    # varies across gestures.  The old Y-position check (`tip.y > mcp.y`)
-    # incorrectly fired as "curled" when the palm faced upward because
-    # extended fingertips are displaced vertically in image space.
+    # Rotation-invariant: correct whether the palm faces the camera, faces
+    # up, or faces sideways.  The old Y-position check (`tip.y > mcp.y`)
+    # misfired when the palm faced upward because extended fingertips are
+    # displaced vertically in image space.
     TIPS = [8, 12, 16, 20]
     MCPS = [5,  9, 13, 17]
 
@@ -782,58 +783,48 @@ def _classify_hand_full(
     # The lateral angle of the index-to-pinky MCP line in image space.
     # Works at any camera angle — no z-depth required.
     # A wrist snap flips this sign rapidly → large peak_swing in tracker.
-    ix, iy = lm[5].x, lm[5].y   # index finger MCP
+    ix, iy = lm[5].x, lm[5].y    # index finger MCP
     px, py = lm[17].x, lm[17].y  # pinky finger MCP
     dx = ix - px
     dy = iy - py
     dist = (dx * dx + dy * dy) ** 0.5
     hand_roll = dx / dist if dist > 0.01 else 0.0
 
-    # ── Palm orientation (up/down) via z-depth ────────────────────────────
-    # z is normalised within-hand depth: negative = closer to camera.
-    # Palm up (facing ceiling): knuckle MCPs are closer to camera → z_mcp < z_wrist
-    # Palm down (facing floor): knuckle MCPs are further away     → z_mcp > z_wrist
-    wrist_z   = lm[0].z
-    avg_mcp_z = (lm[9].z + lm[5].z + lm[13].z) / 3.0
-    z_diff = avg_mcp_z - wrist_z
-
-    palm_thresh = settings.palm_orientation_threshold
-    if z_diff < -palm_thresh:
-        palm_facing = "up"
-    elif z_diff > palm_thresh:
-        palm_facing = "down"
-    else:
-        palm_facing = "camera"
-
-    return is_fist, palm_facing, hand_roll, conf
+    return is_fist, "camera", hand_roll, conf
 
 
 def _pick_candidate(
     is_fist: bool,
-    palm_facing: str,
     twist_swing: float,
+    peak_vx: float,
     settings,
 ) -> Optional[Gesture]:
     """
     Map one frame's hand state to a gesture candidate.
 
     Priority:
-      1. FIST    — closed fist (static, highest priority)
-      2. SNAP    — rapid palm rotation (dynamic)
-      3. UP/DOWN — static palm orientation
+      1. FIST       — closed fist (static, highest priority)
+      2. WAVE_LEFT / WAVE_RIGHT — horizontal wrist sweep exceeds velocity threshold
+      3. SNAP       — rapid palm rotation (dynamic)
     """
-    twist_thresh = float(getattr(settings, 'palm_twist_threshold', 0.12))
+    twist_thresh = float(getattr(settings, 'palm_twist_threshold', 0.40))
+    wave_thresh  = float(getattr(settings, 'wave_velocity_threshold_px', 20.0))
+    mirror       = bool(getattr(settings,  'mirror_camera', True))
 
     if is_fist:
         return Gesture.FIST
 
+    if abs(peak_vx) >= wave_thresh:
+        going_right = peak_vx > 0
+        if mirror:
+            # With mirror_camera the image is flipped: wrist moving right in
+            # the frame means the person is sweeping their arm to the left.
+            return Gesture.WAVE_LEFT if going_right else Gesture.WAVE_RIGHT
+        else:
+            return Gesture.WAVE_RIGHT if going_right else Gesture.WAVE_LEFT
+
     if twist_swing > twist_thresh:
         return Gesture.SNAP
-
-    if palm_facing == "up":
-        return Gesture.UP
-    if palm_facing == "down":
-        return Gesture.DOWN
 
     return None
 
@@ -841,7 +832,7 @@ def _pick_candidate(
 # ── Debug overlay ─────────────────────────────────────────────────────────────
 
 def _draw_debug(frame, pose_res, wrist_xy,
-                twist_swing, palm_facing, is_fist,
+                twist_swing, peak_vx, is_fist,
                 candidate, consec_raised, min_frames):
     """Draw skeleton + gesture state overlay onto a copy of frame."""
     import mediapipe as mp
@@ -887,7 +878,7 @@ def _draw_debug(frame, pose_res, wrist_xy,
     lines = [
         (arm_state,                               (0, 255, 100) if ready else (0, 165, 255)),
         (f"twist={twist_swing:.3f}",              (255, 255, 255)),
-        (f"fist={is_fist}  palm={palm_facing}",   (255, 255, 255)),
+        (f"fist={is_fist}  pvx={peak_vx:.1f}",   (255, 255, 255)),
         (f"cand: {cand_str}",                     (255, 255, 0) if candidate else (160, 160, 160)),
     ]
     fs = max(0.35, w / 1800)          # font scale relative to frame width
