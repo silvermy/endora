@@ -672,14 +672,35 @@ def _classify_hand_full(
 
     lm = hand_res.multi_hand_landmarks[0].landmark
 
-    # ── Fist detection ────────────────────────────────────────────────────
+    # ── Fist detection (3-D distance, rotation-invariant) ────────────────
+    # Measures wrist→tip vs wrist→MCP distance in 3D landmark space.
+    # When a finger is extended the tip is 2–3× further from the wrist
+    # than the MCP.  When curled into a fist the tip folds back and ends
+    # up ≤ MCP distance from the wrist.
+    #
+    # This is fully rotation-invariant: it gives the same answer whether
+    # the palm faces the camera, faces up, or faces sideways — which is
+    # critical now that the camera is frontal and the palm orientation
+    # varies across gestures.  The old Y-position check (`tip.y > mcp.y`)
+    # incorrectly fired as "curled" when the palm faced upward because
+    # extended fingertips are displaced vertically in image space.
     TIPS = [8, 12, 16, 20]
-    PIPS = [6, 10, 14, 18]
     MCPS = [5,  9, 13, 17]
 
+    wrist = lm[0]
+
+    def _d3(a, b):
+        return ((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2) ** 0.5
+
     curled = 0
-    for tip_i, pip_i, mcp_i in zip(TIPS, PIPS, MCPS):
-        if lm[tip_i].y > lm[pip_i].y and lm[tip_i].y > lm[mcp_i].y:
+    for tip_i, mcp_i in zip(TIPS, MCPS):
+        tip_d = _d3(lm[tip_i], wrist)
+        mcp_d = _d3(lm[mcp_i], wrist)
+        # Curled if tip is not significantly further from wrist than MCP.
+        # Factor 1.1 = tip can be up to 10% further than MCP and still count.
+        # Extended finger: tip_d ≈ 2–3× mcp_d (well outside the 1.1 band).
+        # Tight fist:      tip_d ≈ 0.5–0.8× mcp_d (well inside the band).
+        if tip_d < mcp_d * 1.1:
             curled += 1
 
     frac    = curled / 4.0
