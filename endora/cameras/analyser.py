@@ -325,8 +325,6 @@ class CameraAnalyser(threading.Thread):
                 _marg  = float(self.s.arm_above_head_tolerance)
                 _rsh_y = _lm_q[_PL_q.RIGHT_SHOULDER].y
                 _lsh_y = _lm_q[_PL_q.LEFT_SHOULDER].y
-                _rel_y = _lm_q[_PL_q.RIGHT_ELBOW].y
-                _lel_y = _lm_q[_PL_q.LEFT_ELBOW].y
                 _rw_y  = _lm_q[_PL_q.RIGHT_WRIST].y
                 _lw_y  = _lm_q[_PL_q.LEFT_WRIST].y
                 # Loose trigger: just wrist above shoulder on either side.
@@ -342,11 +340,11 @@ class CameraAnalyser(threading.Thread):
                 # the crop — that's fine because we only use relative
                 # positions between landmarks, never absolute frame coords.
                 # Select which wrist to crop around.
-                # Prefer the one that passes the strict raise test; when only
-                # the loose trigger has fired, use whichever wrist is above
-                # its shoulder so the crop stays centred on the active hand.
-                _rw_fully = (_rel_y < _rsh_y and _rw_y < (_rel_y - _marg))
-                _lw_fully = (_lel_y < _lsh_y and _lw_y < (_lel_y - _marg))
+                # Use the wrist that passes the strict raise check (wrist above
+                # shoulder by margin); when both or neither pass, prefer the one
+                # that's higher in the frame (smaller y).
+                _rw_fully = _rw_y < (_rsh_y - _marg)
+                _lw_fully = _lw_y < (_lsh_y - _marg)
                 if _rw_fully or (_rw_y < _rsh_y and not _lw_fully):
                     _wx_n = _lm_q[_PL_q.RIGHT_WRIST].x
                     _wy_n = _lm_q[_PL_q.RIGHT_WRIST].y
@@ -630,17 +628,19 @@ def _arm_above_head(
     """
     Returns (raised, (wrist_x, wrist_y), side).
 
-    "Extended above head": elbow above shoulder AND wrist above elbow
-    by at least arm_above_head_tolerance (fraction of frame height).
+    Arm-raise check for a FRONTAL camera: wrist clearly above shoulder.
 
-    Applying the margin to the wrist-elbow gap (not elbow-shoulder) means
-    the check is robust at any camera height: on a frontal eye-level mount
-    both gaps are large; on an overhead camera the elbow-shoulder gap
-    compresses but the wrist-elbow gap stays usable.
+    The previous two-part check (elbow above shoulder AND wrist above elbow)
+    was designed for overhead cameras where the arm foreshortens badly.
+    For a frontal eye-level mount the elbow rarely clears the shoulder in
+    MediaPipe's normalised Y coordinates even during a full arm raise —
+    the elbow swings out sideways while rising.  Checking only the wrist
+    vs. the shoulder is simpler, more stable, and correct for frontal use.
 
     arm_above_head_tolerance:
-      0.05 = wrist must be 5 % of frame height above elbow (permissive)
-      0.10 = 10 % (stricter — arm must be more clearly extended)
+      0.02 = wrist must be 2 % of frame height above shoulder (permissive)
+      0.05 = 5 % above shoulder (stricter)
+      0.00 = any wrist-above-shoulder position counts
     """
     if not pose_res or not pose_res.pose_landmarks:
         return False, (0.0, 0.0), ""
@@ -652,33 +652,28 @@ def _arm_above_head(
     margin = float(settings.arm_above_head_tolerance)
 
     pairs = [
-        ("RIGHT", PL.RIGHT_SHOULDER, PL.RIGHT_ELBOW, PL.RIGHT_WRIST),
-        ("LEFT",  PL.LEFT_SHOULDER,  PL.LEFT_ELBOW,  PL.LEFT_WRIST),
+        ("RIGHT", PL.RIGHT_SHOULDER, PL.RIGHT_WRIST),
+        ("LEFT",  PL.LEFT_SHOULDER,  PL.LEFT_WRIST),
     ]
 
-    for side, sh_id, el_id, wr_id in pairs:
+    for side, sh_id, wr_id in pairs:
         sh = lm[sh_id]
-        el = lm[el_id]
         wr = lm[wr_id]
 
-        # "Extended above head": elbow above shoulder AND wrist clearly above elbow.
-        # The elbow-shoulder gap is tiny on an overhead camera (the arm foreshortens
-        # badly in top-down projection) so we only require el.y < sh.y there.
-        # The wrist-elbow gap is larger and carries the 'margin' strictness so
-        # a half-raised forearm doesn't qualify.
-        # Camera-angle-independent — works at any mounting height.
-        elbow_above_shoulder = el.y < sh.y
-        wrist_above_elbow    = wr.y < (el.y - margin)
+        # Wrist must be above the shoulder by at least `margin` (frame fraction).
+        # In MediaPipe normalised coords y=0 is the top of the frame, so
+        # "above" means a smaller y value.
+        wrist_above_shoulder = wr.y < (sh.y - margin)
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
-                "  [arm-check] %s sh_y=%.3f el_y=%.3f wr_y=%.3f margin=%.3f "
-                "→ elbow_up=%s wrist_ext=%s (el-wr gap=%.3f)",
-                side, sh.y, el.y, wr.y, margin,
-                elbow_above_shoulder, wrist_above_elbow, el.y - wr.y,
+                "  [arm-check] %s sh_y=%.3f wr_y=%.3f margin=%.3f "
+                "→ wrist_up=%s (sh-wr gap=%.3f)",
+                side, sh.y, wr.y, margin,
+                wrist_above_shoulder, sh.y - wr.y,
             )
 
-        if elbow_above_shoulder and wrist_above_elbow:
+        if wrist_above_shoulder:
             return True, (wr.x * frame_w, wr.y * frame_h), side
 
     return False, (0.0, 0.0), ""
