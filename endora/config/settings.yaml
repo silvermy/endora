@@ -1,4 +1,4 @@
-# Endora v1.6.37
+# Endora v1.6.38
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # After saving from the debug page, values are written here AND to
@@ -10,12 +10,13 @@ debug_port: 8765
 log_level: debug
 ha_event_name: gesture_detected
 
-# How far above the elbow the wrist must be (normalised frame height).
-# The margin is applied to the wrist-elbow gap, not elbow-shoulder,
-# because overhead cameras compress the elbow-shoulder distance.
-# 0.05 = wrist must be 5% of frame height above elbow (permissive, good start)
-# 0.10 = 10% above elbow (stricter)
-arm_above_head_tolerance: 0.05
+# How far above the shoulder the wrist must be (normalised frame height).
+# For a frontal camera a simple wrist-vs-shoulder check is used;
+# the elbow check was removed as it prevented detection on frontal mounts.
+# 0.02 = wrist must be 2% of frame height above shoulder (permissive, good start)
+# 0.05 = 5% above shoulder (stricter — reduces false triggers)
+# 0.00 = any wrist-above-shoulder position qualifies
+arm_above_head_tolerance: 0.02
 
 # Minimum peak wrist velocity (pixels) required to register a wave.
 # Watch the pvx value on the debug page while waving to calibrate.

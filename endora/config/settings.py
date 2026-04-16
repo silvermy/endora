@@ -43,7 +43,7 @@ class Settings:
     pose_model_complexity: int = 2
     pose_min_detection_confidence: float = 0.3
     pose_min_tracking_confidence: float = 0.3
-    arm_above_head_tolerance: float = 0.80
+    arm_above_head_tolerance: float = 0.02
     # Furniture filter: minimum average visibility of shoulders+hips.
     # MediaPipe assigns high visibility to real body landmarks and near-zero
     # to furniture false-detections. 0.35 rejects furniture without touching
