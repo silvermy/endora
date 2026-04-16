@@ -571,6 +571,13 @@ class CameraAnalyser(threading.Thread):
                 last_is_fist = is_fist   # initialise for future fist transitions
                 last_hand_roll = 0.0     # clear carry-forward on new arm raise
                 last_hand_roll_age = 0
+                # Also feed this frame's roll into the twist tracker so that
+                # a snap on the very first raised frame produces a detectable
+                # swing of (approach_roll → current_roll).
+                if palm_facing != "unknown" and not is_fist and hand_roll != 0.0:
+                    palm_twists.update(hand_roll)
+                    last_hand_roll = hand_roll
+                    twist_swing, twist_dir = palm_twists.peak_swing()
                 log.debug(
                     "[%s] arm raised (%s side) wrist=(%.0f,%.0f) "
                     "[seeded %d twist frames → swing=%.3f  "
@@ -841,6 +848,11 @@ def _pick_candidate(
     if is_fist:
         return Gesture.FIST
 
+    # SNAP takes priority over WAVE: a deliberate wrist rotation is a strong
+    # signal and should not be shadowed by incidental horizontal arm motion.
+    if twist_swing > twist_thresh:
+        return Gesture.SNAP
+
     if abs(peak_vx) >= wave_thresh:
         going_right = peak_vx > 0
         if mirror:
@@ -849,9 +861,6 @@ def _pick_candidate(
             return Gesture.WAVE_LEFT if going_right else Gesture.WAVE_RIGHT
         else:
             return Gesture.WAVE_RIGHT if going_right else Gesture.WAVE_LEFT
-
-    if twist_swing > twist_thresh:
-        return Gesture.SNAP
 
     return None
 
