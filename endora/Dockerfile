@@ -31,11 +31,12 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # ── Application code ──────────────────────────────────────────────────────────
 WORKDIR /app
-COPY cameras/  cameras/
-COPY config/   config/
-COPY core/     core/
-COPY output/   output/
-COPY main.py   .
+COPY cameras/    cameras/
+COPY config/     config/
+COPY core/       core/
+COPY output/     output/
+COPY main.py     .
+COPY config.json .
 
 # ── S6 service definition ─────────────────────────────────────────────────────
 # S6 looks for services in /etc/services.d/<name>/run
