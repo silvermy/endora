@@ -1,5 +1,7 @@
 # Endora
 
+![Endora](https://raw.githubusercontent.com/silvermy/endora/main/icon.png)
+
 Wave your hand to control Home Assistant — lights, TV, volume, anything.
 
 Watches an RTSP camera stream for hand gestures and fires HA events you can use in any automation. Runs as a **Home Assistant Add-on** (HA OS / Supervised) or as a **standalone Docker container**.
@@ -16,8 +18,8 @@ All gestures require the arm to be **fully extended above head** — elbow above
 |---|---|---|
 | `endora-snap` | Wrist snap — flip palm from facing forward to backward (or vice versa) | Open hand |
 | `endora-fist` | Raise arm, close fist | Closed fist |
-| `endora-up` | Raise arm, hold palm facing ceiling | Open, palm up |
-| `endora-down` | Raise arm, hold palm facing floor | Open, palm down |
+| `endora-wave-left` | Raise arm, sweep wrist to the left | Open hand |
+| `endora-wave-right` | Raise arm, sweep wrist to the right | Open hand |
 
 ---
 
@@ -133,23 +135,23 @@ Every gesture fires event type `gesture_detected`:
 ### Volume
 
 ```yaml
-- alias: "Endora — palm up → volume up"
+- alias: "Endora — wave left → volume up"
   trigger:
     platform: event
     event_type: gesture_detected
     event_data:
-      gesture: endora-up
+      gesture: endora-wave-left
   action:
     service: media_player.volume_up
     target:
       entity_id: media_player.living_room_tv
 
-- alias: "Endora — palm down → volume down"
+- alias: "Endora — wave right → volume down"
   trigger:
     platform: event
     event_type: gesture_detected
     event_data:
-      gesture: endora-down
+      gesture: endora-wave-right
   action:
     service: media_player.volume_down
     target:
@@ -215,8 +217,9 @@ Point the camera at your typical sitting/standing position. With a fisheye lens 
 | `debug_port` | `8765` | Debug web page port; `0` = disabled |
 | `ha_event_name` | `gesture_detected` | HA event type |
 | `log_level` | `info` | `debug` / `info` / `warning` / `error` |
-| `arm_above_head_tolerance` | `0.10` | How far above shoulder the elbow must be (frame fraction) |
-| `palm_twist_threshold` | `0.12` | z-depth swing required for snap gesture |
+| `arm_above_head_tolerance` | `0.05` | How far above shoulder the wrist must be (frame fraction) |
+| `wave_velocity_threshold_px` | `20` | Minimum wrist pixel speed for wave-left / wave-right |
+| `palm_twist_threshold` | `0.40` | 2D knuckle-line swing required for snap gesture |
 | `fist_curl_threshold` | `0.75` | Curl fraction to count as fist (0–1) |
 | `cooldown_s` | `2.0` | Min seconds between gestures |
 | `pose_visibility_min` | `0.35` | Shoulder visibility threshold (filters furniture) |
