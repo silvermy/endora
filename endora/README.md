@@ -4,7 +4,7 @@ Wave your hand to control Home Assistant — lights, TV, volume, anything.
 
 Watches an RTSP camera stream for hand gestures and fires HA events you can use in any automation. Runs as a **Home Assistant Add-on** (HA OS / Supervised) or as a **standalone Docker container**.
 
-**Debug page:** `http://homeassistant.local:8765/` — live camera overlay, gesture state, and tuning sliders. Enable by setting `debug_port: 8765` in Configuration.
+**Debug page:** [http://homeassistant.local:8765/](http://homeassistant.local:8765/) — live camera overlay, gesture state, and tuning sliders. Enable by setting `debug_port: 8765` in Configuration.
 
 ---
 
@@ -55,7 +55,7 @@ Set `rtsp_url_b` to the same value as `rtsp_url_a` for single-camera mode.
 
 Click **Start** → check the **Log** tab for the stream connecting.
 
-Open the debug page at `http://homeassistant.local:8765/` to verify the camera view and tune settings.
+Open the debug page at [http://homeassistant.local:8765/](http://homeassistant.local:8765/) to verify the camera view and tune settings.
 
 ---
 
@@ -160,7 +160,7 @@ Every gesture fires event type `gesture_detected`:
 
 ## Debug page
 
-Navigate to `http://homeassistant.local:8765/` after enabling `debug_port: 8765`.
+Navigate to [http://homeassistant.local:8765/](http://homeassistant.local:8765/) after enabling `debug_port: 8765`.
 
 The page shows a live camera view with skeleton overlay and a right-side panel with live tuning sliders. Changes take effect immediately — no restart needed. Use **Save to settings.yaml** to persist them.
 

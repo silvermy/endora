@@ -185,6 +185,11 @@ class CameraAnalyser(threading.Thread):
         )
 
         palm_twists = PalmTwistTracker()
+        # Approach cache: collects hand_roll samples while the wrist is above
+        # the shoulder but BEFORE the arm officially passes the raise check.
+        # On the first arm-ready frame this data seeds the main tracker so a
+        # fluid raise→snap is detected without needing a pause at the top.
+        _approach_cache: collections.deque = collections.deque(maxlen=50)  # ~5 s
         sustain_counts: dict[Gesture, int] = {g: 0 for g in Gesture}
         # Frames each gesture must appear consecutively before firing.
         # SNAP is dynamic (brief peak) — grab it on the first qualifying frame.
@@ -307,10 +312,12 @@ class CameraAnalyser(threading.Thread):
             rgb.flags.writeable = False
             pose_res = pose.process(rgb)
 
-            # ── Lazy Hands: only run when wrist looks raised ──────────────
-            # Hands model costs as much as Pose — skip it when the arm is
-            # clearly down to roughly double throughput on slow hardware.
-            # Uses the same shoulder-relative logic as _arm_above_head.
+            # ── Lazy Hands: loose trigger (wrist above shoulder) ──────────
+            # Fire Hands as soon as either wrist crosses its shoulder line —
+            # earlier than the strict arm-raise check (which also requires the
+            # elbow to clear the shoulder).  The earlier start lets the twist
+            # approach-cache fill during the raise motion so a fluid
+            # raise→snap is captured on the very first arm-ready frame.
             _run_hands = False
             if pose_res and pose_res.pose_landmarks:
                 _lm_q  = pose_res.pose_landmarks.landmark
@@ -322,13 +329,8 @@ class CameraAnalyser(threading.Thread):
                 _lel_y = _lm_q[_PL_q.LEFT_ELBOW].y
                 _rw_y  = _lm_q[_PL_q.RIGHT_WRIST].y
                 _lw_y  = _lm_q[_PL_q.LEFT_WRIST].y
-                # Mirror _arm_above_head: elbow above shoulder, wrist clearly above elbow.
-                # This avoids running the expensive Hands model on overhead cameras where
-                # the shoulder-wrist gap alone is a poor predictor.
-                _run_hands = (
-                    (_rel_y < _rsh_y and _rw_y < (_rel_y - _marg)) or
-                    (_lel_y < _lsh_y and _lw_y < (_lel_y - _marg))
-                )
+                # Loose trigger: just wrist above shoulder on either side.
+                _run_hands = (_rw_y < _rsh_y) or (_lw_y < _lsh_y)
             if _run_hands:
                 # Crop a 300×300 patch centred on the raised wrist before
                 # running Hands.  On a 1280-wide dewarped frame the hand is
@@ -339,8 +341,13 @@ class CameraAnalyser(threading.Thread):
                 # Landmarks are returned as normalised [0,1] coords within
                 # the crop — that's fine because we only use relative
                 # positions between landmarks, never absolute frame coords.
-                _rw_raised = (_rel_y < _rsh_y and _rw_y < (_rel_y - _marg))
-                if _rw_raised:
+                # Select which wrist to crop around.
+                # Prefer the one that passes the strict raise test; when only
+                # the loose trigger has fired, use whichever wrist is above
+                # its shoulder so the crop stays centred on the active hand.
+                _rw_fully = (_rel_y < _rsh_y and _rw_y < (_rel_y - _marg))
+                _lw_fully = (_lel_y < _lsh_y and _lw_y < (_lel_y - _marg))
+                if _rw_fully or (_rw_y < _rsh_y and not _lw_fully):
                     _wx_n = _lm_q[_PL_q.RIGHT_WRIST].x
                     _wy_n = _lm_q[_PL_q.RIGHT_WRIST].y
                 else:
@@ -364,6 +371,20 @@ class CameraAnalyser(threading.Thread):
                     hand_res = None
             else:
                 hand_res = None
+
+            # ── Approach-cache pre-classify ───────────────────────────────
+            # Classify the hand here — before the arm-raise gate — so we can
+            # feed hand_roll samples into the approach cache during the wrist's
+            # rise toward the fully-extended position.  Only accumulates while
+            # the arm is NOT yet officially raised (last_arm_raised=False) to
+            # avoid mixing gesture-phase data back into the approach window.
+            _pre_is_fist, _pre_palm, _pre_roll, _pre_conf = False, "unknown", 0.0, 0.0
+            if _run_hands and hand_res is not None:
+                _pre_is_fist, _pre_palm, _pre_roll, _pre_conf = _classify_hand_full(
+                    hand_res, self.s
+                )
+                if _pre_palm != "unknown" and not _pre_is_fist and not last_arm_raised:
+                    _approach_cache.append(_pre_roll)
 
             rgb.flags.writeable = True
 
@@ -428,10 +449,11 @@ class CameraAnalyser(threading.Thread):
                 consecutive_no_pose += 1
                 if consecutive_no_pose >= NO_POSE_TOLERANCE:
                     consecutive_arm_raised = 0
+                    palm_twists.reset()
+                    _approach_cache.clear()
                 if consecutive_no_pose >= NO_POSE_TOLERANCE:
                     if last_arm_raised:
                         log.debug("[%s] arm lowered — resetting", self.label)
-                        palm_twists.reset()
                         for g in Gesture:
                             sustain_counts[g] = 0
                     last_arm_raised = False
@@ -498,36 +520,55 @@ class CameraAnalyser(threading.Thread):
                         log.debug("[%s] debug render error: %s", self.label, e)
                 continue
 
+            # ── 2. Hand shape and orientation ─────────────────────────────
+            # Re-use the pre-classification computed in the approach-cache
+            # section above (avoids running the model a second time).
+            is_fist   = _pre_is_fist
+            palm_facing = _pre_palm
+            hand_roll = _pre_roll
+            hand_conf = _pre_conf
+
             if not last_arm_raised:
-                log.debug("[%s] arm raised (%s side) wrist=(%.0f,%.0f)",
-                          self.label, raised_side, wx, wy)
+                # ── First officially-raised frame ─────────────────────────
+                # Seed the twist tracker from the approach cache so a fluid
+                # raise→snap is detected immediately.  The cache holds up to
+                # ~5 s of hand_roll samples collected while the wrist was
+                # above the shoulder but before the elbow cleared.
+                _n_seed = len(_approach_cache)
                 palm_twists.reset()
+                for _sv in list(_approach_cache)[-palm_twists.HISTORY:]:
+                    palm_twists._samples.append(_sv)
+                _approach_cache.clear()
+                twist_swing, twist_dir = palm_twists.peak_swing()
+                last_is_fist = is_fist   # initialise for future fist transitions
+                log.debug(
+                    "[%s] arm raised (%s side) wrist=(%.0f,%.0f) "
+                    "[seeded %d approach frames → swing=%.3f]",
+                    self.label, raised_side, wx, wy, _n_seed, twist_swing,
+                )
                 arm_raised_since = time.monotonic()
+            else:
+                # ── Subsequent arm-raised frames ──────────────────────────
+                # Update tracker normally.  Fist→open transitions produce a
+                # large hand_roll swing that looks like a snap; reset on
+                # every fist state change to prevent those false fires.
+                if is_fist != last_is_fist:
+                    palm_twists.reset()
+                    _approach_cache.clear()
+                last_is_fist = is_fist
+                if palm_facing != "unknown" and not is_fist:
+                    palm_twists.update(hand_roll)
+                twist_swing, twist_dir = palm_twists.peak_swing()
             last_arm_raised = True
 
             # Reset stale gesture state if arm held still for too long
             now = time.monotonic()
             if now - arm_raised_since > ARM_HELD_TIMEOUT_S:
                 palm_twists.reset()
+                _approach_cache.clear()
                 sustain_counts = {g: 0 for g in Gesture}
                 arm_raised_since = now
                 log.debug("[%s] arm held still — resetting gesture state", self.label)
-
-            # ── 2. Hand shape and orientation ────────────────────────────
-            is_fist, palm_facing, hand_roll, hand_conf = _classify_hand_full(
-                hand_res, self.s
-            )
-
-            # Update palm twist tracker — only when hand is open.
-            # Fist→open transitions produce a large hand_roll swing that
-            # looks identical to a snap; resetting on fist state change and
-            # skipping updates while fist is active prevents those false fires.
-            if is_fist != last_is_fist:
-                palm_twists.reset()   # clean slate on every fist state change
-            last_is_fist = is_fist
-            if palm_facing != "unknown" and not is_fist:
-                palm_twists.update(hand_roll)
-            twist_swing, twist_dir = palm_twists.peak_swing()
 
             # ── 3. Pick candidate ─────────────────────────────────────────
             candidate = _pick_candidate(
