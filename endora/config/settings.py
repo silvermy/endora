@@ -47,8 +47,9 @@ class Settings:
     # Minimum gap (frame fraction) between average hip_y and average shoulder_y.
     # Guards against arm-raise false positives when lying down: when horizontal,
     # hips and shoulders converge; when upright, hips are 0.2–0.4 below shoulders.
-    # 0.10 = hips must be at least 10 % of frame height below shoulders.
-    body_upright_min: float = 0.10
+    # 0.10 = overhead cameras (hips below shoulders in image).
+    # -0.15 = frontal dewarped fisheye (hips appear above shoulders due to perspective).
+    body_upright_min: float = -0.15
     # Furniture filter: minimum average visibility of shoulders+hips.
     # MediaPipe assigns high visibility to real body landmarks and near-zero
     # to furniture false-detections. 0.35 rejects furniture without touching

@@ -1,4 +1,4 @@
-# Endora v1.7.4
+# Endora v1.7.5
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # After saving from the debug page, values are written here AND to
@@ -18,10 +18,11 @@ arm_above_head_tolerance: 0.05
 
 # Body-upright filter: hips must be this far below shoulders (frame fraction).
 # Blocks arm-raise detection when lying on a couch or bed.
-# When upright, hips are 0.2–0.4 below shoulders; when horizontal they converge.
-# 0.10 = hips must be at least 10% of frame height below shoulders.
-# Lower toward 0.05 only if detection fails while seated with legs raised.
-body_upright_min: 0.10
+# Positive = hips must appear BELOW shoulders (overhead/top-down cameras).
+# Negative = allows hips to appear ABOVE shoulders (frontal + dewarped fisheye
+#   cameras where perspective places hips higher in the image than shoulders).
+# -0.15 works for frontal dewarped fisheye; 0.10 for overhead cameras.
+body_upright_min: -0.15
 
 # Minimum peak wrist velocity (pixels) required to register a wave.
 # Watch the pvx value on the debug page while waving to calibrate.
