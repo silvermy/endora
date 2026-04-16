@@ -192,17 +192,20 @@ class CameraAnalyser(threading.Thread):
         _approach_cache: collections.deque = collections.deque(maxlen=50)  # ~5 s
         sustain_counts: dict[Gesture, int] = {g: 0 for g in Gesture}
         # Frames each gesture must appear consecutively before firing.
-        # SNAP is dynamic (brief peak) — grab it on the first qualifying frame.
-        # Static poses (FIST/UP/DOWN) need 2 frames to rule out transient
-        # mis-classifications during hand-shape transitions.
+        # All set to 1: the 3-D distance fist check is reliable enough that
+        # we no longer need an extra frame to rule out transients, and
+        # single-frame sustain gives the fastest possible response.
         SUSTAIN_NEEDED: dict[Gesture, int] = {
             Gesture.SNAP: 1,
-            Gesture.FIST: 2,
-            Gesture.UP:   2,
-            Gesture.DOWN: 2,
+            Gesture.FIST: 1,
+            Gesture.UP:   1,
+            Gesture.DOWN: 1,
         }
         last_arm_raised = False
         last_is_fist = False          # track fist→open transitions
+        last_hand_roll = 0.0          # carry-forward when palm=unknown
+        last_hand_roll_age = 0        # frames since last valid hand_roll
+        MAX_ROLL_CARRY = 2            # max frames to carry forward
         consecutive_no_pose = 0
         NO_POSE_TOLERANCE = 2   # frames of arm-down before resetting state
         arm_raised_since: float = 0.0
@@ -353,7 +356,7 @@ class CameraAnalyser(threading.Thread):
                     _wy_n = _lm_q[_PL_q.LEFT_WRIST].y
                 _wx_px = int(_wx_n * pw)
                 _wy_px = int(_wy_n * ph)
-                _ch = 150   # half-side of crop in pixels
+                _ch = 180   # half-side of crop in pixels
                 _cx1 = max(0, _wx_px - _ch)
                 _cx2 = min(pw, _wx_px + _ch)
                 _cy1 = max(0, _wy_px - _ch)
@@ -539,6 +542,8 @@ class CameraAnalyser(threading.Thread):
                 _approach_cache.clear()
                 twist_swing, twist_dir = palm_twists.peak_swing()
                 last_is_fist = is_fist   # initialise for future fist transitions
+                last_hand_roll = 0.0     # clear carry-forward on new arm raise
+                last_hand_roll_age = 0
                 log.debug(
                     "[%s] arm raised (%s side) wrist=(%.0f,%.0f) "
                     "[seeded %d approach frames → swing=%.3f]",
@@ -553,9 +558,22 @@ class CameraAnalyser(threading.Thread):
                 if is_fist != last_is_fist:
                     palm_twists.reset()
                     _approach_cache.clear()
+                    last_hand_roll = 0.0
+                    last_hand_roll_age = 0
                 last_is_fist = is_fist
                 if palm_facing != "unknown" and not is_fist:
+                    # Fresh valid sample — update normally and record it.
+                    last_hand_roll = hand_roll
+                    last_hand_roll_age = 0
                     palm_twists.update(hand_roll)
+                elif not is_fist and last_hand_roll != 0.0 and last_hand_roll_age < MAX_ROLL_CARRY:
+                    # palm=unknown for a brief gap (Hands missed a frame).
+                    # Carry the last known roll so the swing window stays
+                    # continuous; the next valid frame will correct it.
+                    last_hand_roll_age += 1
+                    palm_twists.update(last_hand_roll)
+                else:
+                    last_hand_roll_age += 1
                 twist_swing, twist_dir = palm_twists.peak_swing()
             last_arm_raised = True
 
@@ -650,6 +668,23 @@ def _arm_above_head(
     PL  = mp.solutions.pose.PoseLandmark
 
     margin = float(settings.arm_above_head_tolerance)
+
+    # ── Body-upright check ────────────────────────────────────────────────
+    # Hips must be sufficiently below shoulders, confirming the person is
+    # sitting or standing rather than lying down.  When horizontal (couch),
+    # hip_y ≈ shoulder_y so the threshold is not met and we bail early.
+    # When upright, hips are typically 0.2–0.4 below shoulders.
+    upright_min = float(getattr(settings, 'body_upright_min', 0.10))
+    avg_sh_y = (lm[PL.LEFT_SHOULDER].y + lm[PL.RIGHT_SHOULDER].y) / 2.0
+    avg_hp_y = (lm[PL.LEFT_HIP].y     + lm[PL.RIGHT_HIP].y)     / 2.0
+    if avg_hp_y < avg_sh_y + upright_min:
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "  [arm-check] body not upright — hips=%.3f shoulders=%.3f "
+                "(need gap≥%.2f, got %.3f)",
+                avg_hp_y, avg_sh_y, upright_min, avg_hp_y - avg_sh_y,
+            )
+        return False, (0.0, 0.0), ""
 
     pairs = [
         ("RIGHT", PL.RIGHT_SHOULDER, PL.RIGHT_WRIST),
