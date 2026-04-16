@@ -206,8 +206,13 @@ class CameraAnalyser(threading.Thread):
         last_hand_roll = 0.0          # carry-forward when palm=unknown
         last_hand_roll_age = 0        # frames since last valid hand_roll
         MAX_ROLL_CARRY = 2            # max frames to carry forward
+        # Per-side wrist pixel history: populated every frame (arm up or down)
+        # so that on the very first raised frame we can immediately seed the
+        # velocity tracker and detect a wave from a quick flick gesture.
+        _right_wrist_history: collections.deque = collections.deque(maxlen=15)
+        _left_wrist_history:  collections.deque = collections.deque(maxlen=15)
         consecutive_no_pose = 0
-        NO_POSE_TOLERANCE = 2   # frames of arm-down before resetting state
+        NO_POSE_TOLERANCE = 4   # frames of arm-down before resetting state
         arm_raised_since: float = 0.0
         # Reset tracking if arm held still for this many seconds
         ARM_HELD_TIMEOUT_S = 10.0
@@ -332,6 +337,15 @@ class CameraAnalyser(threading.Thread):
                 _lw_y  = _lm_q[_PL_q.LEFT_WRIST].y
                 # Loose trigger: just wrist above shoulder on either side.
                 _run_hands = (_rw_y < _rsh_y) or (_lw_y < _lsh_y)
+                # Always track raw wrist pixel positions so we can seed the
+                # velocity tracker on the first raised frame even when the arm
+                # jumps from below-shoulder to raised in a single frame.
+                _right_wrist_history.append(
+                    (int(_lm_q[_PL_q.RIGHT_WRIST].x * pw), int(_rw_y * ph))
+                )
+                _left_wrist_history.append(
+                    (int(_lm_q[_PL_q.LEFT_WRIST].x * pw), int(_lw_y * ph))
+                )
             if _run_hands:
                 # Crop a 300×300 patch centred on the raised wrist before
                 # running Hands.  On a 1280-wide dewarped frame the hand is
@@ -538,19 +552,32 @@ class CameraAnalyser(threading.Thread):
                 # above the shoulder but before the arm officially raised.
                 _n_seed = len(_approach_cache)
                 palm_twists.reset()
-                wrist_tracker.reset()
-                last_peak_vx = 0.0
                 for _sv in list(_approach_cache)[-palm_twists.HISTORY:]:
                     palm_twists._samples.append(_sv)
                 _approach_cache.clear()
                 twist_swing, twist_dir = palm_twists.peak_swing()
+                # Seed the velocity tracker from the pre-raise wrist history
+                # for this side.  This lets a quick flick gesture (arm goes
+                # from below to above shoulder in one frame) be detected
+                # immediately — no need to hold the arm up for 2+ seconds.
+                wrist_tracker.reset()
+                _v_hist = (_right_wrist_history
+                           if raised_side == "RIGHT"
+                           else _left_wrist_history)
+                for _hwx, _hwy in list(_v_hist)[-wrist_tracker.HISTORY:]:
+                    wrist_tracker.update(_hwx, _hwy)
+                wrist_tracker.update(wx, wy)   # include this raised frame
+                last_peak_vx, _ = wrist_tracker.peak_velocity()
                 last_is_fist = is_fist   # initialise for future fist transitions
                 last_hand_roll = 0.0     # clear carry-forward on new arm raise
                 last_hand_roll_age = 0
                 log.debug(
                     "[%s] arm raised (%s side) wrist=(%.0f,%.0f) "
-                    "[seeded %d approach frames → swing=%.3f]",
-                    self.label, raised_side, wx, wy, _n_seed, twist_swing,
+                    "[seeded %d twist frames → swing=%.3f  "
+                    "%d vel frames → pvx=%.1f]",
+                    self.label, raised_side, wx, wy,
+                    _n_seed, twist_swing,
+                    len(_v_hist), last_peak_vx,
                 )
                 arm_raised_since = time.monotonic()
             else:
