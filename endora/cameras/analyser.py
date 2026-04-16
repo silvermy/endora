@@ -211,6 +211,13 @@ class CameraAnalyser(threading.Thread):
         # velocity tracker and detect a wave from a quick flick gesture.
         _right_wrist_history: collections.deque = collections.deque(maxlen=15)
         _left_wrist_history:  collections.deque = collections.deque(maxlen=15)
+        # Cross-raise snap baseline: the hand_roll seen at the END of the
+        # previous arm session.  Used as the "before" snapshot on the next
+        # raise so a snap (roll changes between raises) is detectable even
+        # when the arm only crosses the threshold for one frame.
+        _prev_raise_roll: float = 0.0
+        _prev_raise_roll_time: float = 0.0
+        SNAP_ROLL_TTL_S: float = 15.0   # baseline expires after 15 s of inactivity
         consecutive_no_pose = 0
         NO_POSE_TOLERANCE = 4   # frames of arm-down before resetting state
         arm_raised_since: float = 0.0
@@ -463,6 +470,12 @@ class CameraAnalyser(threading.Thread):
                 pose_detected = bool(pose_res and pose_res.pose_landmarks)
                 consecutive_no_pose += 1
                 if consecutive_no_pose >= NO_POSE_TOLERANCE:
+                    # Save the last known roll as a cross-raise snap baseline
+                    # BEFORE clearing state so the next raise can compare
+                    # against it and detect a snap (roll change between raises).
+                    if last_arm_raised and last_hand_roll != 0.0:
+                        _prev_raise_roll = last_hand_roll
+                        _prev_raise_roll_time = time.monotonic()
                     consecutive_arm_raised = 0
                     palm_twists.reset()
                     wrist_tracker.reset()
@@ -571,13 +584,27 @@ class CameraAnalyser(threading.Thread):
                 last_is_fist = is_fist   # initialise for future fist transitions
                 last_hand_roll = 0.0     # clear carry-forward on new arm raise
                 last_hand_roll_age = 0
-                # Also feed this frame's roll into the twist tracker so that
-                # a snap on the very first raised frame produces a detectable
-                # swing of (approach_roll → current_roll).
+                # If this frame's roll wasn't captured in the approach cache
+                # (hand not yet detected on the pre-raise frames), add it now
+                # so we have at least one current-raise sample.
+                if (len(palm_twists._samples) == 0
+                        and palm_facing != "unknown"
+                        and not is_fist
+                        and hand_roll != 0.0):
+                    palm_twists._samples.append(hand_roll)
+                # Cross-raise snap baseline: prepend the roll from the previous
+                # arm session so we can measure the delta even when the arm
+                # only crosses the threshold for one frame.  If the user snapped
+                # (wrist rotated between raises), the delta will exceed the
+                # snap threshold.  Baseline expires after SNAP_ROLL_TTL_S.
+                _now_raise = time.monotonic()
+                if (len(palm_twists._samples) < 2
+                        and _prev_raise_roll != 0.0
+                        and _now_raise - _prev_raise_roll_time < SNAP_ROLL_TTL_S):
+                    palm_twists._samples.appendleft(_prev_raise_roll)
+                twist_swing, twist_dir = palm_twists.peak_swing()
                 if palm_facing != "unknown" and not is_fist and hand_roll != 0.0:
-                    palm_twists.update(hand_roll)
                     last_hand_roll = hand_roll
-                    twist_swing, twist_dir = palm_twists.peak_swing()
                 log.debug(
                     "[%s] arm raised (%s side) wrist=(%.0f,%.0f) "
                     "[seeded %d twist frames → swing=%.3f  "
