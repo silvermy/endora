@@ -1,6 +1,6 @@
 # Endora
 
-![Endora](https://raw.githubusercontent.com/silvermy/endora/main/icon.png)
+![Endora](icon.png)
 
 Wave your hand to control Home Assistant — lights, TV, volume, anything.
 
