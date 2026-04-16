@@ -141,10 +141,10 @@ class HABackend(BaseBackend):
 
 class PrintBackend(BaseBackend):
     SYMBOLS = {
-        Gesture.SNAP: "✋ endora-snap",
-        Gesture.FIST: "✊ endora-fist",
-        Gesture.UP:   "☝  endora-up  ",
-        Gesture.DOWN: "👇 endora-down",
+        Gesture.SNAP:       "✋ endora-snap      ",
+        Gesture.FIST:       "✊ endora-fist      ",
+        Gesture.WAVE_LEFT:  "👈 endora-wave-left ",
+        Gesture.WAVE_RIGHT: "👉 endora-wave-right",
     }
 
     def __init__(self):
