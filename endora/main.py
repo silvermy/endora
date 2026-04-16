@@ -34,7 +34,15 @@ def main():
     setup_logging(settings.log_level)
 
     log = logging.getLogger("main")
-    log.info("Endora v1.6.25 starting (HA add-on mode)")
+    try:
+        import json as _json
+        _ver = _json.loads(
+            ((__import__("pathlib").Path(__file__).parent / "config.json")
+             .read_text())
+        ).get("version", "?")
+    except Exception:
+        _ver = "?"
+    log.info("Endora v%s starting (HA add-on mode)", _ver)
     log.info("RTSP A: %s", _mask(settings.rtsp_url_a))
     log.info("RTSP B: %s", _mask(settings.rtsp_url_b))
     log.info("HA event: %s → %s/events/%s",
