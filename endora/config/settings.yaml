@@ -1,4 +1,4 @@
-# Endora v1.7.17
+# Endora v1.7.18
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # After saving from the debug page, values are written here AND to
@@ -11,35 +11,25 @@ log_level: debug
 ha_event_name: gesture_detected
 
 # How far above the shoulder the wrist must be (normalised frame height).
-# For a frontal camera a simple wrist-vs-shoulder check is used.
-# 0.05 = wrist must be 5% of frame height above shoulder (good default)
-# 0.02 = more permissive; 0.10 = stricter
-arm_above_head_tolerance: 0.05
+# 0.15 = wrist must be 15% of frame height above shoulder (good default,
+#        prevents scratching the top of the head from triggering).
+# 0.05 = more permissive; 0.20 = stricter
+arm_above_head_tolerance: 0.15
 
 # Body-upright filter: hips must be this far below shoulders (frame fraction).
-# Blocks arm-raise detection when lying on a couch or bed.
-# Positive = hips must appear BELOW shoulders (overhead/top-down cameras).
 # Negative = allows hips to appear ABOVE shoulders (frontal + dewarped fisheye
 #   cameras where perspective places hips higher in the image than shoulders).
 # -0.15 works for frontal dewarped fisheye; 0.10 for overhead cameras.
 body_upright_min: -0.15
 
-# Minimum peak wrist velocity (pixels) required to register a wave.
-# Watch the pvx value on the debug page while waving to calibrate.
-# Lateral wrist offset from shoulder (pixels) required to classify as wave.
-# Measured at the moment the arm is detected as raised.
-# Arm extended sideways ≈ 200–500px; arm raised straight up ≈ 0–80px.
-# 150px is a safe default — raise if snaps are misclassified as waves.
-wave_velocity_threshold_px: 150.0
-
-# Minimum |hand_roll| to classify as snap without needing a cross-raise baseline.
-# hand_roll ≈ ±1 when palm is sideways; ≈ 0 when facing camera.
-# 0.65 = palm tilted more than ~40° from neutral → snap. Lower = more sensitive.
-snap_roll_threshold: 0.65
-
-# How many consecutive frames the gesture must appear before firing.
-# Higher = fewer false positives but slightly more latency.
-# wave_sustain_frames removed — gestures fire on the first confirmed frame
+# Wave vs snap classifier: elbow position.
+# When the elbow is ABOVE the shoulder the arm is raised straight up → SNAP.
+# When the elbow is AT or BELOW the shoulder the arm is extended sideways → WAVE.
+# wave_lateral_fraction: minimum wrist offset from body midline (as a fraction
+#   of frame width) to confirm a lateral sweep.
+#   0.12 = 12% of frame width (~230 px on a 1920-wide dewarped frame).
+#   Raise toward 0.20 if straight raises are still misclassified as waves.
+wave_lateral_fraction: 0.12
 
 # 0.75 = 3 of 4 fingers must be curled to count as a fist.
 fist_curl_threshold: 0.85
@@ -70,8 +60,6 @@ dewarp_out_height: 480
 # Furniture filter — uses MediaPipe landmark visibility (0–1 confidence).
 # Real body landmarks score well even from overhead; furniture near 0.
 # 0.35 rejects false detections without blocking the person.
-# Raise toward 0.5 if the table keeps winning; lower toward 0.2 if you
-# are being rejected (watch the logs for "pose rejected: avg_torso_visibility").
 pose_visibility_min: 0.35
 
 # Crop bottom of frame (%) — removes the coffee table area entirely.
@@ -83,11 +71,6 @@ pose_model_complexity: 1          # 0=fastest 1=balanced 2=most accurate (max)
 # pose_min_tracking_confidence: 0.3
 # hand_min_detection_confidence: 0.3
 # hand_min_tracking_confidence: 0.1
-# Minimum single-frame swing in 2D hand_roll to register a snap.
-# hand_roll = (index_mcp.x − pinky_mcp.x) / hand_width, ranges ±1.
-# A full palm flip produces a swing of ~0.8–1.2.
-# 0.40 catches deliberate snaps. Lower = more sensitive.
-palm_twist_threshold: 0.40
 # palm_orientation_threshold: 0.05
 # vertical_velocity_threshold_px: 20.0
 # fusion_agreement_window_s: 1.0
@@ -98,3 +81,4 @@ palm_twist_threshold: 0.40
 # dewarp_cx: -1          # fisheye circle centre X (default = frame centre)
 # dewarp_cy: -1          # fisheye circle centre Y (default = frame centre)
 # low_light_clip: 2.0
+# wave_velocity_threshold_px: 150.0   # deprecated — no longer used
