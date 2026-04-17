@@ -200,10 +200,11 @@ class CameraAnalyser(threading.Thread):
         SUSTAIN_NEEDED: dict[Gesture, int] = {
             Gesture.SNAP:       1,
             Gesture.FIST:       3,
-            Gesture.WAVE_LEFT:  1,
-            Gesture.WAVE_RIGHT: 1,
+            Gesture.WAVE_LEFT:  2,
+            Gesture.WAVE_RIGHT: 2,
         }
         last_arm_raised = False
+        arm_must_reset = False        # True after a gesture fires; cleared when arm drops
         last_is_fist = False          # track fist→open transitions
         last_hand_roll = 0.0          # carry-forward when palm=unknown
         last_hand_roll_age = 0        # frames since last valid hand_roll
@@ -488,6 +489,7 @@ class CameraAnalyser(threading.Thread):
                         for g in Gesture:
                             sustain_counts[g] = 0
                     last_arm_raised = False
+                    arm_must_reset = False   # arm is fully down — next raise is fresh
                 if log.isEnabledFor(logging.DEBUG) and consecutive_no_pose % 10 == 1:
                     if not pose_detected:
                         log.debug("[%s] NO POSE DETECTED — body not found in frame", self.label)
@@ -551,6 +553,16 @@ class CameraAnalyser(threading.Thread):
                         log.debug("[%s] debug render error: %s", self.label, e)
                 continue
 
+            # After a gesture fires the arm must come fully down (consecutive_no_pose
+            # >= NO_POSE_TOLERANCE) before another gesture is allowed.  This prevents
+            # the snap default from re-firing every frame while the arm stays up,
+            # and prevents MediaPipe jitter on the way down from creating a loop.
+            if arm_must_reset:
+                last_arm_raised = True
+                if log.isEnabledFor(logging.DEBUG):
+                    log.debug("[%s] arm_must_reset — waiting for arm to lower", self.label)
+                continue
+
             # ── 2. Hand shape and orientation ─────────────────────────────
             # Re-use the pre-classification computed in the approach-cache
             # section above (avoids running the model a second time).
@@ -571,18 +583,17 @@ class CameraAnalyser(threading.Thread):
                     palm_twists._samples.append(_sv)
                 _approach_cache.clear()
                 twist_swing, twist_dir = palm_twists.peak_swing()
-                # Seed the velocity tracker from the pre-raise wrist history
-                # for this side.  This lets a quick flick gesture (arm goes
-                # from below to above shoulder in one frame) be detected
-                # immediately — no need to hold the arm up for 2+ seconds.
+                # Start velocity tracking fresh from the first raised frame.
+                # Previously we seeded the tracker with pre-raise wrist history
+                # to catch quick-flick waves, but that history includes lateral
+                # arm-raise motion which regularly exceeds the wave threshold
+                # even on a calm snap.  Velocity is now measured from motion
+                # that occurs WHILE the arm is raised, not before.
+                # Wave needs 2 consecutive high-pvx frames (sustain=2) so a
+                # single-frame spike on frame 2 still cannot fire it alone.
                 wrist_tracker.reset()
-                _v_hist = (_right_wrist_history
-                           if raised_side == "RIGHT"
-                           else _left_wrist_history)
-                for _hwx, _hwy in list(_v_hist)[-wrist_tracker.HISTORY:]:
-                    wrist_tracker.update(_hwx, _hwy)
-                wrist_tracker.update(wx, wy)   # include this raised frame
-                last_peak_vx, _ = wrist_tracker.peak_velocity()
+                wrist_tracker.update(wx, wy)   # first raised-arm sample
+                last_peak_vx = 0.0             # need ≥2 samples to have a delta
                 last_is_fist = is_fist   # initialise for future fist transitions
                 last_hand_roll = 0.0     # clear carry-forward on new arm raise
                 last_hand_roll_age = 0
@@ -692,6 +703,7 @@ class CameraAnalyser(threading.Thread):
                 wrist_tracker.reset()
                 last_peak_vx = 0.0
                 consecutive_arm_raised = 0
+                arm_must_reset = True    # require arm to drop before next gesture
 
             # ── Debug overlay ─────────────────────────────────────────────
             if self.debug_frame_cb is not None:
