@@ -267,7 +267,7 @@ body{
 h3{font-size:11px;letter-spacing:3px;color:#555;font-weight:500;text-transform:uppercase}
 #wrap{display:flex;gap:12px;width:100%;max-width:1300px;align-items:flex-start}
 #vbox{flex:1 1 auto;min-width:0}
-#vbox img{width:100%;display:block;border:1px solid #1e1e1e}
+#vbox img{width:100%;display:block;border:1px solid #1e1e1e;min-height:240px;background:#111}
 #legend{font-size:11px;color:#444;text-align:center;padding:4px 0}
 #panel{
   flex:0 0 272px;background:#111;border:1px solid #222;border-radius:8px;
@@ -466,6 +466,32 @@ function doSave() {
 }
 
 fetch('/settings').then(r=>r.json()).then(build).catch(()=>build({}));
+
+// ── MJPEG stream reconnect ──────────────────────────────────────────────────
+// The <img> tag can silently stall if the TCP connection drops (e.g. add-on
+// restart) or if the browser didn't receive the first frame quickly enough.
+// We reconnect by appending a cache-busting timestamp to /stream and
+// swapping the src — the old connection is abandoned by the browser.
+(function() {
+  const img = document.querySelector('#vbox img');
+  let _stall = null;
+
+  function reconnect() {
+    img.src = '/stream?' + Date.now();
+  }
+
+  // Reconnect immediately on any load error (connection refused, reset, etc.)
+  img.addEventListener('error', function() {
+    clearTimeout(_stall);
+    _stall = setTimeout(reconnect, 2000);
+  });
+
+  // Watchdog: if the naturalWidth stays 0 for 4 s after page load, the stream
+  // never started — reconnect.  After that we trust the error event.
+  setTimeout(function() {
+    if (img.naturalWidth === 0) reconnect();
+  }, 4000);
+})();
 </script>
 </body>
 </html>"""
@@ -527,8 +553,13 @@ class _Handler(BaseHTTPRequestHandler):
                         + f"Content-Length: {len(jpg)}\r\n\r\n".encode()
                         + jpg + b"\r\n"
                     )
+                    # Flush after every frame — without this the OS send-buffer
+                    # holds the data until it fills (~8 KB), which can delay the
+                    # first visible frame by several seconds and makes the browser
+                    # show a blank image until the buffer finally drains.
+                    self.wfile.flush()
                     time.sleep(0.1)
-            except (BrokenPipeError, ConnectionResetError):
+            except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
 
         else:
