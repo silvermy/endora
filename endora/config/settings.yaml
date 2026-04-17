@@ -1,4 +1,4 @@
-# Endora v1.7.13
+# Endora v1.7.14
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # After saving from the debug page, values are written here AND to
@@ -26,10 +26,11 @@ body_upright_min: -0.15
 
 # Minimum peak wrist velocity (pixels) required to register a wave.
 # Watch the pvx value on the debug page while waving to calibrate.
-# Horizontal wrist displacement (pixels, over last 5 pre-raise frames) required
-# to classify the gesture as a wave rather than a snap.
-# A deliberate lateral sweep should produce 80–200px; natural raise sway < 40px.
-wave_velocity_threshold_px: 80.0
+# Lateral wrist offset from shoulder (pixels) required to classify as wave.
+# Measured at the moment the arm is detected as raised.
+# Arm extended sideways ≈ 200–500px; arm raised straight up ≈ 0–80px.
+# 150px is a safe default — raise if snaps are misclassified as waves.
+wave_velocity_threshold_px: 150.0
 
 # Minimum |hand_roll| to classify as snap without needing a cross-raise baseline.
 # hand_roll ≈ ±1 when palm is sideways; ≈ 0 when facing camera.
