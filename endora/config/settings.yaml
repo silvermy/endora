@@ -1,4 +1,4 @@
-# Endora v1.7.6
+# Endora v1.7.7
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # After saving from the debug page, values are written here AND to
@@ -26,7 +26,7 @@ body_upright_min: -0.15
 
 # Minimum peak wrist velocity (pixels) required to register a wave.
 # Watch the pvx value on the debug page while waving to calibrate.
-wave_velocity_threshold_px: 20.0
+wave_velocity_threshold_px: 35.0
 
 # Minimum |hand_roll| to classify as snap without needing a cross-raise baseline.
 # hand_roll ≈ ±1 when palm is sideways; ≈ 0 when facing camera.
