@@ -1,5 +1,5 @@
 """
-cameras/analyser.py  — Endora v1.7.22
+cameras/analyser.py  — Endora v1.7.24
 
 Hybrid gesture detection: MediaPipe Pose + Hands.
 
@@ -138,7 +138,7 @@ class CameraAnalyser(threading.Thread):
         _wave_dx: float         = 0.0
         _is_fist: bool          = False
 
-        log.info("[%s] Analyser running (v1.7.22 — one-arm gate + forearm classifier)", self.label)
+        log.info("[%s] Analyser running (v1.7.24 — one-arm gate + forearm classifier)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -373,7 +373,8 @@ class CameraAnalyser(threading.Thread):
                         try:
                             dbg = _draw_debug(
                                 proc_frame, pose_res, wrist_xy,
-                                _elbow_gap_norm, _wave_dx, _is_fist, None,
+                                _forearm_dy_norm, _elbow_gap_norm,
+                                _wave_dx, _is_fist, None,
                                 consecutive_arm_raised, ARM_RAISE_MIN_FRAMES,
                             )
                             self.debug_frame_cb(self.label, dbg)
@@ -558,11 +559,18 @@ def _arm_above_head(
         return False, (0.0, 0.0), ""
 
     # ── Both-arms guard ───────────────────────────────────────────────────
-    # If BOTH wrists are above their respective shoulders, reject — it's a
-    # two-handed pose (arms spread wide, T-pose, stretch, "big animal") not
-    # a single-arm gesture.  Snap, wave, and fist are always one-handed.
-    _rw_raised = lm[PL.RIGHT_WRIST].y < (lm[PL.RIGHT_SHOULDER].y - margin)
-    _lw_raised = lm[PL.LEFT_WRIST].y  < (lm[PL.LEFT_SHOULDER].y  - margin)
+    # If BOTH wrists are clearly above their shoulders, reject — it's a
+    # two-handed pose (arms spread wide, T-pose, stretch, "big animal"),
+    # not a single-arm gesture.
+    #
+    # IMPORTANT: use a threshold strictly larger than `margin` so that a
+    # casually resting arm (gap just above margin) doesn't accidentally
+    # count as "raised" and suppress a genuine one-arm snap.
+    # 0.10 is the minimum — enough clearance to catch deliberate two-handed
+    # poses while leaving room for the resting arm to sit below the bar.
+    _both_margin = max(margin, 0.10)
+    _rw_raised = lm[PL.RIGHT_WRIST].y < (lm[PL.RIGHT_SHOULDER].y - _both_margin)
+    _lw_raised = lm[PL.LEFT_WRIST].y  < (lm[PL.LEFT_SHOULDER].y  - _both_margin)
     if _rw_raised and _lw_raised:
         if log.isEnabledFor(logging.DEBUG):
             log.debug("  [arm-check] both wrists raised — ignoring (two-handed pose)")
