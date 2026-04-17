@@ -194,10 +194,12 @@ class CameraAnalyser(threading.Thread):
         _approach_cache: collections.deque = collections.deque(maxlen=50)  # ~5 s
         sustain_counts: dict[Gesture, int] = {g: 0 for g in Gesture}
         # Frames each gesture must appear consecutively before firing.
-        # All set to 1: single-frame sustain for fastest possible response.
+        # FIST needs 3: a snap briefly curls fingers (middle finger pressing
+        # thumb) and can transiently look like a fist for 1–2 frames.
+        # A deliberate held fist sustains easily for 3+ frames.
         SUSTAIN_NEEDED: dict[Gesture, int] = {
             Gesture.SNAP:       1,
-            Gesture.FIST:       1,
+            Gesture.FIST:       3,
             Gesture.WAVE_LEFT:  1,
             Gesture.WAVE_RIGHT: 1,
         }
