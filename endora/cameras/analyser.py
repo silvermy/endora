@@ -198,9 +198,9 @@ class CameraAnalyser(threading.Thread):
         # thumb) and can transiently look like a fist for 1–2 frames.
         # A deliberate held fist sustains easily for 3+ frames.
         SUSTAIN_NEEDED: dict[Gesture, int] = {
-            Gesture.SNAP:       1,   # fires on single raised frame (arm often only
-                                     # detected for 1 frame at ~9fps)
-            Gesture.FIST:       3,
+            Gesture.SNAP:       1,
+            Gesture.FIST:       1,   # at ~9fps arm is often 1 frame; rely on
+                                     # fist_curl_threshold=0.85 for discrimination
             Gesture.WAVE_LEFT:  1,
             Gesture.WAVE_RIGHT: 1,
         }
@@ -584,23 +584,19 @@ class CameraAnalyser(threading.Thread):
                     palm_twists._samples.append(_sv)
                 _approach_cache.clear()
                 twist_swing, twist_dir = palm_twists.peak_swing()
-                # Determine wave vs snap from the APPROACH DIRECTION recorded
-                # in the pre-raise wrist history.  A wave sweeps in laterally
-                # (large horizontal displacement); a snap raises from below
-                # (small horizontal displacement).  This works even when the
-                # arm is only detected for a single frame — velocity-based
-                # detection requires multiple raised frames, which at ~9fps
-                # often never arrives.
-                _v_hist = (_right_wrist_history
-                           if raised_side == "RIGHT"
-                           else _left_wrist_history)
-                if len(_v_hist) >= 2:
-                    _hist_list = list(_v_hist)
-                    _look_back = min(5, len(_hist_list))
-                    last_peak_vx = wx - _hist_list[-_look_back][0]
-                    # positive = wrist moved right during approach
+                # Classify wave vs snap from LATERAL WRIST OFFSET at the
+                # moment of raise: where is the wrist relative to the shoulder?
+                # Wave = arm extended sideways (large |wrist_x - shoulder_x|).
+                # Snap = arm raised roughly above shoulder (small offset).
+                # This is absolute position — not history, not velocity — so it
+                # works perfectly on a single raised frame at any frame rate.
+                _lm_wave = pose_res.pose_landmarks.landmark
+                _PL_wave = mp.solutions.pose.PoseLandmark
+                if raised_side == "RIGHT":
+                    _sh_x_px = _lm_wave[_PL_wave.RIGHT_SHOULDER].x * pw
                 else:
-                    last_peak_vx = 0.0
+                    _sh_x_px = _lm_wave[_PL_wave.LEFT_SHOULDER].x * pw
+                last_peak_vx = wx - _sh_x_px   # +ve = wrist right of shoulder
                 wrist_tracker.reset()
                 wrist_tracker.update(wx, wy)
                 last_is_fist = is_fist   # initialise for future fist transitions
@@ -903,13 +899,16 @@ def _pick_candidate(
     (pixels). 80px over 5 frames at 9fps = clear lateral sweep; natural raise
     sway is typically < 40px.
     """
-    wave_thresh = float(getattr(settings, 'wave_velocity_threshold_px', 80.0))
+    # wave_velocity_threshold_px is reused as the lateral-offset threshold
+    # (pixels on the dewarped frame). Arm extended sideways ≈ 200–500 px from
+    # shoulder; arm raised straight up ≈ 0–80 px. 150 px is a safe midpoint.
+    wave_thresh = float(getattr(settings, 'wave_velocity_threshold_px', 150.0))
     mirror      = bool(getattr(settings,  'mirror_camera', True))
 
     if is_fist:
         return Gesture.FIST
 
-    # WAVE: wrist arrived from the side (arm swept horizontally into raised position)
+    # WAVE: wrist is clearly to one side of the shoulder (arm extended sideways)
     if abs(approach_dx) >= wave_thresh:
         going_right = approach_dx > 0
         if mirror:
@@ -917,7 +916,7 @@ def _pick_candidate(
         else:
             return Gesture.WAVE_RIGHT if going_right else Gesture.WAVE_LEFT
 
-    # SNAP: default for vertical raises and everything else
+    # SNAP: wrist roughly above shoulder (vertical raise)
     return Gesture.SNAP
 
 

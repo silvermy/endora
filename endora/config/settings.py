@@ -65,7 +65,7 @@ class Settings:
 
     # ── Gesture thresholds ────────────────────────────────────────────────
     mirror_camera: bool = True
-    wave_velocity_threshold_px: float = 80.0
+    wave_velocity_threshold_px: float = 150.0
     wave_sustain_frames: int = 3
     # Advanced: override in settings.yaml if needed
     vertical_velocity_threshold_px: float = 20.0
