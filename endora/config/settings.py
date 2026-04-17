@@ -43,7 +43,10 @@ class Settings:
     pose_model_complexity: int = 2
     pose_min_detection_confidence: float = 0.3
     pose_min_tracking_confidence: float = 0.3
-    arm_above_head_tolerance: float = 0.05
+    # 0.15 = wrist must be 15 % of frame height above shoulder.
+    # Prevents scratching the top of the head from triggering gestures.
+    # Lower (0.05) is more permissive but can fire on incidental head touches.
+    arm_above_head_tolerance: float = 0.15
     # Minimum gap (frame fraction) between average hip_y and average shoulder_y.
     # Guards against arm-raise false positives when lying down: when horizontal,
     # hips and shoulders converge; when upright, hips are 0.2–0.4 below shoulders.
@@ -65,6 +68,13 @@ class Settings:
 
     # ── Gesture thresholds ────────────────────────────────────────────────
     mirror_camera: bool = True
+    # wave_lateral_fraction: wrist offset from body midline as a fraction of
+    # frame width required to classify as wave (vs snap).
+    # 0.12 = 12 % of frame width = ~230 px on a 1920 px wide dewarped frame.
+    # Raise toward 0.20 if straight raises are misclassified as waves.
+    wave_lateral_fraction: float = 0.12
+    # Deprecated — no longer used for classification; kept for backward compat
+    # so existing options.json/settings.yaml files don't cause load errors.
     wave_velocity_threshold_px: float = 150.0
     wave_sustain_frames: int = 3
     # Advanced: override in settings.yaml if needed
