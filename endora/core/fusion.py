@@ -40,6 +40,11 @@ class GestureFusion:
             g: [] for g in Gesture
         }
         self._last_emitted: Dict[Gesture, float] = {g: 0.0 for g in Gesture}
+        # Tracks the last time ANY gesture fired — blocks all gestures during cooldown.
+        # This prevents a second gesture (e.g. wave) firing immediately after the
+        # first (e.g. snap) because the motion that triggered the first gesture
+        # produces residual velocity that crosses the wave threshold a frame later.
+        self._last_emitted_any: float = 0.0
         self.total_emitted = 0
 
     def receive(self, gesture: Gesture, confidence: float, source: str):
@@ -47,10 +52,17 @@ class GestureFusion:
             now = time.monotonic()
 
             # ── Global cooldown check FIRST ───────────────────────────────
-            # Check before even accumulating candidates so a rapid burst
-            # from the same or different sources doesn't sneak through.
+            # A single cooldown window covers ALL gesture types.  Per-gesture
+            # clocks are kept for logging/stats but the global gate fires first.
+            global_elapsed = now - self._last_emitted_any
+            if global_elapsed < self.s.cooldown_s:
+                log.debug("Gesture %s suppressed by global cooldown (%.1fs remaining)",
+                          gesture, self.s.cooldown_s - global_elapsed)
+                return
+
+            # Per-gesture cooldown (secondary, guards same-gesture repeats)
             if now - self._last_emitted[gesture] < self.s.cooldown_s:
-                log.debug("Gesture %s suppressed by cooldown (%.1fs remaining)",
+                log.debug("Gesture %s suppressed by per-gesture cooldown (%.1fs remaining)",
                           gesture,
                           self.s.cooldown_s - (now - self._last_emitted[gesture]))
                 return
@@ -83,6 +95,7 @@ class GestureFusion:
             # Mark emitted BEFORE calling callback to block any re-entrant
             # candidates that arrive while the callback is executing
             self._last_emitted[gesture] = now
+            self._last_emitted_any = now
             self._pending[gesture].clear()
             self.total_emitted += 1
 
