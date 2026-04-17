@@ -625,9 +625,11 @@ class CameraAnalyser(threading.Thread):
                     last_hand_roll = hand_roll
                 log.debug(
                     "[%s] arm raised (%s side) wrist=(%.0f,%.0f) "
-                    "[seeded %d twist frames → swing=%.3f  pvx=%.1f]",
+                    "sh_x=%.0f lateral_offset=%.0f "
+                    "[seeded %d twist frames → swing=%.3f]",
                     self.label, raised_side, wx, wy,
-                    _n_seed, twist_swing, last_peak_vx,
+                    _sh_x_px, last_peak_vx,
+                    _n_seed, twist_swing,
                 )
                 arm_raised_since = time.monotonic()
             else:
