@@ -198,11 +198,11 @@ class CameraAnalyser(threading.Thread):
         # thumb) and can transiently look like a fist for 1–2 frames.
         # A deliberate held fist sustains easily for 3+ frames.
         SUSTAIN_NEEDED: dict[Gesture, int] = {
-            Gesture.SNAP:       2,   # wait one delta-frame before committing, so wave
-                                     # has a chance to register if the wrist is sweeping
+            Gesture.SNAP:       1,   # fires on single raised frame (arm often only
+                                     # detected for 1 frame at ~9fps)
             Gesture.FIST:       3,
-            Gesture.WAVE_LEFT:  2,
-            Gesture.WAVE_RIGHT: 2,
+            Gesture.WAVE_LEFT:  1,
+            Gesture.WAVE_RIGHT: 1,
         }
         last_arm_raised = False
         arm_must_reset = False        # True after a gesture fires; cleared when arm drops
@@ -584,17 +584,25 @@ class CameraAnalyser(threading.Thread):
                     palm_twists._samples.append(_sv)
                 _approach_cache.clear()
                 twist_swing, twist_dir = palm_twists.peak_swing()
-                # Start velocity tracking fresh from the first raised frame.
-                # Previously we seeded the tracker with pre-raise wrist history
-                # to catch quick-flick waves, but that history includes lateral
-                # arm-raise motion which regularly exceeds the wave threshold
-                # even on a calm snap.  Velocity is now measured from motion
-                # that occurs WHILE the arm is raised, not before.
-                # Wave needs 2 consecutive high-pvx frames (sustain=2) so a
-                # single-frame spike on frame 2 still cannot fire it alone.
+                # Determine wave vs snap from the APPROACH DIRECTION recorded
+                # in the pre-raise wrist history.  A wave sweeps in laterally
+                # (large horizontal displacement); a snap raises from below
+                # (small horizontal displacement).  This works even when the
+                # arm is only detected for a single frame — velocity-based
+                # detection requires multiple raised frames, which at ~9fps
+                # often never arrives.
+                _v_hist = (_right_wrist_history
+                           if raised_side == "RIGHT"
+                           else _left_wrist_history)
+                if len(_v_hist) >= 2:
+                    _hist_list = list(_v_hist)
+                    _look_back = min(5, len(_hist_list))
+                    last_peak_vx = wx - _hist_list[-_look_back][0]
+                    # positive = wrist moved right during approach
+                else:
+                    last_peak_vx = 0.0
                 wrist_tracker.reset()
-                wrist_tracker.update(wx, wy)   # first raised-arm sample
-                last_peak_vx = 0.0             # need ≥2 samples to have a delta
+                wrist_tracker.update(wx, wy)
                 last_is_fist = is_fist   # initialise for future fist transitions
                 last_hand_roll = 0.0     # clear carry-forward on new arm raise
                 last_hand_roll_age = 0
@@ -651,9 +659,9 @@ class CameraAnalyser(threading.Thread):
                 else:
                     last_hand_roll_age += 1
                 twist_swing, twist_dir = palm_twists.peak_swing()
-                # Track wrist pixel position for wave detection
+                # Keep wrist tracker for debug overlay; last_peak_vx holds the
+                # approach-direction dx from the first raised frame — don't overwrite.
                 wrist_tracker.update(wx, wy)
-                last_peak_vx, _ = wrist_tracker.peak_velocity()
             last_arm_raised = True
 
             # Reset stale gesture state if arm held still for too long
@@ -869,7 +877,7 @@ def _classify_hand_full(
 
 def _pick_candidate(
     is_fist: bool,
-    peak_vx: float,
+    approach_dx: float,
     settings,
 ) -> Optional[Gesture]:
     """
@@ -877,30 +885,39 @@ def _pick_candidate(
 
     Priority:
       1. FIST            — closed fist (static, highest priority)
-      2. WAVE_LEFT/RIGHT — deliberate horizontal sweep exceeding wave_velocity_threshold_px
-      3. SNAP            — default for any other non-fist raise
+      2. WAVE_LEFT/RIGHT — wrist approached horizontally (arm swept in from side)
+      3. SNAP            — default for vertical raises
 
-    Snap is the default because the wrist-velocity signal (Pose landmarks) is
-    always available and tends to read ~20–30 px even for relatively still raises,
-    meaning a low wave threshold causes constant false waves.  By making wave the
-    exceptional case (requiring clearly intentional horizontal velocity) and snap
-    the fallback, most calm raises correctly fire as snap.
+    Wave is detected from the APPROACH DIRECTION recorded in pre-raise wrist
+    history: the horizontal displacement of the wrist over the last 5 history
+    frames.  A wave sweeps the arm in from the side (large |approach_dx|); a
+    snap or calm raise comes up from below (small |approach_dx|).
+
+    This is robust at low frame-rates (~9fps) where the arm may only be
+    detected above the shoulder for a single frame — velocity-based detection
+    requires at least 2 raised frames to compute a delta, which often never
+    arrives.  Approach direction is computed from pre-raise history and is
+    available on frame 1.
+
+    wave_velocity_threshold_px is reused as the approach-displacement threshold
+    (pixels). 80px over 5 frames at 9fps = clear lateral sweep; natural raise
+    sway is typically < 40px.
     """
-    wave_thresh = float(getattr(settings, 'wave_velocity_threshold_px', 35.0))
+    wave_thresh = float(getattr(settings, 'wave_velocity_threshold_px', 80.0))
     mirror      = bool(getattr(settings,  'mirror_camera', True))
 
     if is_fist:
         return Gesture.FIST
 
-    # WAVE: only when there is a clear, deliberate horizontal sweep.
-    if abs(peak_vx) >= wave_thresh:
-        going_right = peak_vx > 0
+    # WAVE: wrist arrived from the side (arm swept horizontally into raised position)
+    if abs(approach_dx) >= wave_thresh:
+        going_right = approach_dx > 0
         if mirror:
             return Gesture.WAVE_LEFT if going_right else Gesture.WAVE_RIGHT
         else:
             return Gesture.WAVE_RIGHT if going_right else Gesture.WAVE_LEFT
 
-    # SNAP: everything else (calm raise, palm turn, quick flick below wave threshold)
+    # SNAP: default for vertical raises and everything else
     return Gesture.SNAP
 
 
