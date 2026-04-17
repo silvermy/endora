@@ -1,5 +1,5 @@
 """
-cameras/analyser.py  — Endora v1.7.21
+cameras/analyser.py  — Endora v1.7.22
 
 Hybrid gesture detection: MediaPipe Pose + Hands.
 
@@ -138,7 +138,7 @@ class CameraAnalyser(threading.Thread):
         _wave_dx: float         = 0.0
         _is_fist: bool          = False
 
-        log.info("[%s] Analyser running (v1.7.21 — forearm-angle classifier)", self.label)
+        log.info("[%s] Analyser running (v1.7.22 — one-arm gate + forearm classifier)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -555,6 +555,17 @@ def _arm_above_head(
                 "(need gap≥%.2f, got %.3f)",
                 avg_hp_y, avg_sh_y, upright_min, avg_hp_y - avg_sh_y,
             )
+        return False, (0.0, 0.0), ""
+
+    # ── Both-arms guard ───────────────────────────────────────────────────
+    # If BOTH wrists are above their respective shoulders, reject — it's a
+    # two-handed pose (arms spread wide, T-pose, stretch, "big animal") not
+    # a single-arm gesture.  Snap, wave, and fist are always one-handed.
+    _rw_raised = lm[PL.RIGHT_WRIST].y < (lm[PL.RIGHT_SHOULDER].y - margin)
+    _lw_raised = lm[PL.LEFT_WRIST].y  < (lm[PL.LEFT_SHOULDER].y  - margin)
+    if _rw_raised and _lw_raised:
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("  [arm-check] both wrists raised — ignoring (two-handed pose)")
         return False, (0.0, 0.0), ""
 
     pairs = [
