@@ -657,7 +657,7 @@ class CameraAnalyser(threading.Thread):
 
             # ── 3. Pick candidate ─────────────────────────────────────────
             candidate = _pick_candidate(
-                is_fist, twist_swing, last_peak_vx, self.s
+                is_fist, twist_swing, hand_roll, last_peak_vx, self.s
             )
 
             if log.isEnabledFor(logging.DEBUG):
@@ -857,6 +857,7 @@ def _classify_hand_full(
 def _pick_candidate(
     is_fist: bool,
     twist_swing: float,
+    hand_roll: float,
     peak_vx: float,
     settings,
 ) -> Optional[Gesture]:
@@ -865,26 +866,32 @@ def _pick_candidate(
 
     Priority:
       1. FIST       — closed fist (static, highest priority)
-      2. WAVE_LEFT / WAVE_RIGHT — horizontal wrist sweep exceeds velocity threshold
-      3. SNAP       — rapid palm rotation (dynamic)
+      2. SNAP       — palm rotation detected via EITHER:
+                        a) twist_swing > palm_twist_threshold  (roll changed across raises)
+                        b) |hand_roll| > snap_roll_threshold   (palm currently sideways)
+      3. WAVE_LEFT / WAVE_RIGHT — horizontal wrist sweep
     """
-    twist_thresh = float(getattr(settings, 'palm_twist_threshold', 0.40))
-    wave_thresh  = float(getattr(settings, 'wave_velocity_threshold_px', 20.0))
-    mirror       = bool(getattr(settings,  'mirror_camera', True))
+    twist_thresh     = float(getattr(settings, 'palm_twist_threshold',       0.40))
+    snap_roll_thresh = float(getattr(settings, 'snap_roll_threshold',        0.65))
+    wave_thresh      = float(getattr(settings, 'wave_velocity_threshold_px', 20.0))
+    mirror           = bool(getattr(settings,  'mirror_camera', True))
 
     if is_fist:
         return Gesture.FIST
 
-    # SNAP takes priority over WAVE: a deliberate wrist rotation is a strong
-    # signal and should not be shadowed by incidental horizontal arm motion.
-    if twist_swing > twist_thresh:
+    # SNAP: deliberate wrist rotation takes priority over wave.
+    # Two complementary signals:
+    #   a) Cross-raise swing: roll changed significantly since the last arm session.
+    #   b) Absolute roll: palm is currently rotated sideways (knuckle line vertical).
+    #      hand_roll ≈ ±1 when palm is 90° rotated; ≈ 0 when facing the camera.
+    #      Waves are done with the palm facing forward (low |roll|); snaps leave
+    #      the palm sideways (high |roll|) at the moment the arm reaches threshold.
+    if twist_swing > twist_thresh or abs(hand_roll) > snap_roll_thresh:
         return Gesture.SNAP
 
     if abs(peak_vx) >= wave_thresh:
         going_right = peak_vx > 0
         if mirror:
-            # With mirror_camera the image is flipped: wrist moving right in
-            # the frame means the person is sweeping their arm to the left.
             return Gesture.WAVE_LEFT if going_right else Gesture.WAVE_RIGHT
         else:
             return Gesture.WAVE_RIGHT if going_right else Gesture.WAVE_LEFT
