@@ -205,7 +205,8 @@ class CameraAnalyser(threading.Thread):
             Gesture.WAVE_RIGHT: 1,
         }
         last_arm_raised = False
-        arm_must_reset = False        # True after a gesture fires; cleared when arm drops
+        arm_must_reset = False        # True after a gesture fires
+        _last_gesture_time: float = 0.0  # wall-clock time of last fired gesture
         last_is_fist = False          # track fist→open transitions
         last_hand_roll = 0.0          # carry-forward when palm=unknown
         last_hand_roll_age = 0        # frames since last valid hand_roll
@@ -490,7 +491,18 @@ class CameraAnalyser(threading.Thread):
                         for g in Gesture:
                             sustain_counts[g] = 0
                     last_arm_raised = False
-                    arm_must_reset = False   # arm is fully down — next raise is fresh
+                    # Only clear arm_must_reset once the full cooldown has elapsed
+                    # since the last gesture.  Prevents snap looping when the arm
+                    # flickers up/down repeatedly — each flicker would otherwise
+                    # clear arm_must_reset and allow another gesture to fire.
+                    if arm_must_reset:
+                        _elapsed = time.monotonic() - _last_gesture_time
+                        if _elapsed >= self.s.cooldown_s:
+                            arm_must_reset = False
+                            log.debug("[%s] arm_must_reset cleared (%.1fs elapsed)", self.label, _elapsed)
+                        else:
+                            log.debug("[%s] arm_must_reset held (%.1fs < cooldown %.1fs)",
+                                      self.label, _elapsed, self.s.cooldown_s)
                 if log.isEnabledFor(logging.DEBUG) and consecutive_no_pose % 10 == 1:
                     if not pose_detected:
                         log.debug("[%s] NO POSE DETECTED — body not found in frame", self.label)
@@ -708,7 +720,8 @@ class CameraAnalyser(threading.Thread):
                 wrist_tracker.reset()
                 last_peak_vx = 0.0
                 consecutive_arm_raised = 0
-                arm_must_reset = True    # require arm to drop before next gesture
+                arm_must_reset = True    # require arm to drop + cooldown before next gesture
+                _last_gesture_time = time.monotonic()
 
             # ── Debug overlay ─────────────────────────────────────────────
             if self.debug_frame_cb is not None:
