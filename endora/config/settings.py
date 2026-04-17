@@ -67,11 +67,21 @@ class Settings:
     palm_orientation_threshold: float = 0.05
 
     # ── Gesture thresholds ────────────────────────────────────────────────
-    mirror_camera: bool = True
+    # Flip the image 180° (useful for cameras mounted upside-down).
+    flip_image: bool = False
+    # Flip gesture left/right (set True if the camera faces you and you have
+    # NOT already mirrored it in the camera's own app).
+    mirror_camera: bool = False
+    # Minimum elbow-above-shoulder gap (normalised frame height) to classify
+    # an arm raise as SNAP.  snap_elbow_min = shoulder_y_norm − elbow_y_norm.
+    # Arm straight up → gap ≈ 0.15–0.25.  Arm sideways → gap ≈ 0.00–0.04.
+    # 0.08 is the crossover (~20° from horizontal).
+    # Lower toward 0.04 if snaps are misfiring as waves.
+    # Raise toward 0.12 if waves are misfiring as snaps.
+    snap_elbow_min: float = 0.08
     # wave_lateral_fraction: wrist offset from body midline as a fraction of
     # frame width required to classify as wave (vs snap).
-    # 0.12 = 12 % of frame width = ~230 px on a 1920 px wide dewarped frame.
-    # Raise toward 0.20 if straight raises are misclassified as waves.
+    # Deprecated — no longer used for classification; snap_elbow_min is used.
     wave_lateral_fraction: float = 0.10
     # Deprecated — no longer used for classification; kept for backward compat
     # so existing options.json/settings.yaml files don't cause load errors.
