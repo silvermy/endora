@@ -1,4 +1,4 @@
-# Endora v1.7.18
+# Endora v1.7.19
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # After saving from the debug page, values are written here AND to
@@ -29,7 +29,7 @@ body_upright_min: -0.15
 #   of frame width) to confirm a lateral sweep.
 #   0.12 = 12% of frame width (~230 px on a 1920-wide dewarped frame).
 #   Raise toward 0.20 if straight raises are still misclassified as waves.
-wave_lateral_fraction: 0.12
+wave_lateral_fraction: 0.10
 
 # 0.75 = 3 of 4 fingers must be curled to count as a fist.
 fist_curl_threshold: 0.85

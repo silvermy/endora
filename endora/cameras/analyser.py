@@ -1,5 +1,5 @@
 """
-cameras/analyser.py  — Endora v1.7.18
+cameras/analyser.py  — Endora v1.7.19
 
 Hybrid gesture detection: MediaPipe Pose + Hands.
 
@@ -137,7 +137,7 @@ class CameraAnalyser(threading.Thread):
         _wave_dx: float       = 0.0
         _is_fist: bool        = False
 
-        log.info("[%s] Analyser running (v1.7.18 — elbow-based classifier)", self.label)
+        log.info("[%s] Analyser running (v1.7.19 — elbow-based classifier)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -416,13 +416,20 @@ class CameraAnalyser(threading.Thread):
                 log.debug("[%s] arm held still — resetting gesture state", self.label)
 
             # ── 3. Hand shape ─────────────────────────────────────────────
-            # Crop a 360×360 patch centred on the raised wrist and run Hands
-            # on it.  On a 1920-wide dewarped frame the hand is ~50 px across;
+            # Crop around the raised wrist and run Hands on it.
+            # On a 1920-wide dewarped frame the hand is ~50 px across;
             # cropping makes the hand fill the frame and dramatically improves
             # MediaPipe's palm detector accuracy.
+            #
+            # Fist detection tip: MediaPipe's palm detector is trained on open
+            # palms.  For a closed fist, shift the crop centre UPWARD by 60 px
+            # from the Pose wrist landmark so the knuckles (higher in frame)
+            # sit near the crop centre and the full fist silhouette is visible.
+            # Larger crop radius (220 px) ensures the whole hand fits even when
+            # the wrist estimate is slightly off.
             _wx_px = int(wx)
-            _wy_px = int(wy)
-            _ch    = 180   # half-side of crop in pixels
+            _wy_px = int(wy) - 60   # shift centre up toward knuckles
+            _ch    = 220            # half-side of crop in pixels
             _cx1   = max(0,  _wx_px - _ch)
             _cx2   = min(pw, _wx_px + _ch)
             _cy1   = max(0,  _wy_px - _ch)
@@ -607,34 +614,34 @@ def _pick_candidate(
 
     Priority:
       1. FIST            — closed fist, any arm position
-      2. WAVE_LEFT/RIGHT — elbow NOT above shoulder (arm extended sideways)
-      3. SNAP            — elbow above shoulder (arm raised straight up)
+      2. WAVE_LEFT/RIGHT — wrist is clearly to one side of the body mid-line
+      3. SNAP            — wrist roughly above body centre (small lateral offset)
 
-    Wave direction uses the wrist's offset from the body mid-line (wave_dx).
-    mirror_camera flips left/right for cameras facing the user.
+    Discriminator: wave_dx = wrist_x − shoulder_midline_x (pixels).
+    Using the MIDPOINT of both shoulders as reference means off-centre seating
+    doesn't break classification — the threshold scales with body position.
 
-    wave_lateral_fraction: minimum |wave_dx| as a fraction of frame width to
-    confirm a lateral sweep.  0.12 = 12 % of frame width.  At 1920 px wide
-    that is 230 px — well beyond the ±50 px natural body sway.
+    wave_lateral_fraction: minimum |wave_dx| as a fraction of frame width.
+      0.10 = 10% of 1920 px ≈ 192 px — snug but beyond natural arm sway.
+      0.15 = 15% ≈ 288 px — stricter; use if snaps near frame edge misfire.
+
+    elbow_above_shoulder is passed in for debug overlay only; it is NOT used
+    for classification here (when waving with arm raised, the elbow is often
+    also above the shoulder, so gating on it suppresses waves).
     """
     if is_fist:
         return Gesture.FIST
 
-    if not elbow_above_shoulder:
-        # Elbow at or below shoulder → arm swept out sideways → WAVE
-        wave_frac      = float(getattr(settings, 'wave_lateral_fraction', 0.12))
-        wave_thresh_px = wave_frac * frame_width
-        if abs(wave_dx) >= wave_thresh_px:
-            mirror      = bool(getattr(settings, 'mirror_camera', True))
-            going_right = wave_dx > 0
-            if mirror:
-                return Gesture.WAVE_LEFT if going_right else Gesture.WAVE_RIGHT
-            else:
-                return Gesture.WAVE_RIGHT if going_right else Gesture.WAVE_LEFT
-        # Arm extended sideways but not far enough — still classify as SNAP
-        # (straight-up raise at centre of frame scores a small wave_dx).
+    wave_frac      = float(getattr(settings, 'wave_lateral_fraction', 0.10))
+    wave_thresh_px = wave_frac * frame_width
+    if abs(wave_dx) >= wave_thresh_px:
+        mirror      = bool(getattr(settings, 'mirror_camera', True))
+        going_right = wave_dx > 0
+        if mirror:
+            return Gesture.WAVE_LEFT if going_right else Gesture.WAVE_RIGHT
+        else:
+            return Gesture.WAVE_RIGHT if going_right else Gesture.WAVE_LEFT
 
-    # Elbow above shoulder → arm raised straight up → SNAP
     return Gesture.SNAP
 
 

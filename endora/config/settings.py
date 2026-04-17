@@ -72,7 +72,7 @@ class Settings:
     # frame width required to classify as wave (vs snap).
     # 0.12 = 12 % of frame width = ~230 px on a 1920 px wide dewarped frame.
     # Raise toward 0.20 if straight raises are misclassified as waves.
-    wave_lateral_fraction: float = 0.12
+    wave_lateral_fraction: float = 0.10
     # Deprecated — no longer used for classification; kept for backward compat
     # so existing options.json/settings.yaml files don't cause load errors.
     wave_velocity_threshold_px: float = 150.0
