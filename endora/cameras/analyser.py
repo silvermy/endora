@@ -1,5 +1,5 @@
 """
-cameras/analyser.py  — Endora v1.7.20
+cameras/analyser.py  — Endora v1.7.21
 
 Hybrid gesture detection: MediaPipe Pose + Hands.
 
@@ -133,11 +133,12 @@ class CameraAnalyser(threading.Thread):
         _idle_reset_done: bool   = False
 
         # Per-frame classification signals (safe defaults)
-        _elbow_gap_norm: float = 0.0   # shoulder_y_norm - elbow_y_norm; >0 = elbow above shoulder
-        _wave_dx: float        = 0.0
-        _is_fist: bool         = False
+        _forearm_dy_norm: float = 0.0  # elbow_y_norm - wrist_y_norm; >0 = wrist above elbow
+        _elbow_gap_norm: float  = 0.0  # shoulder_y_norm - elbow_y_norm (debug/log only)
+        _wave_dx: float         = 0.0
+        _is_fist: bool          = False
 
-        log.info("[%s] Analyser running (v1.7.20 — elbow-gap classifier)", self.label)
+        log.info("[%s] Analyser running (v1.7.21 — forearm-angle classifier)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -322,7 +323,7 @@ class CameraAnalyser(threading.Thread):
                     try:
                         dbg = _draw_debug(
                             proc_frame, pose_res, None,
-                            False, 0.0, False, None,
+                            0.0, 0.0, 0.0, False, None,
                             consecutive_arm_raised, ARM_RAISE_MIN_FRAMES,
                         )
                         self.debug_frame_cb(self.label, dbg)
@@ -345,7 +346,8 @@ class CameraAnalyser(threading.Thread):
                     try:
                         dbg = _draw_debug(
                             proc_frame, pose_res, wrist_xy,
-                            _elbow_gap_norm, _wave_dx, _is_fist, None,
+                            _forearm_dy_norm, _elbow_gap_norm, _wave_dx,
+                            _is_fist, None,
                             consecutive_arm_raised, ARM_RAISE_MIN_FRAMES,
                         )
                         self.debug_frame_cb(self.label, dbg)
@@ -379,28 +381,32 @@ class CameraAnalyser(threading.Thread):
                             log.debug("[%s] debug render error: %s", self.label, e)
                     continue
 
-            # ── 2. Elbow gap — snap vs wave signal ────────────────────────
-            # _elbow_gap_norm = shoulder_y_norm − elbow_y_norm
-            #   (positive when elbow is ABOVE shoulder in the image)
+            # ── 2. Forearm angle — snap vs wave signal ─────────────────────
+            # _forearm_dy_norm = elbow_y_norm − wrist_y_norm
+            #   (positive when wrist is ABOVE elbow in the image)
             #
-            # Arm straight up (SNAP): elbow rises clearly above shoulder →
-            #   gap ≈ 0.15–0.25
-            # Arm extended sideways (WAVE): elbow stays near shoulder height →
-            #   gap ≈ 0.00–0.04
+            # SNAP (arm raised upward): forearm points up → wrist clearly
+            #   above elbow → forearm_dy ≈ 0.08–0.18
             #
-            # Using the MAGNITUDE (not a binary) lets us set a calibrated
-            # crossover threshold via snap_elbow_min (default 0.08).
-            # This signal is immune to lateral seating position because it
-            # only compares the elbow to the same-side shoulder vertically.
+            # WAVE (arm extended sideways): forearm points outward → wrist
+            #   at roughly elbow height or below → forearm_dy ≈ −0.05–0.04
+            #
+            # This works even when elbow_gap is large for BOTH gestures
+            # (i.e. both snap and wave are performed with the arm elevated).
+            # The forearm orientation is the most position-independent and
+            # gesture-specific signal available from a single frame at 9 fps.
             _lm_g = pose_res.pose_landmarks.landmark
             _PL_g = mp.solutions.pose.PoseLandmark
             if raised_side == "RIGHT":
                 _elbow_y    = _lm_g[_PL_g.RIGHT_ELBOW].y
+                _wrist_y_n  = _lm_g[_PL_g.RIGHT_WRIST].y
                 _sh_y_local = _lm_g[_PL_g.RIGHT_SHOULDER].y
             else:
                 _elbow_y    = _lm_g[_PL_g.LEFT_ELBOW].y
+                _wrist_y_n  = _lm_g[_PL_g.LEFT_WRIST].y
                 _sh_y_local = _lm_g[_PL_g.LEFT_SHOULDER].y
-            _elbow_gap_norm = _sh_y_local - _elbow_y  # positive = elbow above shoulder
+            _forearm_dy_norm = _elbow_y - _wrist_y_n  # positive = wrist above elbow
+            _elbow_gap_norm  = _sh_y_local - _elbow_y  # positive = elbow above shoulder (debug)
 
             # Wrist offset from body midline — used only for WAVE direction.
             _mid_x   = ((_lm_g[_PL_g.LEFT_SHOULDER].x + _lm_g[_PL_g.RIGHT_SHOULDER].x)
@@ -410,9 +416,9 @@ class CameraAnalyser(threading.Thread):
             if not last_arm_raised:
                 log.debug(
                     "[%s] arm raised (%s) wrist=(%.0f,%.0f) "
-                    "elbow_gap=%.3f wave_dx=%.0f",
+                    "forearm_dy=%.3f elbow_gap=%.3f wave_dx=%.0f",
                     self.label, raised_side, wx, wy,
-                    _elbow_gap_norm, _wave_dx,
+                    _forearm_dy_norm, _elbow_gap_norm, _wave_dx,
                 )
                 arm_raised_since = time.monotonic()
 
@@ -458,15 +464,15 @@ class CameraAnalyser(threading.Thread):
 
             # ── 4. Pick candidate ─────────────────────────────────────────
             candidate = _pick_candidate(
-                _is_fist, _elbow_gap_norm, _wave_dx, self.s
+                _is_fist, _forearm_dy_norm, _wave_dx, self.s
             )
 
             if log.isEnabledFor(logging.DEBUG):
                 log.debug(
                     "[%s] arm up | wrist=(%.0f,%.0f) fist=%s "
-                    "elbow_gap=%.3f wave_dx=%.0f → candidate=%s sustain=%s",
+                    "forearm_dy=%.3f elbow_gap=%.3f wave_dx=%.0f → candidate=%s sustain=%s",
                     self.label, wx, wy,
-                    _is_fist, _elbow_gap_norm, _wave_dx,
+                    _is_fist, _forearm_dy_norm, _elbow_gap_norm, _wave_dx,
                     str(candidate) if candidate else "none",
                     {g.name: sustain_counts[g] for g in Gesture
                      if sustain_counts[g] > 0},
@@ -496,7 +502,8 @@ class CameraAnalyser(threading.Thread):
                     dbg = _draw_debug(
                         proc_frame, pose_res,
                         wrist_xy if arm_raised else None,
-                        _elbow_gap_norm, _wave_dx, _is_fist, candidate,
+                        _forearm_dy_norm, _elbow_gap_norm, _wave_dx,
+                        _is_fist, candidate,
                         consecutive_arm_raised, ARM_RAISE_MIN_FRAMES,
                     )
                     self.debug_frame_cb(self.label, dbg)
@@ -614,7 +621,7 @@ def _classify_fist(hand_res, settings) -> tuple[bool, float]:
 
 def _pick_candidate(
     is_fist: bool,
-    elbow_gap_norm: float,
+    forearm_dy_norm: float,
     wave_dx: float,
     settings,
 ) -> Optional[Gesture]:
@@ -623,36 +630,38 @@ def _pick_candidate(
 
     Priority:
       1. FIST            — closed fist, any arm position
-      2. SNAP            — elbow clearly above shoulder (arm raised upward)
-      3. WAVE_LEFT/RIGHT — elbow near shoulder height (arm extended sideways)
+      2. SNAP            — forearm points upward (wrist clearly above elbow)
+      3. WAVE_LEFT/RIGHT — forearm points sideways (wrist at/below elbow height)
 
-    Discriminator: elbow_gap_norm = shoulder_y_norm − elbow_y_norm
-      (positive when elbow is ABOVE shoulder in MediaPipe normalised coords)
+    Discriminator: forearm_dy_norm = elbow_y_norm − wrist_y_norm
+      (positive when wrist is ABOVE elbow in normalised coords)
 
-    snap_elbow_min (default 0.08):
-      Arm straight up → gap ≈ 0.15–0.25  → SNAP
-      Arm extended sideways → gap ≈ 0–0.04 → WAVE
-      Crossover at 0.08 = elbow 8 % of frame height above shoulder.
-      Raise toward 0.12 if waves fire as snap; lower toward 0.04 if snaps
-      fire as wave.
+    SNAP: arm raised straight up → forearm vertical → wrist high above elbow
+          forearm_dy ≈ 0.08–0.18
+    WAVE: arm swept sideways    → forearm horizontal → wrist at elbow height
+          forearm_dy ≈ −0.05–0.04
 
-    This is the most seating-position-independent signal available: it
-    compares the elbow to its own shoulder vertically, so it doesn't matter
-    if the user is off-centre or their wrist ends up far from the midline.
+    This works even when the elbow is elevated for BOTH gestures (high waves
+    and snaps can both have elbow well above the shoulder).  The forearm
+    angle is the most geometry-independent signal at 9 fps.
 
-    wave_dx (wrist − shoulder midline, pixels) is used only to set
-    WAVE_LEFT vs WAVE_RIGHT direction.
+    snap_forearm_min (default 0.06): crossover threshold.
+      Watch forearm_dy in the debug overlay:
+        snap  ≈ 0.10+   wave ≈ 0.00 or negative
+      Raise toward 0.10 if waves misfire as snap.
+      Lower toward 0.03 if snaps misfire as wave.
+
+    wave_dx (wrist − shoulder midline, pixels) sets WAVE_LEFT vs WAVE_RIGHT.
     """
     if is_fist:
         return Gesture.FIST
 
-    snap_elbow_min = float(getattr(settings, 'snap_elbow_min', 0.08))
+    snap_forearm_min = float(getattr(settings, 'snap_forearm_min', 0.06))
 
-    if elbow_gap_norm >= snap_elbow_min:
-        # Elbow clearly above shoulder → arm raised upward → SNAP
+    if forearm_dy_norm >= snap_forearm_min:
         return Gesture.SNAP
 
-    # Elbow near/below shoulder → arm extended sideways → WAVE
+    # Forearm roughly horizontal → WAVE
     mirror      = bool(getattr(settings, 'mirror_camera', False))
     going_right = wave_dx > 0
     if mirror:
@@ -665,7 +674,7 @@ def _pick_candidate(
 
 def _draw_debug(
     frame, pose_res, wrist_xy,
-    elbow_gap_norm, wave_dx, is_fist,
+    forearm_dy_norm, elbow_gap_norm, wave_dx, is_fist,
     candidate, consec_raised, min_frames,
 ):
     """Draw skeleton + gesture state overlay onto a copy of frame."""
@@ -710,8 +719,8 @@ def _draw_debug(
     cand_str  = str(candidate) if candidate else "none"
     lines = [
         (arm_state,                                   (0, 255, 100) if ready else (0, 165, 255)),
-        (f"elbow_gap={elbow_gap_norm:.3f}",            (255, 255, 255)),
-        (f"fist={is_fist}  wave_dx={wave_dx:.0f}",   (255, 255, 255)),
+        (f"forearm_dy={forearm_dy_norm:.3f}  eg={elbow_gap_norm:.3f}", (255, 255, 255)),
+        (f"fist={is_fist}  wave_dx={wave_dx:.0f}",                    (255, 255, 255)),
         (f"cand: {cand_str}",                         (255, 255, 0) if candidate else (160, 160, 160)),
     ]
     fs      = max(0.35, w / 1800)
