@@ -72,12 +72,16 @@ class Settings:
     # Flip gesture left/right (set True if the camera faces you and you have
     # NOT already mirrored it in the camera's own app).
     mirror_camera: bool = False
-    # Minimum elbow-above-shoulder gap (normalised frame height) to classify
-    # an arm raise as SNAP.  snap_elbow_min = shoulder_y_norm − elbow_y_norm.
-    # Arm straight up → gap ≈ 0.15–0.25.  Arm sideways → gap ≈ 0.00–0.04.
-    # 0.08 is the crossover (~20° from horizontal).
-    # Lower toward 0.04 if snaps are misfiring as waves.
-    # Raise toward 0.12 if waves are misfiring as snaps.
+    # Minimum forearm vertical extent (normalised frame height) to classify
+    # an arm raise as SNAP.  snap_forearm_min = elbow_y_norm − wrist_y_norm.
+    # Arm straight up → forearm_dy ≈ 0.08–0.18  (wrist clearly above elbow)
+    # Arm swept sideways → forearm_dy ≈ −0.05–0.04 (wrist at elbow height)
+    # 0.06 is the crossover.  Watch forearm_dy in the debug overlay:
+    #   snap should read 0.10+, wave should read 0.00 or negative.
+    # Lower toward 0.03 if snaps misfire as wave.
+    # Raise toward 0.10 if waves misfire as snap.
+    snap_forearm_min: float = 0.06
+    # Deprecated name — kept so old settings.yaml files don't cause errors.
     snap_elbow_min: float = 0.08
     # wave_lateral_fraction: wrist offset from body midline as a fraction of
     # frame width required to classify as wave (vs snap).

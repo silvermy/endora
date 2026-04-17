@@ -1,4 +1,4 @@
-# Endora v1.7.20
+# Endora v1.7.21
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # After saving from the debug page, values are written here AND to
@@ -32,13 +32,15 @@ body_upright_min: -0.15
 # Flip image 180° — for cameras mounted upside-down.
 flip_image: false
 
-# snap_elbow_min: how far above the shoulder the elbow must be (normalised
+# snap_forearm_min: how far the wrist must be above the elbow (normalised
 # frame height) to classify an arm raise as SNAP rather than WAVE.
-# Arm straight up → gap ≈ 0.15–0.25.  Arm swept sideways → gap ≈ 0–0.04.
-# 0.08 is the safe midpoint (~20° from horizontal).
-# Lower toward 0.04 if snaps misfire as waves.
-# Raise toward 0.12 if waves misfire as snaps.
-snap_elbow_min: 0.08
+# forearm_dy = elbow_y_norm - wrist_y_norm  (positive = wrist above elbow)
+# Arm straight up → forearm_dy ≈ 0.08–0.18  → SNAP
+# Arm swept sideways → forearm_dy ≈ −0.05–0.04 → WAVE
+# Watch forearm_dy in the debug overlay while gesturing to calibrate.
+# Lower toward 0.03 if snaps misfire as wave.
+# Raise toward 0.10 if waves misfire as snap.
+snap_forearm_min: 0.06
 
 wave_lateral_fraction: 0.10
 
