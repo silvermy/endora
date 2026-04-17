@@ -198,7 +198,8 @@ class CameraAnalyser(threading.Thread):
         # thumb) and can transiently look like a fist for 1–2 frames.
         # A deliberate held fist sustains easily for 3+ frames.
         SUSTAIN_NEEDED: dict[Gesture, int] = {
-            Gesture.SNAP:       1,
+            Gesture.SNAP:       2,   # wait one delta-frame before committing, so wave
+                                     # has a chance to register if the wrist is sweeping
             Gesture.FIST:       3,
             Gesture.WAVE_LEFT:  2,
             Gesture.WAVE_RIGHT: 2,
