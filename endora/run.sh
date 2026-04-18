@@ -6,7 +6,7 @@
 
 set -e
 
-bashio::log.info "Endora v1.7.36 starting..."
+bashio::log.info "Endora v1.7.37 starting..."
 
 if ! bashio::config.has_value "rtsp_url_a"; then
     bashio::log.fatal "rtsp_url_a is not configured"
@@ -28,7 +28,7 @@ export DEBUG_PORT="$(bashio::config 'debug_port')"
 export LOG_LEVEL="$(bashio::config 'log_level')"
 
 if [ "${DEBUG_PORT}" != "0" ] && [ -n "${DEBUG_PORT}" ]; then
-    bashio::log.info "Debug stream: http://<ha-ip>:${DEBUG_PORT}/"
+    bashio::log.info "Debug stream: http://homeassistant.local:${DEBUG_PORT}/"
 fi
 
 exec /opt/venv/bin/python3 /app/main.py
