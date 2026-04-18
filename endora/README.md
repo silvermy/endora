@@ -1,23 +1,27 @@
 # Endora
 
-Wave your hand to control Home Assistant — lights, TV, volume, anything.
+Control Home Assistant with arm gestures — lights, TV, volume, anything.
 
-Watches an RTSP camera stream for hand gestures and fires HA events you can use in any automation. Runs as a **Home Assistant Add-on** (HA OS / Supervised) or as a **standalone Docker container**.
+Watches an RTSP camera stream for hand/arm gestures and fires HA events you can use in any automation. Runs as a **Home Assistant Add-on** (HA OS / Supervised) or as a **standalone Docker container**.
 
-**Debug page:** [http://homeassistant.local:8765/](http://homeassistant.local:8765/) — live camera overlay, gesture state, and tuning sliders. Enable by setting `debug_port: 8765` in Configuration.
+Designed for use from a couch with a fisheye camera mounted overhead or at eye level.
+
+**Debug stream:** [http://homeassistant.local:8765/](http://homeassistant.local:8765/) — live camera overlay with skeleton, arm state, and gesture candidate. Enable with `debug_port: 8765`.
 
 ---
 
 ## Gestures
 
-All gestures require the arm to be **fully extended above head** — elbow above shoulder, wrist above elbow.
+All gestures require the arm to be **raised above the head** — wrist above shoulder by at least `arm_above_head_tolerance`.
 
-| HA event data | Motion | Hand shape |
-|---|---|---|
-| `endora-snap` | Wrist snap — flip palm from facing forward to backward (or vice versa) | Open hand |
-| `endora-fist` | Raise arm, close fist | Closed fist |
-| `endora-wave-left` | Raise arm, sweep wrist to the left | Open hand |
-| `endora-wave-right` | Raise arm, sweep wrist to the right | Open hand |
+| HA event data | How to perform |
+|---|---|
+| `endora-snap` | Raise arm straight up — fires immediately when arm goes vertical |
+| `endora-hold` | Raise arm and keep it up — fires `hold_duration_s` seconds after snap |
+| `endora-double-snap` | Raise arm twice within `double_snap_window_s` seconds |
+| `endora-thumbs-up` | Raise arm with thumb extended upward, other fingers curled |
+
+**SNAP → HOLD sequence:** raising your arm always fires `endora-snap` first. If you keep your arm up, `endora-hold` fires after `hold_duration_s` (default 1.5s). Lower and raise again within `double_snap_window_s` (default 3s) for `endora-double-snap`.
 
 ---
 
@@ -29,33 +33,21 @@ All gestures require the arm to be **fully extended above head** — elbow above
 
 Add: `https://github.com/silvermy/endora`
 
-Or as a local add-on:
+### 2. Install & Configure
 
-```bash
-cd /addons
-git clone https://github.com/silvermy/endora endora
-```
-
-Then: **Settings → Add-ons → Add-on Store → ⋮ → Check for updates**
-
-### 2. Configure
-
-In the add-on **Configuration** tab:
+Find **Endora** in the add-on store, install, then set options in the **Configuration** tab:
 
 ```yaml
 rtsp_url_a: "rtsp://admin:password@192.168.1.100:554/stream1"
+rtsp_url_b: "rtsp://admin:password@192.168.1.100:554/stream1"  # same as A for single-camera
 ha_event_name: gesture_detected
 debug_port: 8765
 log_level: info
 ```
 
-Set `rtsp_url_b` to the same value as `rtsp_url_a` for single-camera mode.
-
 ### 3. Start
 
-Click **Start** → check the **Log** tab for the stream connecting.
-
-Open the debug page at [http://homeassistant.local:8765/](http://homeassistant.local:8765/) to verify the camera view and tune settings.
+Click **Start** → check the **Log** tab for stream connection. Open the debug stream at [http://homeassistant.local:8765/](http://homeassistant.local:8765/) to verify camera view and tune.
 
 ---
 
@@ -104,7 +96,7 @@ Every gesture fires event type `gesture_detected`:
 }
 ```
 
-### Lights on/off
+### Lights
 
 ```yaml
 - alias: "Endora — snap → lights toggle"
@@ -118,76 +110,76 @@ Every gesture fires event type `gesture_detected`:
     target:
       area_id: living_room
 
-- alias: "Endora — fist → lights off"
+- alias: "Endora — hold → lights off"
   trigger:
     platform: event
     event_type: gesture_detected
     event_data:
-      gesture: endora-fist
+      gesture: endora-hold
   action:
     service: light.turn_off
     target:
       area_id: living_room
-```
 
-### Volume
-
-```yaml
-- alias: "Endora — wave left → volume up"
+- alias: "Endora — double-snap → scene"
   trigger:
     platform: event
     event_type: gesture_detected
     event_data:
-      gesture: endora-wave-left
+      gesture: endora-double-snap
+  action:
+    service: scene.turn_on
+    target:
+      entity_id: scene.movie_mode
+
+- alias: "Endora — thumbs-up → volume up"
+  trigger:
+    platform: event
+    event_type: gesture_detected
+    event_data:
+      gesture: endora-thumbs-up
   action:
     service: media_player.volume_up
     target:
       entity_id: media_player.living_room_tv
-
-- alias: "Endora — wave right → volume down"
-  trigger:
-    platform: event
-    event_type: gesture_detected
-    event_data:
-      gesture: endora-wave-right
-  action:
-    service: media_player.volume_down
-    target:
-      entity_id: media_player.living_room_tv
 ```
 
 ---
 
-## Debug page
+## Debug stream
 
 Navigate to [http://homeassistant.local:8765/](http://homeassistant.local:8765/) after enabling `debug_port: 8765`.
 
-The page shows a live camera view with skeleton overlay and a right-side panel with live tuning sliders. Changes take effect immediately — no restart needed. Use **Save to settings.yaml** to persist them.
-
-| Overlay | Meaning |
+| Overlay element | Meaning |
 |---|---|
-| Green skeleton | Body detected |
-| `NO POSE DETECTED` (red) | Body not found — check lighting, camera angle |
+| Green skeleton | Body detected and passing visibility filter |
+| `NO POSE DETECTED` (red box) | Body not found — check lighting, camera angle |
 | Cyan dot on wrist | ARM READY — gestures can fire |
 | Orange dot on wrist | Warming up (not enough consecutive frames yet) |
-| Bottom-left panel | Arm state, twist swing value, palm orientation, current candidate |
-| Green banner | Gesture fired |
-
-### Tuning
-
-1. Open debug page and raise your arm — look for the cyan wrist dot (ARM READY).
-2. If arm isn't triggering: lower **Arm raise margin** slider.
-3. If arm triggers when it shouldn't: raise **Arm raise margin** slider.
-4. For snap gesture: watch `twist=` value while snapping. If it doesn't exceed **Snap sensitivity**, lower that slider.
-5. Use **CLAHE enhance** toggle if detection is poor in low light or dark clothing against dark background.
+| `forearm_dy` | Forearm verticality — should read 0.10+ for a clean snap |
+| `hold_elapsed` | Seconds since snap fired — approaches `hold_duration_s` for HOLD |
+| `cand:` | Current gesture candidate this frame |
 
 ---
 
-## Camera placement
+## Fisheye dewarping
 
-An **eye-level mount at 4–4.5 ft** (e.g., on a mantel shelf or TV console) gives the best results. MediaPipe Pose was trained on frontal views — overhead mounting degrades accuracy significantly.
+If using a fisheye camera (e.g. Reolink with fisheye mode), enable dewarping:
 
-Point the camera at your typical sitting/standing position. With a fisheye lens the field of view is wide enough to cover a couch + a few feet either side without issue.
+```yaml
+dewarp_enable: true
+dewarp_fov: 180        # total lens FOV
+dewarp_tilt: 30        # + = camera looks down toward floor
+dewarp_pan: -25        # + = right, - = left (centre yourself in frame)
+dewarp_roll: 0         # level the horizon
+dewarp_vfov: 50        # vertical FOV of output (narrower = more zoomed in)
+dewarp_out_width: 1280
+dewarp_out_height: 640
+```
+
+Set the Reolink camera to **Fisheye** mode (not Defisheye) in the app so the raw fisheye circle is streamed.
+
+Tune `dewarp_pan` until you are roughly centred in the debug stream — this prevents MediaPipe from latching onto furniture instead of you.
 
 ---
 
@@ -195,37 +187,49 @@ Point the camera at your typical sitting/standing position. With a fisheye lens 
 
 | Problem | Fix |
 |---|---|
-| No skeleton | Check lighting; try `pose_model_complexity: 2`; lower `pose_min_detection_confidence` to `0.3` |
-| ARM READY triggers too easily | Raise **Arm raise margin** (`arm_above_head_tolerance`) |
-| ARM READY never triggers | Lower **Arm raise margin** |
-| Snap not detecting | Lower **Snap sensitivity** (`palm_twist_threshold`); watch `twist=` on debug page |
-| False fist triggers | Raise `fist_curl_threshold` toward `0.9` |
-| High CPU on Pi | Set `pose_model_complexity: 0`; `frame_width: 320` |
+| No skeleton / tracking furniture | Raise `pose_visibility_min` toward `0.5`; adjust `dewarp_pan` to centre yourself |
+| ARM READY never triggers | Lower `arm_above_head_tolerance` (try `0.15`) |
+| ARM READY triggers too easily | Raise `arm_above_head_tolerance` (try `0.25`) |
+| SNAP not firing | Lower `snap_forearm_min` toward `0.07`; watch `forearm_dy` in debug |
+| SNAP fires when arm is sideways | Raise `snap_forearm_min` toward `0.13` |
+| HOLD fires too soon / too late | Adjust `hold_duration_s` |
+| DOUBLE_SNAP window too tight | Raise `double_snap_window_s` to `4` or `5` |
+| THUMBS_UP not detecting | Set `log_level: debug` and watch `thumbs_up=` in logs; lower `fist_curl_threshold` |
+| Feet-up on couch fires false snaps | Raise `leg_raise_margin` toward `0.25` |
+| Sitting cross-legged suppresses gestures | Lower `leg_raise_margin` toward `0.15` |
+| High CPU on Pi | Set `pose_model_complexity: 0` |
 | Stream dropping | Switch `rtsp_transport: udp` on wired LAN |
-| 401 from HA | Check token; for add-on ensure `homeassistant_api: true` |
+| 401 from HA | Check token; for add-on ensure `homeassistant_api: true` in config.json |
 
 ---
 
-## Configuration reference
+## Full configuration reference
 
 | Option | Default | Description |
 |---|---|---|
-| `rtsp_url_a` | — | RTSP URL (required) |
+| `rtsp_url_a` | — | RTSP stream URL (required) |
 | `rtsp_url_b` | same as A | Second camera; set equal to A for single-camera mode |
-| `debug_port` | `8765` | Debug web page port; `0` = disabled |
-| `ha_event_name` | `gesture_detected` | HA event type |
+| `debug_port` | `8765` | Debug stream port; `0` = disabled |
+| `ha_event_name` | `gesture_detected` | HA event type fired on gesture |
 | `log_level` | `info` | `debug` / `info` / `warning` / `error` |
-| `arm_above_head_tolerance` | `0.05` | How far above shoulder the wrist must be (frame fraction) |
-| `wave_velocity_threshold_px` | `20` | Minimum wrist pixel speed for wave-left / wave-right |
-| `palm_twist_threshold` | `0.40` | 2D knuckle-line swing required for snap gesture |
-| `fist_curl_threshold` | `0.75` | Curl fraction to count as fist (0–1) |
-| `cooldown_s` | `2.0` | Min seconds between gestures |
-| `pose_visibility_min` | `0.35` | Shoulder visibility threshold (filters furniture) |
-| `frame_crop_bottom` | `0` | % of frame to crop from bottom |
-| `pose_model_complexity` | `1` | 0=fastest, 1=balanced, 2=accurate |
-| `low_light_enhance` | `false` | CLAHE contrast boost before inference |
-| `mirror_camera` | `true` | Flip left/right for forward-facing camera |
-| `dewarp_enable` | `false` | Enable fisheye dewarping |
-| `dewarp_tilt` | `30.0` | Camera tilt angle (° down) |
-| `dewarp_pan` | `0.0` | Camera pan angle (° right) |
-| `dewarp_vfov` | `75.0` | Vertical FOV of output (°) |
+| `arm_above_head_tolerance` | `0.15` | Wrist must be this far above shoulder (frame fraction) |
+| `body_upright_min` | `-0.15` | Hip-shoulder gap to confirm upright posture (negative OK for fisheye) |
+| `leg_raise_margin` | `0.20` | Both ankles must exceed this above hip to suppress gestures (couch guard) |
+| `snap_forearm_min` | `0.10` | Minimum forearm verticality for SNAP/HOLD (`forearm_dy` in debug) |
+| `hold_duration_s` | `1.5` | Seconds after SNAP that arm must stay up to fire HOLD |
+| `double_snap_window_s` | `3.0` | Seconds within which two snaps count as DOUBLE_SNAP |
+| `fist_curl_threshold` | `0.75` | Fraction of fingers curled for THUMBS_UP detection |
+| `cooldown_s` | `2.0` | Minimum seconds between any two gestures |
+| `pose_visibility_min` | `0.45` | Min shoulder/hip visibility to accept a pose (filters furniture) |
+| `frame_crop_bottom` | `0` | % of frame to crop from bottom (removes coffee table) |
+| `mirror_camera` | `false` | Flip left/right gesture direction |
+| `flip_image` | `false` | Rotate frame 180° for upside-down cameras |
+| `low_light_enhance` | `false` | CLAHE contrast boost for low-light / IR scenes |
+| `dewarp_enable` | `false` | Enable fisheye-to-perspective dewarping |
+| `dewarp_fov` | `180.0` | Total fisheye lens FOV in degrees |
+| `dewarp_tilt` | `30.0` | Tilt angle: + = down toward floor |
+| `dewarp_pan` | `0.0` | Pan angle: + = right, - = left |
+| `dewarp_roll` | `0.0` | Roll to level horizon |
+| `dewarp_vfov` | `75.0` | Vertical FOV of dewarped output |
+| `dewarp_out_width` | `1280` | Output frame width (wider = more horizontal FOV) |
+| `dewarp_out_height` | `480` | Output frame height |
