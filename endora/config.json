@@ -1,6 +1,6 @@
 {
   "name": "Endora",
-  "version": "1.7.37",
+  "version": "1.7.38",
   "slug": "endora",
   "description": "Gesture detection — SNAP, HOLD, DOUBLE_SNAP, PEACE. Works from couch or standing.",
   "url": "https://github.com/silvermy/endora",
@@ -80,10 +80,12 @@
   "homeassistant_api": true,
   "hassio_api": true,
   "auth_api": false,
-  "ingress": false,
+  "ingress": true,
+  "ingress_port": 8766,
   "panel_icon": "mdi:hand-wave",
   "panel_title": "Endora",
   "ports": {
-    "8765/tcp": 8765
+    "8765/tcp": 8765,
+    "8766/tcp": 8766
   }
 }
