@@ -49,6 +49,14 @@ log_level: info
 
 Click **Start** → check the **Log** tab for stream connection. Open the debug stream at [http://homeassistant.local:8765/](http://homeassistant.local:8765/) to verify camera view and tune.
 
+### 4. Sidebar (optional)
+
+Endora can appear in the HA sidebar as a quick link to the add-on page and debug stream. To enable or disable it:
+
+**Settings → Add-ons → Endora → Info tab → "Show in sidebar" toggle**
+
+This is a per-user preference stored by HA — each household member can set it independently. When enabled, clicking the sidebar entry opens a landing page with links to the add-on settings and debug stream.
+
 ---
 
 ## Installation — Standalone Docker
