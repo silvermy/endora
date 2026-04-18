@@ -460,8 +460,6 @@ class CameraAnalyser(threading.Thread):
                 hand_res = hands.process(_hands_rgb)
             else:
                 hand_res = None
-            else:
-                hand_res = None
 
             _is_fist, _hand_conf = _classify_fist(hand_res, self.s)
 
