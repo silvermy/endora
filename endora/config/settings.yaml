@@ -1,4 +1,4 @@
-# Endora v1.7.25
+# Endora v1.7.26
 # ── Essential settings ───────────────────────────────────────────────────────
 # These mirror the add-on Configuration tab.
 # After saving from the debug page, values are written here AND to
@@ -22,6 +22,12 @@ arm_above_head_tolerance: 0.15
 # -0.15 works for frontal dewarped fisheye; 0.10 for overhead cameras.
 body_upright_min: -0.15
 
+# Leg-raise guard: suppress all gestures when ankle or knee rises above hip
+# level by this fraction of frame height. Prevents feet-up-on-couch from
+# triggering false SNAP events. Increase toward 0.15 if you sometimes gesture
+# while seated with knees up. Set to 0.0 to disable.
+leg_raise_margin: 0.05
+
 # Wave vs snap classifier: elbow position.
 # When the elbow is ABOVE the shoulder the arm is raised straight up → SNAP.
 # When the elbow is AT or BELOW the shoulder the arm is extended sideways → WAVE.
@@ -40,7 +46,7 @@ flip_image: false
 # Watch forearm_dy in the debug overlay while gesturing to calibrate.
 # Lower toward 0.03 if snaps misfire as wave.
 # Raise toward 0.10 if waves misfire as snap.
-snap_forearm_min: 0.06
+snap_forearm_min: 0.10
 
 wave_lateral_fraction: 0.10
 

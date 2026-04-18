@@ -11,6 +11,10 @@
     "rtsp_transport": { "name": "RTSP transport", "description": "tcp (reliable) or udp (lower latency)" },
     "pose_model_complexity": { "name": "Pose model", "description": "0=fastest, 1=balanced, 2=accurate" },
     "ha_event_name": { "name": "HA event name", "description": "Event fired in Home Assistant" },
-    "log_level": { "name": "Log level", "description": "debug|info|warning|error" }
+    "log_level": { "name": "Log level", "description": "debug|info|warning|error" },
+    "body_upright_min": { "name": "Body upright threshold", "description": "Hips must be this far below shoulders (negative = fisheye OK)" },
+    "leg_raise_margin": { "name": "Leg-raise suppression margin", "description": "Suppress gestures when ankle/knee rises this far above hip (0=disable)" },
+    "snap_forearm_min": { "name": "Snap forearm threshold", "description": "Forearm must be this vertical (0.10 recommended) to classify as SNAP" },
+    "wave_lateral_fraction": { "name": "Wave lateral fraction", "description": "Wrist must be this fraction of frame width off-centre for a WAVE to fire" }
   }
 }
