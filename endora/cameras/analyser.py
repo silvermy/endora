@@ -1,16 +1,17 @@
 """
-cameras/analyser.py  — Endora v1.7.28
+cameras/analyser.py  — Endora v1.7.29
 
 Hybrid gesture detection: MediaPipe Pose + Hands.
 
 Pipeline per frame:
   1. (Optional) Fisheye dewarp → crop → CLAHE
   2. Pose  → arm raised above head? (wrist above shoulder + margin)
-  3. Hands → open vs fist
+  3. Hands → thumb up / two-finger V / open
   4. Classify:
-       FIST          — closed fist
-       SNAP          — elbow above shoulder (arm raised straight up)
-       WAVE_LEFT/RIGHT — elbow below shoulder (arm extended sideways)
+       SNAP        — forearm vertical, fires immediately on raise
+       HOLD        — forearm vertical, held for ~1.5 s (arm stays up)
+       DOUBLE_SNAP — two SNAP events within double_snap_window_s
+       THUMBS_UP   — arm raised, thumb extended upward, other fingers curled
   5. Sustain N frames → fire → cooldown
 """
 
@@ -30,14 +31,14 @@ log = logging.getLogger(__name__)
 # ── Gesture enum ──────────────────────────────────────────────────────────────
 
 class Gesture(Enum):
-    SNAP       = auto()  # arm raised straight up, wrist snap
-    FIST       = auto()  # arm raised, closed fist (static)
-    WAVE_LEFT  = auto()  # arm extended sideways, sweep left
-    WAVE_RIGHT = auto()  # arm extended sideways, sweep right
+    SNAP        = auto()  # arm raised straight up, fires immediately
+    HOLD        = auto()  # arm raised straight up, held for hold_duration_s
+    DOUBLE_SNAP = auto()  # two snaps within double_snap_window_s seconds
+    THUMBS_UP   = auto()  # arm raised, thumb up, other fingers curled
 
     @property
     def event_name(self) -> str:
-        """HA event data value, e.g. 'endora-wave-left'."""
+        """HA event data value, e.g. 'endora-snap'."""
         return f"endora-{self.name.lower().replace('_', '-')}"
 
     def __str__(self) -> str:
@@ -103,16 +104,22 @@ class CameraAnalyser(threading.Thread):
 
         # ── Gesture state ─────────────────────────────────────────────────
         sustain_counts: dict[Gesture, int] = {g: 0 for g in Gesture}
-        # Frames each gesture must appear consecutively before firing.
-        # At ~9 fps the arm is often only detected for 1 frame per raise, so
-        # SUSTAIN_NEEDED=1 across the board.  Discrimination relies on the
-        # gesture classifier, not on sustain count.
+        # SNAP fires on 1 sustained frame. HOLD requires arm_up for
+        # hold_duration_s. DOUBLE_SNAP tracks recent snap times.
+        # THUMBS_UP requires 2 sustained frames for reliability.
         SUSTAIN_NEEDED: dict[Gesture, int] = {
-            Gesture.SNAP:       1,
-            Gesture.FIST:       1,
-            Gesture.WAVE_LEFT:  1,
-            Gesture.WAVE_RIGHT: 1,
+            Gesture.SNAP:        1,
+            Gesture.HOLD:        1,
+            Gesture.DOUBLE_SNAP: 1,
+            Gesture.THUMBS_UP:   2,
         }
+
+        # HOLD state — tracks how long arm has been continuously raised vertical
+        _hold_fired: bool      = False   # True once HOLD fires; reset on arm-down
+        _arm_up_since: float   = 0.0
+
+        # DOUBLE_SNAP state — ring buffer of recent snap fire times
+        _snap_times: list[float] = []
 
         last_arm_raised    = False
         arm_must_reset     = False   # True after a gesture fires; blocks re-fire
@@ -138,7 +145,7 @@ class CameraAnalyser(threading.Thread):
         _wave_dx: float         = 0.0
         _is_fist: bool          = False
 
-        log.info("[%s] Analyser running (v1.7.28 — leg-raise guard + wave/snap fixes)", self.label)
+        log.info("[%s] Analyser running (v1.7.29 — leg-raise guard + wave/snap fixes)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -295,6 +302,8 @@ class CameraAnalyser(threading.Thread):
                         log.debug("[%s] arm lowered — resetting sustain counts", self.label)
                         for g in Gesture:
                             sustain_counts[g] = 0
+                        _hold_fired  = False
+                        _arm_up_since = 0.0
                     last_arm_raised = False
                     # Clear arm_must_reset only once the full cooldown has elapsed.
                     # This prevents re-fire when the arm flickers up/down after a gesture.
@@ -397,20 +406,10 @@ class CameraAnalyser(threading.Thread):
                             log.debug("[%s] debug render error: %s", self.label, e)
                     continue
 
-            # ── 2. Forearm angle — snap vs wave signal ─────────────────────
-            # _forearm_dy_norm = elbow_y_norm − wrist_y_norm
-            #   (positive when wrist is ABOVE elbow in the image)
-            #
-            # SNAP (arm raised upward): forearm points up → wrist clearly
-            #   above elbow → forearm_dy ≈ 0.08–0.18
-            #
-            # WAVE (arm extended sideways): forearm points outward → wrist
-            #   at roughly elbow height or below → forearm_dy ≈ −0.05–0.04
-            #
-            # This works even when elbow_gap is large for BOTH gestures
-            # (i.e. both snap and wave are performed with the arm elevated).
-            # The forearm orientation is the most position-independent and
-            # gesture-specific signal available from a single frame at 9 fps.
+            # ── 2. Forearm angle ──────────────────────────────────────────
+            # forearm_dy_norm = elbow_y_norm − wrist_y_norm
+            #   positive when wrist is ABOVE elbow (arm vertical → SNAP/HOLD)
+            #   near-zero or negative (arm sideways) → not a snap gesture
             _lm_g = pose_res.pose_landmarks.landmark
             _PL_g = mp.solutions.pose.PoseLandmark
             if raised_side == "RIGHT":
@@ -421,22 +420,23 @@ class CameraAnalyser(threading.Thread):
                 _elbow_y    = _lm_g[_PL_g.LEFT_ELBOW].y
                 _wrist_y_n  = _lm_g[_PL_g.LEFT_WRIST].y
                 _sh_y_local = _lm_g[_PL_g.LEFT_SHOULDER].y
-            _forearm_dy_norm = _elbow_y - _wrist_y_n  # positive = wrist above elbow
-            _elbow_gap_norm  = _sh_y_local - _elbow_y  # positive = elbow above shoulder (debug)
+            _forearm_dy_norm = _elbow_y - _wrist_y_n
+            _elbow_gap_norm  = _sh_y_local - _elbow_y
 
-            # Wrist offset from body midline — used only for WAVE direction.
+            # Lateral offset (kept for debug overlay)
             _mid_x   = ((_lm_g[_PL_g.LEFT_SHOULDER].x + _lm_g[_PL_g.RIGHT_SHOULDER].x)
                         / 2.0) * pw
-            _wave_dx = wx - _mid_x   # +ve = wrist right of centre
+            _wave_dx = wx - _mid_x
 
             if not last_arm_raised:
                 log.debug(
                     "[%s] arm raised (%s) wrist=(%.0f,%.0f) "
-                    "forearm_dy=%.3f elbow_gap=%.3f wave_dx=%.0f",
+                    "forearm_dy=%.3f elbow_gap=%.3f",
                     self.label, raised_side, wx, wy,
-                    _forearm_dy_norm, _elbow_gap_norm, _wave_dx,
+                    _forearm_dy_norm, _elbow_gap_norm,
                 )
                 arm_raised_since = time.monotonic()
+                _arm_up_since    = time.monotonic()
 
             last_arm_raised = True
 
@@ -448,20 +448,11 @@ class CameraAnalyser(threading.Thread):
                 log.debug("[%s] arm held still — resetting gesture state", self.label)
 
             # ── 3. Hand shape ─────────────────────────────────────────────
-            # Crop around the raised wrist and run Hands on it.
-            # On a 1920-wide dewarped frame the hand is ~50 px across;
-            # cropping makes the hand fill the frame and dramatically improves
-            # MediaPipe's palm detector accuracy.
-            #
-            # Fist detection tip: MediaPipe's palm detector is trained on open
-            # palms.  For a closed fist, shift the crop centre UPWARD by 60 px
-            # from the Pose wrist landmark so the knuckles (higher in frame)
-            # sit near the crop centre and the full fist silhouette is visible.
-            # Larger crop radius (220 px) ensures the whole hand fits even when
-            # the wrist estimate is slightly off.
+            # Crop around the wrist and run Hands. Shift upward toward knuckles
+            # so the full hand fills the crop regardless of shape.
             _wx_px = int(wx)
-            _wy_px = int(wy) - 80   # shift centre up toward knuckles (was 60)
-            _ch    = 260            # half-side of crop in pixels (was 220)
+            _wy_px = int(wy) - 80
+            _ch    = 260
             _cx1   = max(0,  _wx_px - _ch)
             _cx2   = min(pw, _wx_px + _ch)
             _cy1   = max(0,  _wy_px - _ch)
@@ -476,19 +467,38 @@ class CameraAnalyser(threading.Thread):
             else:
                 hand_res = None
 
-            _is_fist, _hand_conf = _classify_fist(hand_res, self.s)
+            _is_thumbs_up, _hand_conf = _classify_thumbs_up(hand_res, self.s)
+            # Keep _is_fist alias for debug overlay compatibility
+            _is_fist = _is_thumbs_up
 
             # ── 4. Pick candidate ─────────────────────────────────────────
-            candidate = _pick_candidate(
-                _is_fist, _forearm_dy_norm, _wave_dx, self.s, frame_w=pw
+            snap_forearm_min = float(getattr(self.s, 'snap_forearm_min', 0.10))
+            _arm_is_vertical = _forearm_dy_norm >= snap_forearm_min
+
+            # HOLD: arm vertical, held continuously for hold_duration_s,
+            # not yet fired this raise.
+            hold_duration_s = float(getattr(self.s, 'hold_duration_s', 1.5))
+            _arm_held_long  = (
+                _arm_up_since > 0 and
+                (now - _arm_up_since) >= hold_duration_s
             )
+
+            if _is_thumbs_up:
+                candidate = Gesture.THUMBS_UP
+            elif _arm_is_vertical and _arm_held_long and not _hold_fired:
+                candidate = Gesture.HOLD
+            elif _arm_is_vertical:
+                candidate = Gesture.SNAP
+            else:
+                candidate = None
 
             if log.isEnabledFor(logging.DEBUG):
                 log.debug(
-                    "[%s] arm up | wrist=(%.0f,%.0f) fist=%s "
-                    "forearm_dy=%.3f elbow_gap=%.3f wave_dx=%.0f → candidate=%s sustain=%s",
+                    "[%s] arm up | wrist=(%.0f,%.0f) thumbs_up=%s "
+                    "forearm_dy=%.3f vertical=%s held=%.1fs → candidate=%s sustain=%s",
                     self.label, wx, wy,
-                    _is_fist, _forearm_dy_norm, _elbow_gap_norm, _wave_dx,
+                    _is_thumbs_up, _forearm_dy_norm, _arm_is_vertical,
+                    now - _arm_up_since if _arm_up_since > 0 else 0.0,
                     str(candidate) if candidate else "none",
                     {g.name: sustain_counts[g] for g in Gesture
                      if sustain_counts[g] > 0},
@@ -504,13 +514,36 @@ class CameraAnalyser(threading.Thread):
             needed = SUSTAIN_NEEDED.get(candidate, 1) if candidate else 1
 
             if candidate and sustain_counts.get(candidate, 0) >= needed:
+                now_fire = time.monotonic()
+
+                # HOLD: mark fired so it doesn't re-fire while arm stays up
+                if candidate == Gesture.HOLD:
+                    _hold_fired = True
+
+                # DOUBLE_SNAP: if this is a SNAP, check if a previous snap
+                # fired recently; if so, emit DOUBLE_SNAP instead.
+                if candidate == Gesture.SNAP:
+                    double_snap_window = float(getattr(self.s, 'double_snap_window_s', 3.0))
+                    # Prune old snap times
+                    _snap_times[:] = [t for t in _snap_times
+                                      if now_fire - t < double_snap_window]
+                    if _snap_times:
+                        # A previous snap exists within the window → DOUBLE_SNAP
+                        log.debug("[%s] DOUBLE_SNAP detected (prev snap %.1fs ago)",
+                                  self.label, now_fire - _snap_times[-1])
+                        _snap_times.clear()
+                        candidate = Gesture.DOUBLE_SNAP
+                    else:
+                        _snap_times.append(now_fire)
+                        # First snap — fire SNAP normally, don't suppress
+
                 confidence = min(1.0, sustain_counts[candidate] / max(1, needed * 2))
                 log.debug("[%s] FIRING %s conf=%.2f", self.label, candidate, confidence)
                 self.on_candidate(candidate, confidence, self.label)
                 sustain_counts         = {g: 0 for g in Gesture}
                 consecutive_arm_raised = 0
                 arm_must_reset         = True
-                _last_gesture_time     = time.monotonic()
+                _last_gesture_time     = now_fire
 
             # ── Debug overlay ─────────────────────────────────────────────
             if self.debug_frame_cb is not None:
@@ -575,30 +608,25 @@ def _arm_above_head(
 
     # ── Leg-raise guard ───────────────────────────────────────────────────
     # When lying on the couch with feet raised, ankles/knees appear elevated
-    # in the frame. If either ankle is above hip level (with a small margin),
-    # suppress all gesture detection — it's a leg raise, not an arm gesture.
-    # leg_raise_margin: how far above the hip an ankle must be to trigger (0.05
-    # = 5% of frame height clearance, enough to ignore normal seated posture).
-    _leg_raise_margin = float(getattr(settings, 'leg_raise_margin', 0.05))
-    _avg_hip_y = avg_hp_y  # already computed above
+    # in the frame. Requires BOTH ankles above hip level to suppress — a single
+    # raised knee while seated normally should not block gestures.
+    # leg_raise_margin: how far above the hip BOTH ankles must be (0.20 = 20%
+    # of frame height, much more forgiving than the previous 0.05).
+    _leg_raise_margin = float(getattr(settings, 'leg_raise_margin', 0.20))
+    _avg_hip_y = avg_hp_y
     _r_ankle_y = lm[PL.RIGHT_ANKLE].y if hasattr(PL, 'RIGHT_ANKLE') else 1.0
     _l_ankle_y = lm[PL.LEFT_ANKLE].y  if hasattr(PL, 'LEFT_ANKLE')  else 1.0
-    _r_knee_y  = lm[PL.RIGHT_KNEE].y  if hasattr(PL, 'RIGHT_KNEE')  else 1.0
-    _l_knee_y  = lm[PL.LEFT_KNEE].y   if hasattr(PL, 'LEFT_KNEE')   else 1.0
-    # In normalised coords y=0 is top — "above hip" means smaller y value
+    # Both ankles must be above hip threshold to suppress
     _leg_raised = (
-        _r_ankle_y < _avg_hip_y - _leg_raise_margin or
-        _l_ankle_y < _avg_hip_y - _leg_raise_margin or
-        _r_knee_y  < _avg_hip_y - _leg_raise_margin or
-        _l_knee_y  < _avg_hip_y - _leg_raise_margin
+        _r_ankle_y < _avg_hip_y - _leg_raise_margin and
+        _l_ankle_y < _avg_hip_y - _leg_raise_margin
     )
     if _leg_raised:
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
                 "  [arm-check] leg raise detected — suppressing gesture "
-                "(r_ankle=%.3f l_ankle=%.3f r_knee=%.3f l_knee=%.3f hip=%.3f margin=%.3f)",
-                _r_ankle_y, _l_ankle_y, _r_knee_y, _l_knee_y,
-                _avg_hip_y, _leg_raise_margin,
+                "(r_ankle=%.3f l_ankle=%.3f hip=%.3f margin=%.3f)",
+                _r_ankle_y, _l_ankle_y, _avg_hip_y, _leg_raise_margin,
             )
         return False, (0.0, 0.0), ""
 
@@ -646,102 +674,37 @@ def _arm_above_head(
     return False, (0.0, 0.0), ""
 
 
-def _classify_fist(hand_res, settings) -> tuple[bool, float]:
+def _classify_thumbs_up(hand_res, settings) -> tuple[bool, float]:
     """
-    Returns (is_fist, confidence).
+    Returns (is_thumbs_up, confidence).
 
-    Uses rotation-invariant 3D distance: tip vs MCP distance from wrist.
-    Extended finger: tip_d ≈ 2–3× mcp_d.
-    Curled  finger:  tip_d ≈ 0.5–0.8× mcp_d.
+    Thumbs-up: thumb tip clearly above thumb MCP (extended upward),
+    while index/middle/ring/pinky tips are below their MCPs (curled).
 
-    fist_curl_threshold (0–1): fraction of 4 fingers that must be curled.
-    0.85 = 3.4 of 4 fingers curled.
+    Uses normalised y coordinates (smaller y = higher in frame).
+    thumb_up_margin: how far above MCP the tip must be (normalised 3D dist).
+    fist_curl_threshold reused for finger-curl fraction.
     """
     if not hand_res or not hand_res.multi_hand_landmarks:
         return False, 0.0
 
     lm = hand_res.multi_hand_landmarks[0].landmark
 
+    # Thumb: tip (4) above IP (3) above MCP (2) — extended = tip clearly above MCP
+    thumb_tip  = lm[4]
+    thumb_mcp  = lm[2]
+    thumb_up   = thumb_tip.y < thumb_mcp.y  # smaller y = higher in frame
+
+    # Fingers: tip above MCP = extended; below = curled
     TIPS = [8, 12, 16, 20]
     MCPS = [5,  9, 13, 17]
-    wrist = lm[0]
+    curled = sum(1 for t, m in zip(TIPS, MCPS) if lm[t].y > lm[m].y)
+    curl_frac = curled / 4.0
+    fingers_curled = curl_frac >= float(getattr(settings, 'fist_curl_threshold', 0.75))
 
-    def _d3(a, b):
-        return ((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2) ** 0.5
-
-    curled = 0
-    for tip_i, mcp_i in zip(TIPS, MCPS):
-        tip_d = _d3(lm[tip_i], wrist)
-        mcp_d = _d3(lm[mcp_i], wrist)
-        if tip_d < mcp_d * 1.1:
-            curled += 1
-
-    frac    = curled / 4.0
-    is_fist = frac >= float(settings.fist_curl_threshold)
-    conf    = frac if is_fist else (1.0 - frac)
-    return is_fist, conf
-
-
-def _pick_candidate(
-    is_fist: bool,
-    forearm_dy_norm: float,
-    wave_dx: float,
-    settings,
-    frame_w: int = 1280,
-) -> Optional[Gesture]:
-    """
-    Map one frame's hand + arm state to a gesture candidate.
-
-    Priority:
-      1. FIST            — closed fist, any arm position
-      2. SNAP            — forearm clearly vertical (wrist well above elbow)
-      3. WAVE_LEFT/RIGHT — forearm horizontal AND wrist clearly lateral
-      4. None            — ambiguous frame, wait for a cleaner one
-
-    Discriminator: forearm_dy_norm = elbow_y_norm − wrist_y_norm
-      (positive when wrist is ABOVE elbow in normalised coords)
-
-    SNAP: arm raised straight up → forearm_dy ≈ 0.08–0.18
-    WAVE: arm swept sideways    → forearm_dy ≈ −0.05–0.04
-
-    snap_forearm_min (default 0.10): minimum forearm_dy to classify as SNAP.
-      Raised from 0.06 — at 0.02–0.06 the arm is ambiguous (elbow level with
-      wrist) and should return None rather than defaulting to SNAP.
-
-    wave_lateral_fraction: minimum wrist offset from body midline as a fraction
-      of frame width before a WAVE fires. Without this gate every small wrist
-      wobble while the arm is raised gets classified as a wave.
-      0.10 = wrist must be at least 10% of frame width (~128 px) off-centre.
-
-    Returns None for ambiguous frames so the sustain counter doesn't accumulate
-    noise — the arm must hold a clear posture for SUSTAIN_NEEDED frames.
-    """
-    if is_fist:
-        return Gesture.FIST
-
-    snap_forearm_min    = float(getattr(settings, 'snap_forearm_min',    0.10))
-    wave_lat_frac       = float(getattr(settings, 'wave_lateral_fraction', 0.10))
-    wave_px_min         = wave_lat_frac * frame_w
-
-    if forearm_dy_norm >= snap_forearm_min:
-        return Gesture.SNAP
-
-    # Forearm roughly horizontal — require meaningful lateral wrist offset
-    # before committing to a wave direction.  Without this gate, resting the
-    # arm slightly off-centre fires a wave on every frame.
-    if abs(wave_dx) < wave_px_min:
-        log.debug(
-            "  [pick] forearm horizontal but |wave_dx|=%.0f < min=%.0f — returning None",
-            abs(wave_dx), wave_px_min,
-        )
-        return None
-
-    mirror      = bool(getattr(settings, 'mirror_camera', False))
-    going_right = wave_dx > 0
-    if mirror:
-        return Gesture.WAVE_LEFT if going_right else Gesture.WAVE_RIGHT
-    else:
-        return Gesture.WAVE_RIGHT if going_right else Gesture.WAVE_LEFT
+    is_thumbs_up = thumb_up and fingers_curled
+    confidence   = (curl_frac + (1.0 if thumb_up else 0.0)) / 2.0
+    return is_thumbs_up, confidence
 
 
 # ── Debug overlay ─────────────────────────────────────────────────────────────
