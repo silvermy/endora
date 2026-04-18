@@ -53,6 +53,11 @@ class Settings:
     # 0.10 = overhead cameras (hips below shoulders in image).
     # -0.15 = frontal dewarped fisheye (hips appear above shoulders due to perspective).
     body_upright_min: float = -0.15
+    # Leg-raise guard: if any ankle or knee is this far above hip level
+    # (normalised frame fraction), all gesture detection is suppressed.
+    # Prevents feet-up-on-couch from triggering false snaps.
+    # 0.05 = 5% of frame height clearance above hip.
+    leg_raise_margin: float = 0.05
     # Furniture filter: minimum average visibility of shoulders+hips.
     # MediaPipe assigns high visibility to real body landmarks and near-zero
     # to furniture false-detections. 0.35 rejects furniture without touching
@@ -80,7 +85,7 @@ class Settings:
     #   snap should read 0.10+, wave should read 0.00 or negative.
     # Lower toward 0.03 if snaps misfire as wave.
     # Raise toward 0.10 if waves misfire as snap.
-    snap_forearm_min: float = 0.06
+    snap_forearm_min: float = 0.10
     # Deprecated name — kept so old settings.yaml files don't cause errors.
     snap_elbow_min: float = 0.08
     # wave_lateral_fraction: wrist offset from body midline as a fraction of

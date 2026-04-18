@@ -445,14 +445,14 @@ class CameraAnalyser(threading.Thread):
             # Larger crop radius (220 px) ensures the whole hand fits even when
             # the wrist estimate is slightly off.
             _wx_px = int(wx)
-            _wy_px = int(wy) - 60   # shift centre up toward knuckles
-            _ch    = 220            # half-side of crop in pixels
+            _wy_px = int(wy) - 80   # shift centre up toward knuckles (was 60)
+            _ch    = 260            # half-side of crop in pixels (was 220)
             _cx1   = max(0,  _wx_px - _ch)
             _cx2   = min(pw, _wx_px + _ch)
             _cy1   = max(0,  _wy_px - _ch)
             _cy2   = min(ph, _wy_px + _ch)
             _hands_crop = rgb[_cy1:_cy2, _cx1:_cx2]
-            if _hands_crop.size > 0:
+            if _hands_crop.size > 0 and (_cx2 - _cx1) >= 64 and (_cy2 - _cy1) >= 64:
                 _hands_rgb = cv2.resize(
                     _hands_crop, (256, 256),
                     interpolation=cv2.INTER_LINEAR,
@@ -460,12 +460,14 @@ class CameraAnalyser(threading.Thread):
                 hand_res = hands.process(_hands_rgb)
             else:
                 hand_res = None
+            else:
+                hand_res = None
 
             _is_fist, _hand_conf = _classify_fist(hand_res, self.s)
 
             # ── 4. Pick candidate ─────────────────────────────────────────
             candidate = _pick_candidate(
-                _is_fist, _forearm_dy_norm, _wave_dx, self.s
+                _is_fist, _forearm_dy_norm, _wave_dx, self.s, frame_w=pw
             )
 
             if log.isEnabledFor(logging.DEBUG):
@@ -558,6 +560,35 @@ def _arm_above_head(
             )
         return False, (0.0, 0.0), ""
 
+    # ── Leg-raise guard ───────────────────────────────────────────────────
+    # When lying on the couch with feet raised, ankles/knees appear elevated
+    # in the frame. If either ankle is above hip level (with a small margin),
+    # suppress all gesture detection — it's a leg raise, not an arm gesture.
+    # leg_raise_margin: how far above the hip an ankle must be to trigger (0.05
+    # = 5% of frame height clearance, enough to ignore normal seated posture).
+    _leg_raise_margin = float(getattr(settings, 'leg_raise_margin', 0.05))
+    _avg_hip_y = avg_hp_y  # already computed above
+    _r_ankle_y = lm[PL.RIGHT_ANKLE].y if hasattr(PL, 'RIGHT_ANKLE') else 1.0
+    _l_ankle_y = lm[PL.LEFT_ANKLE].y  if hasattr(PL, 'LEFT_ANKLE')  else 1.0
+    _r_knee_y  = lm[PL.RIGHT_KNEE].y  if hasattr(PL, 'RIGHT_KNEE')  else 1.0
+    _l_knee_y  = lm[PL.LEFT_KNEE].y   if hasattr(PL, 'LEFT_KNEE')   else 1.0
+    # In normalised coords y=0 is top — "above hip" means smaller y value
+    _leg_raised = (
+        _r_ankle_y < _avg_hip_y - _leg_raise_margin or
+        _l_ankle_y < _avg_hip_y - _leg_raise_margin or
+        _r_knee_y  < _avg_hip_y - _leg_raise_margin or
+        _l_knee_y  < _avg_hip_y - _leg_raise_margin
+    )
+    if _leg_raised:
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "  [arm-check] leg raise detected — suppressing gesture "
+                "(r_ankle=%.3f l_ankle=%.3f r_knee=%.3f l_knee=%.3f hip=%.3f margin=%.3f)",
+                _r_ankle_y, _l_ankle_y, _r_knee_y, _l_knee_y,
+                _avg_hip_y, _leg_raise_margin,
+            )
+        return False, (0.0, 0.0), ""
+
     # ── Both-arms guard ───────────────────────────────────────────────────
     # If BOTH wrists are clearly above their shoulders, reject — it's a
     # two-handed pose (arms spread wide, T-pose, stretch, "big animal"),
@@ -643,44 +674,55 @@ def _pick_candidate(
     forearm_dy_norm: float,
     wave_dx: float,
     settings,
+    frame_w: int = 1280,
 ) -> Optional[Gesture]:
     """
     Map one frame's hand + arm state to a gesture candidate.
 
     Priority:
       1. FIST            — closed fist, any arm position
-      2. SNAP            — forearm points upward (wrist clearly above elbow)
-      3. WAVE_LEFT/RIGHT — forearm points sideways (wrist at/below elbow height)
+      2. SNAP            — forearm clearly vertical (wrist well above elbow)
+      3. WAVE_LEFT/RIGHT — forearm horizontal AND wrist clearly lateral
+      4. None            — ambiguous frame, wait for a cleaner one
 
     Discriminator: forearm_dy_norm = elbow_y_norm − wrist_y_norm
       (positive when wrist is ABOVE elbow in normalised coords)
 
-    SNAP: arm raised straight up → forearm vertical → wrist high above elbow
-          forearm_dy ≈ 0.08–0.18
-    WAVE: arm swept sideways    → forearm horizontal → wrist at elbow height
-          forearm_dy ≈ −0.05–0.04
+    SNAP: arm raised straight up → forearm_dy ≈ 0.08–0.18
+    WAVE: arm swept sideways    → forearm_dy ≈ −0.05–0.04
 
-    This works even when the elbow is elevated for BOTH gestures (high waves
-    and snaps can both have elbow well above the shoulder).  The forearm
-    angle is the most geometry-independent signal at 9 fps.
+    snap_forearm_min (default 0.10): minimum forearm_dy to classify as SNAP.
+      Raised from 0.06 — at 0.02–0.06 the arm is ambiguous (elbow level with
+      wrist) and should return None rather than defaulting to SNAP.
 
-    snap_forearm_min (default 0.06): crossover threshold.
-      Watch forearm_dy in the debug overlay:
-        snap  ≈ 0.10+   wave ≈ 0.00 or negative
-      Raise toward 0.10 if waves misfire as snap.
-      Lower toward 0.03 if snaps misfire as wave.
+    wave_lateral_fraction: minimum wrist offset from body midline as a fraction
+      of frame width before a WAVE fires. Without this gate every small wrist
+      wobble while the arm is raised gets classified as a wave.
+      0.10 = wrist must be at least 10% of frame width (~128 px) off-centre.
 
-    wave_dx (wrist − shoulder midline, pixels) sets WAVE_LEFT vs WAVE_RIGHT.
+    Returns None for ambiguous frames so the sustain counter doesn't accumulate
+    noise — the arm must hold a clear posture for SUSTAIN_NEEDED frames.
     """
     if is_fist:
         return Gesture.FIST
 
-    snap_forearm_min = float(getattr(settings, 'snap_forearm_min', 0.06))
+    snap_forearm_min    = float(getattr(settings, 'snap_forearm_min',    0.10))
+    wave_lat_frac       = float(getattr(settings, 'wave_lateral_fraction', 0.10))
+    wave_px_min         = wave_lat_frac * frame_w
 
     if forearm_dy_norm >= snap_forearm_min:
         return Gesture.SNAP
 
-    # Forearm roughly horizontal → WAVE
+    # Forearm roughly horizontal — require meaningful lateral wrist offset
+    # before committing to a wave direction.  Without this gate, resting the
+    # arm slightly off-centre fires a wave on every frame.
+    if abs(wave_dx) < wave_px_min:
+        log.debug(
+            "  [pick] forearm horizontal but |wave_dx|=%.0f < min=%.0f — returning None",
+            abs(wave_dx), wave_px_min,
+        )
+        return None
+
     mirror      = bool(getattr(settings, 'mirror_camera', False))
     going_right = wave_dx > 0
     if mirror:
