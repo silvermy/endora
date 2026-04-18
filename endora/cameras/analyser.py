@@ -1,5 +1,5 @@
 """
-cameras/analyser.py  — Endora v1.7.35
+cameras/analyser.py  — Endora v1.7.36
 
 Hybrid gesture detection: MediaPipe Pose + Hands.
 
@@ -152,7 +152,7 @@ class CameraAnalyser(threading.Thread):
         _wave_dx: float         = 0.0
         _is_fist: bool          = False
 
-        log.info("[%s] Analyser running (v1.7.35 — leg-raise guard + wave/snap fixes)", self.label)
+        log.info("[%s] Analyser running (v1.7.36 — SNAP/HOLD/DOUBLE_SNAP/PEACE gestures)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
