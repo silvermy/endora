@@ -618,16 +618,35 @@ a.btn-secondary:hover{{background:#1e1e1e}}
 </style>
 </head>
 <body>
-<h1>✋ Endora</h1>
+<h1>&#x270B; Endora</h1>
 <p>Gesture detection for Home Assistant</p>
 <div class="links">
-  <a class="btn btn-primary" href="/hassio/addon/local_endora/info" target="_top">
-    ⚙️ &nbsp; Add-on Settings
+  <a class="btn btn-primary" id="settings-link" href="#" target="_top">
+    &#9881;&#65039; &nbsp; Add-on Settings
   </a>
   <a class="btn btn-secondary" href="http://homeassistant.local:{port}/" target="_blank">
-    📷 &nbsp; Debug Stream
+    &#128247; &nbsp; Debug Stream
   </a>
 </div>
+<script>
+// Derive the add-on slug from the ingress path.
+// HA ingress URLs look like: /api/hassio_ingress/<token>/
+// The add-on info page is at: /hassio/addon/<slug>/info
+// We can't get the slug from the ingress token directly, but we can
+// link to the add-ons overview page which always works.
+(function() {{
+  var link = document.getElementById('settings-link');
+  // Try to extract slug from referrer or parent URL
+  var ref = document.referrer || '';
+  var m = ref.match(/\\/hassio\\/addon\\/([^\\/]+)/);
+  if (m) {{
+    link.href = '/hassio/addon/' + m[1] + '/info';
+  }} else {{
+    // Fallback: go to add-ons overview
+    link.href = '/hassio/store';
+  }}
+}})();
+</script>
 </body>
 </html>
 """
