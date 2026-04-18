@@ -1,0 +1,19 @@
+# Endora — Python dependencies
+# Built into the Docker image at build time.
+
+# ── Computer vision ───────────────────────────────────────────────────────────
+# MediaPipe: pose skeleton + hand landmark detection
+# Official arm64 wheels exist from v0.10.9 (works on Pi 4/5 64-bit, amd64)
+mediapipe>=0.10.9
+
+# OpenCV headless — no Qt/GTK, smaller image, all we need is VideoCapture
+# Must be built with FFmpeg support for RTSP (the PyPI wheel includes it)
+opencv-python-headless>=4.9.0.80
+
+# ── Config ────────────────────────────────────────────────────────────────────
+PyYAML>=6.0
+
+# ── Notes ─────────────────────────────────────────────────────────────────────
+# Output to HA uses urllib (stdlib) — no extra packages needed.
+# MQTT and HTTP backends have been removed; HA Supervisor API is the only
+# output target.  If you want MQTT as well, add: paho-mqtt>=2.0.0

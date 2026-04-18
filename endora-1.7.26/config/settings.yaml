@@ -1,0 +1,104 @@
+# Endora v1.7.26
+# ── Essential settings ───────────────────────────────────────────────────────
+# These mirror the add-on Configuration tab.
+# After saving from the debug page, values are written here AND to
+# /data/options.json so they survive add-on restarts.
+
+rtsp_url_a: "rtsp://admin:rarcy1-hyfder-bubvuK@10.0.0.178:554/h264Preview_01_sub"
+rtsp_url_b: "rtsp://admin:rarcy1-hyfder-bubvuK@10.0.0.178:554/h264Preview_01_sub"
+debug_port: 8765
+log_level: debug
+ha_event_name: gesture_detected
+
+# How far above the shoulder the wrist must be (normalised frame height).
+# 0.15 = wrist must be 15% of frame height above shoulder (good default,
+#        prevents scratching the top of the head from triggering).
+# 0.05 = more permissive; 0.20 = stricter
+arm_above_head_tolerance: 0.15
+
+# Body-upright filter: hips must be this far below shoulders (frame fraction).
+# Negative = allows hips to appear ABOVE shoulders (frontal + dewarped fisheye
+#   cameras where perspective places hips higher in the image than shoulders).
+# -0.15 works for frontal dewarped fisheye; 0.10 for overhead cameras.
+body_upright_min: -0.15
+
+# Leg-raise guard: suppress all gestures when ankle or knee rises above hip
+# level by this fraction of frame height. Prevents feet-up-on-couch from
+# triggering false SNAP events. Increase toward 0.15 if you sometimes gesture
+# while seated with knees up. Set to 0.0 to disable.
+leg_raise_margin: 0.05
+
+# Wave vs snap classifier: elbow position.
+# When the elbow is ABOVE the shoulder the arm is raised straight up → SNAP.
+# When the elbow is AT or BELOW the shoulder the arm is extended sideways → WAVE.
+# wave_lateral_fraction: minimum wrist offset from body midline (as a fraction
+#   of frame width) to confirm a lateral sweep.
+#   0.12 = 12% of frame width (~230 px on a 1920-wide dewarped frame).
+#   Raise toward 0.20 if straight raises are still misclassified as waves.
+# Flip image 180° — for cameras mounted upside-down.
+flip_image: false
+
+# snap_forearm_min: how far the wrist must be above the elbow (normalised
+# frame height) to classify an arm raise as SNAP rather than WAVE.
+# forearm_dy = elbow_y_norm - wrist_y_norm  (positive = wrist above elbow)
+# Arm straight up → forearm_dy ≈ 0.08–0.18  → SNAP
+# Arm swept sideways → forearm_dy ≈ −0.05–0.04 → WAVE
+# Watch forearm_dy in the debug overlay while gesturing to calibrate.
+# Lower toward 0.03 if snaps misfire as wave.
+# Raise toward 0.10 if waves misfire as snap.
+snap_forearm_min: 0.10
+
+wave_lateral_fraction: 0.10
+
+# 0.75 = 3 of 4 fingers must be curled to count as a fist.
+fist_curl_threshold: 0.85
+
+# Flip gesture left/right — only needed if the camera faces you AND you have
+# NOT already mirrored it in the camera app itself.
+mirror_camera: false
+
+# Minimum pause between fired gestures (seconds).
+cooldown_s: 2.0
+
+# Night-vision / IR enhancement.
+low_light_enhance: true
+
+# ── Fisheye dewarping ─────────────────────────────────────────────────────────
+# Enable this when using the raw fisheye RTSP stream (no in-camera dewarping).
+# Set the Reolink camera to "Fisheye" mode in the app, then tune tilt/pan/roll.
+dewarp_enable: true
+dewarp_fov: 180.0        # total lens FOV in degrees
+dewarp_tilt: 30.0        # + = down toward floor
+dewarp_pan: 5.0          # + = right, - = left
+dewarp_roll: 0.0         # levels a tilted horizon (+ = CW, - = CCW)
+dewarp_vfov: 50.0        # vertical FOV of output (narrower = more zoomed in)
+dewarp_out_width: 1920   # wider = more horizontal FOV
+dewarp_out_height: 480
+
+# ── Advanced (rarely needed — leave at defaults unless you know why) ──────────
+
+# Furniture filter — uses MediaPipe landmark visibility (0–1 confidence).
+# Real body landmarks score well even from overhead; furniture near 0.
+# 0.35 rejects false detections without blocking the person.
+pose_visibility_min: 0.35
+
+# Crop bottom of frame (%) — removes the coffee table area entirely.
+# 15 is a good starting point; only increase if the table still appears.
+frame_crop_bottom: 15
+
+pose_model_complexity: 1          # 0=fastest 1=balanced 2=most accurate (max)
+# pose_min_detection_confidence: 0.3
+# pose_min_tracking_confidence: 0.3
+# hand_min_detection_confidence: 0.3
+# hand_min_tracking_confidence: 0.1
+# palm_orientation_threshold: 0.05
+# vertical_velocity_threshold_px: 20.0
+# fusion_agreement_window_s: 1.0
+# rtsp_transport: tcp
+# frame_width: 640
+# frame_height: 640
+# frame_crop_top: 0
+# dewarp_cx: -1          # fisheye circle centre X (default = frame centre)
+# dewarp_cy: -1          # fisheye circle centre Y (default = frame centre)
+# low_light_clip: 2.0
+# wave_velocity_threshold_px: 150.0   # deprecated — no longer used
