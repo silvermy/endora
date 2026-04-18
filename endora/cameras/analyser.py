@@ -1,17 +1,17 @@
 """
-cameras/analyser.py  — Endora v1.7.32
+cameras/analyser.py  — Endora v1.7.34
 
 Hybrid gesture detection: MediaPipe Pose + Hands.
 
 Pipeline per frame:
   1. (Optional) Fisheye dewarp → crop → CLAHE
   2. Pose  → arm raised above head? (wrist above shoulder + margin)
-  3. Hands → thumb up / open
+  3. Hands → peace sign (index+middle extended) / open
   4. Classify:
        SNAP        — forearm vertical, fires immediately on raise
        HOLD        — fires hold_duration_s after SNAP (arm kept up after snap)
        DOUBLE_SNAP — second arm raise within double_snap_window_s of first SNAP
-       THUMBS_UP   — arm raised, thumb extended upward, other fingers curled
+       PEACE       — arm raised, index+middle fingers extended, others curled
   5. Sustain N frames → fire → cooldown
      Note: SNAP does not set arm_must_reset — arm can stay up for HOLD to follow.
 """
@@ -35,7 +35,7 @@ class Gesture(Enum):
     SNAP        = auto()  # arm raised straight up, fires immediately
     HOLD        = auto()  # arm raised straight up, held for hold_duration_s
     DOUBLE_SNAP = auto()  # two snaps within double_snap_window_s seconds
-    THUMBS_UP   = auto()  # arm raised, thumb up, other fingers curled
+    PEACE       = auto()  # arm raised, index+middle extended, others curled (V/peace sign)
 
     @property
     def event_name(self) -> str:
@@ -107,12 +107,12 @@ class CameraAnalyser(threading.Thread):
         sustain_counts: dict[Gesture, int] = {g: 0 for g in Gesture}
         # SNAP fires on 1 sustained frame. HOLD requires arm_up for
         # hold_duration_s. DOUBLE_SNAP tracks recent snap times.
-        # THUMBS_UP requires 2 sustained frames for reliability.
+        # PEACE requires 2 sustained frames for reliability.
         SUSTAIN_NEEDED: dict[Gesture, int] = {
             Gesture.SNAP:        1,
             Gesture.HOLD:        1,
             Gesture.DOUBLE_SNAP: 1,
-            Gesture.THUMBS_UP:   2,
+            Gesture.PEACE:       2,
         }
 
         # HOLD state — timer starts when SNAP fires, not when arm goes up.
@@ -147,7 +147,7 @@ class CameraAnalyser(threading.Thread):
         _wave_dx: float         = 0.0
         _is_fist: bool          = False
 
-        log.info("[%s] Analyser running (v1.7.32 — leg-raise guard + wave/snap fixes)", self.label)
+        log.info("[%s] Analyser running (v1.7.34 — leg-raise guard + wave/snap fixes)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -468,9 +468,9 @@ class CameraAnalyser(threading.Thread):
             else:
                 hand_res = None
 
-            _is_thumbs_up, _hand_conf = _classify_thumbs_up(hand_res, self.s)
+            _is_peace, _hand_conf = _classify_peace(hand_res, self.s)
             # Keep _is_fist alias for debug overlay compatibility
-            _is_fist = _is_thumbs_up
+            _is_fist = _is_peace
 
             # ── 4. Pick candidate ─────────────────────────────────────────
             snap_forearm_min = float(getattr(self.s, 'snap_forearm_min', 0.10))
@@ -485,8 +485,8 @@ class CameraAnalyser(threading.Thread):
                 (now - _snap_fired_at) >= hold_duration_s
             )
 
-            if _is_thumbs_up:
-                candidate = Gesture.THUMBS_UP
+            if _is_peace:
+                candidate = Gesture.PEACE
             elif _arm_is_vertical and _hold_ready:
                 candidate = Gesture.HOLD
             elif _arm_is_vertical:
@@ -497,10 +497,10 @@ class CameraAnalyser(threading.Thread):
             if log.isEnabledFor(logging.DEBUG):
                 _hold_elapsed = (now - _snap_fired_at) if _snap_fired_at > 0 else 0.0
                 log.debug(
-                    "[%s] arm up | wrist=(%.0f,%.0f) thumbs_up=%s "
+                    "[%s] arm up | wrist=(%.0f,%.0f) peace=%s "
                     "forearm_dy=%.3f vertical=%s hold_elapsed=%.1fs → candidate=%s sustain=%s",
                     self.label, wx, wy,
-                    _is_thumbs_up, _forearm_dy_norm, _arm_is_vertical,
+                    _is_peace, _forearm_dy_norm, _arm_is_vertical,
                     _hold_elapsed,
                     str(candidate) if candidate else "none",
                     {g.name: sustain_counts[g] for g in Gesture
@@ -678,37 +678,37 @@ def _arm_above_head(
     return False, (0.0, 0.0), ""
 
 
-def _classify_thumbs_up(hand_res, settings) -> tuple[bool, float]:
+def _classify_peace(hand_res, settings) -> tuple[bool, float]:
     """
-    Returns (is_thumbs_up, confidence).
+    Returns (is_peace, confidence).
 
-    Thumbs-up: thumb tip clearly above thumb MCP (extended upward),
-    while index/middle/ring/pinky tips are below their MCPs (curled).
+    Peace / V sign: index (8) and middle (12) fingers extended,
+    ring (16) and pinky (20) curled, thumb (4) unconstrained.
 
-    Uses normalised y coordinates (smaller y = higher in frame).
-    thumb_up_margin: how far above MCP the tip must be (normalised 3D dist).
-    fist_curl_threshold reused for finger-curl fraction.
+    Extended finger: tip.y < mcp.y (tip higher in frame than knuckle).
+    Curled  finger: tip.y > mcp.y.
+
+    Two fingers must be extended AND two must be curled for a clean V sign.
+    because extended fingers produce a clear geometric signal at fisheye/overhead resolution.
     """
     if not hand_res or not hand_res.multi_hand_landmarks:
         return False, 0.0
 
     lm = hand_res.multi_hand_landmarks[0].landmark
 
-    # Thumb: tip (4) above IP (3) above MCP (2) — extended = tip clearly above MCP
-    thumb_tip  = lm[4]
-    thumb_mcp  = lm[2]
-    thumb_up   = thumb_tip.y < thumb_mcp.y  # smaller y = higher in frame
+    # Index and middle must be extended (tip above MCP in frame)
+    index_extended  = lm[8].y  < lm[5].y
+    middle_extended = lm[12].y < lm[9].y
 
-    # Fingers: tip above MCP = extended; below = curled
-    TIPS = [8, 12, 16, 20]
-    MCPS = [5,  9, 13, 17]
-    curled = sum(1 for t, m in zip(TIPS, MCPS) if lm[t].y > lm[m].y)
-    curl_frac = curled / 4.0
-    fingers_curled = curl_frac >= float(getattr(settings, 'fist_curl_threshold', 0.75))
+    # Ring and pinky must be curled (tip below MCP in frame)
+    ring_curled  = lm[16].y > lm[13].y
+    pinky_curled = lm[20].y > lm[17].y
 
-    is_thumbs_up = thumb_up and fingers_curled
-    confidence   = (curl_frac + (1.0 if thumb_up else 0.0)) / 2.0
-    return is_thumbs_up, confidence
+    is_peace   = index_extended and middle_extended and ring_curled and pinky_curled
+    # Confidence: fraction of the 4 conditions met
+    conditions = [index_extended, middle_extended, ring_curled, pinky_curled]
+    confidence = sum(conditions) / 4.0
+    return is_peace, confidence
 
 
 # ── Debug overlay ─────────────────────────────────────────────────────────────

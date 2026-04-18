@@ -48,8 +48,7 @@ def main():
     log.info("HA event: %s → %s/events/%s",
              settings.ha_event_name, settings.ha_url, settings.ha_event_name)
     if settings.debug_port > 0:
-        log.info("Debug stream: http://<ha-ip>:%d/  (port %d active)",
-                 settings.debug_port, settings.debug_port)
+        log.info("Debug stream: http://homeassistant.local:%d/", settings.debug_port)
     else:
         log.warning("Debug stream DISABLED (debug_port=0). "
                     "Set debug_port=8765 in the add-on Configuration tab to enable.")
