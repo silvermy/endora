@@ -343,7 +343,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 <h3>Endora Debug</h3>
 <div id="wrap">
   <div id="vbox">
-    <img src="__BASE_URL__/stream" alt="stream">
+    <img src="/stream" alt="stream">
     <div id="legend">cyan&nbsp;=&nbsp;ready &nbsp;·&nbsp; orange&nbsp;=&nbsp;warming &nbsp;·&nbsp; arrow&nbsp;=&nbsp;peak&nbsp;velocity</div>
   </div>
   <div id="panel">
@@ -432,14 +432,14 @@ const _t = {};
 function onCom(key, value) {
   clearTimeout(_t[key]);
   _t[key] = setTimeout(() =>
-    fetch('__BASE_URL__/set?key='+encodeURIComponent(key)+'&value='+encodeURIComponent(value))
+    fetch('/set?key='+encodeURIComponent(key)+'&value='+encodeURIComponent(value))
       .catch(e => console.warn('set', e)), 60);
 }
 
 function setBool(key, on) {
   const lbl = document.getElementById('lbl_' + key);
   if (lbl) { lbl.textContent = on ? 'ON' : 'OFF'; lbl.style.color = on ? '#e8c040' : '#555'; }
-  fetch('__BASE_URL__/set?key='+encodeURIComponent(key)+'&value='+(on?'true':'false'))
+  fetch('/set?key='+encodeURIComponent(key)+'&value='+(on?'true':'false'))
     .catch(e => console.warn(e));
 }
 
@@ -447,7 +447,7 @@ function setLog(isDebug) {
   const level = isDebug ? 'debug' : 'info';
   document.getElementById('loglabel').textContent = isDebug ? 'DEBUG' : 'INFO';
   document.getElementById('loglabel').style.color = isDebug ? '#e8c040' : '#555';
-  fetch('__BASE_URL__/set?key=log_level&value=' + level).catch(e => console.warn(e));
+  fetch('/set?key=log_level&value=' + level).catch(e => console.warn(e));
 }
 
 function doSave() {
@@ -455,7 +455,7 @@ function doSave() {
   const msg = document.getElementById('savemsg');
   btn.disabled = true;
   msg.style.color = '#888'; msg.textContent = 'saving\u2026';
-  fetch('__BASE_URL__/save', {method:'POST'})
+  fetch('/save', {method:'POST'})
     .then(r => r.json())
     .then(d => {
       msg.style.color = d.ok ? '#5c5' : '#c55';
@@ -465,7 +465,7 @@ function doSave() {
     .finally(() => { btn.disabled = false; });
 }
 
-fetch('__BASE_URL__/settings').then(r=>r.json()).then(build).catch(()=>build({}));
+fetch('/settings').then(r=>r.json()).then(build).catch(()=>build({}));
 
 // ── MJPEG stream reconnect ──────────────────────────────────────────────────
 // The <img> tag can silently stall if the TCP connection drops (e.g. add-on
@@ -477,7 +477,7 @@ fetch('__BASE_URL__/settings').then(r=>r.json()).then(build).catch(()=>build({})
   let _stall = null;
 
   function reconnect() {
-    img.src = '__BASE_URL__/stream?' + Date.now();
+    img.src = '/stream?' + Date.now();
   }
 
   // Reconnect immediately on any load error (connection refused, reset, etc.)
@@ -500,10 +500,6 @@ fetch('__BASE_URL__/settings').then(r=>r.json()).then(build).catch(()=>build({})
 # ── HTTP handler ──────────────────────────────────────────────────────────────
 
 class _Handler(BaseHTTPRequestHandler):
-    # Set to the direct debug port URL when serving via ingress,
-    # empty string when serving directly (relative URLs work fine).
-    base_url: str = ""
-
     def log_message(self, *_):
         pass
 
@@ -515,7 +511,7 @@ class _Handler(BaseHTTPRequestHandler):
             html = (_HTML_TEMPLATE
                     .replace("__PARAMS_JSON__", json.dumps(_PARAMS))
                     .replace("__TOGGLES_JSON__", json.dumps(_TOGGLES))
-                    .replace("__BASE_URL__", self.base_url))
+                    )
             body = html.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -596,20 +592,41 @@ def start(port: int, ingress_port: int = 8766) -> None:
     class _Server(socketserver.ThreadingMixIn, HTTPServer):
         daemon_threads = True
 
-    # Debug stream server (direct access) — relative URLs work fine
-    _Handler.base_url = ""
+    # Debug stream server (direct access)
     debug_server = _Server(("0.0.0.0", port), _Handler)
     threading.Thread(target=debug_server.serve_forever, daemon=True,
                      name="DebugServer").start()
     log.info("Debug stream: http://homeassistant.local:%d/", port)
 
-    # Ingress server (HA sidebar) — must use absolute URLs pointing to
-    # the direct debug port since HA's ingress proxy breaks MJPEG streams
-    # and doesn't forward API calls reliably.
-    class _IngressHandler(_Handler):
-        base_url = f"http://homeassistant.local:{port}"
+    # Ingress server (HA sidebar) — redirects browser to the direct debug
+    # URL in a new tab. Cannot embed the stream in HA's HTTPS iframe because
+    # browsers block mixed HTTP/HTTPS content.
+    _direct_url = f"http://homeassistant.local:{port}/"
 
-    ingress_server = _Server(("0.0.0.0", ingress_port), _IngressHandler)
+    class _RedirectHandler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_GET(self):
+            body = (
+                f'<!DOCTYPE html><html><head><title>Endora</title>'
+                f'<meta http-equiv="refresh" content="0;url={_direct_url}">'
+                f'</head><body style="background:#0d0d0d;color:#d0d0d0;'
+                f'font-family:system-ui;display:flex;align-items:center;'
+                f'justify-content:center;height:100vh;flex-direction:column;gap:16px">'
+                f'<p style="color:#e8c040;font-size:18px;font-weight:600">&#x270B; Endora</p>'
+                f'<p style="color:#666;font-size:13px">Opening debug stream&hellip;</p>'
+                f'<a href="{_direct_url}" target="_blank" '
+                f'style="color:#5c5;font-size:13px">Click here if it doesn\'t open</a>'
+                f'</body></html>'
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    ingress_server = _Server(("0.0.0.0", ingress_port), _RedirectHandler)
     threading.Thread(target=ingress_server.serve_forever, daemon=True,
                      name="IngressServer").start()
-    log.info("Ingress (sidebar): port %d → stream via port %d", ingress_port, port)
+    log.info("Ingress (sidebar): port %d → redirects to port %d", ingress_port, port)
