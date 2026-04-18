@@ -15,9 +15,9 @@ Two auth modes — automatically selected:
 
 Event payload:
   {
-    "gesture":        "wave_left",
+    "gesture":        "endora-snap",
     "confidence":     0.91,
-    "source_cameras": ["A", "B"],
+    "source_cameras": ["A"],
     "timestamp":      "2024-04-05T14:32:01.123456+00:00"
   }
 
@@ -25,7 +25,7 @@ HA automation trigger:
   platform: event
   event_type: gesture_detected
   event_data:
-    gesture: wave_left
+    gesture: endora-snap
 """
 
 from __future__ import annotations
@@ -141,10 +141,10 @@ class HABackend(BaseBackend):
 
 class PrintBackend(BaseBackend):
     SYMBOLS = {
-        Gesture.SNAP:       "✋ endora-snap      ",
-        Gesture.FIST:       "✊ endora-fist      ",
-        Gesture.WAVE_LEFT:  "👈 endora-wave-left ",
-        Gesture.WAVE_RIGHT: "👉 endora-wave-right",
+        Gesture.SNAP:        "☝️  endora-snap       ",
+        Gesture.HOLD:        "✋  endora-hold       ",
+        Gesture.DOUBLE_SNAP: "✌️  endora-double-snap",
+        Gesture.THUMBS_UP:   "👍  endora-thumbs-up  ",
     }
 
     def __init__(self):
