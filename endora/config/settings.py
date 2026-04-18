@@ -62,7 +62,7 @@ class Settings:
     # MediaPipe assigns high visibility to real body landmarks and near-zero
     # to furniture false-detections. 0.35 rejects furniture without touching
     # real people. Lower = more permissive; raise to 0.5 if still seeing table.
-    pose_visibility_min: float = 0.35
+    pose_visibility_min: float = 0.45
 
     # ── Hands (gesture classification) ───────────────────────────────────
     # Advanced: override in settings.yaml if needed

@@ -1,5 +1,5 @@
 """
-cameras/analyser.py  — Endora v1.7.27
+cameras/analyser.py  — Endora v1.7.28
 
 Hybrid gesture detection: MediaPipe Pose + Hands.
 
@@ -127,7 +127,7 @@ class CameraAnalyser(threading.Thread):
 
         # Anti-furniture / idle-lock reset
         _furniture_rejection_streak = 0
-        FURNITURE_RESET_FRAMES = 12
+        FURNITURE_RESET_FRAMES = 5   # break tracking lock faster (was 12)
         IDLE_RESET_S   = 60.0
         _last_arm_up_time: float = 0.0
         _idle_reset_done: bool   = False
@@ -138,7 +138,7 @@ class CameraAnalyser(threading.Thread):
         _wave_dx: float         = 0.0
         _is_fist: bool          = False
 
-        log.info("[%s] Analyser running (v1.7.27 — leg-raise guard + wave/snap fixes)", self.label)
+        log.info("[%s] Analyser running (v1.7.28 — leg-raise guard + wave/snap fixes)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -235,24 +235,39 @@ class CameraAnalyser(threading.Thread):
             if pose_res and pose_res.pose_landmarks:
                 _lm_f = pose_res.pose_landmarks.landmark
                 _PL_f = mp.solutions.pose.PoseLandmark
+                # Check visibility across shoulders AND hips — furniture typically
+                # scores near-zero on all four; a real person scores well on at least
+                # shoulders even when hips are partially occluded.
                 _vis_scores = [
                     _lm_f[_PL_f.LEFT_SHOULDER].visibility,
                     _lm_f[_PL_f.RIGHT_SHOULDER].visibility,
+                    _lm_f[_PL_f.LEFT_HIP].visibility,
+                    _lm_f[_PL_f.RIGHT_HIP].visibility,
                 ]
                 _avg_vis = sum(_vis_scores) / len(_vis_scores)
-                _min_vis = float(getattr(self.s, 'pose_visibility_min', 0.35))
-                if _avg_vis < _min_vis:
+                _min_vis = float(getattr(self.s, 'pose_visibility_min', 0.45))
+
+                # Position sanity check: if both shoulders are in the bottom 35%
+                # of the frame the "body" is almost certainly furniture on a table,
+                # not a sitting or standing person.  Real people seated on a couch
+                # have shoulders in roughly the upper 60% of a dewarped frame.
+                _sh_y_avg = (_lm_f[_PL_f.LEFT_SHOULDER].y +
+                             _lm_f[_PL_f.RIGHT_SHOULDER].y) / 2.0
+                _position_ok = _sh_y_avg < 0.75  # shoulders must be in upper 75%
+
+                if _avg_vis < _min_vis or not _position_ok:
                     _furniture_rejection_streak += 1
                     log.debug(
-                        "[%s] pose rejected: avg_shoulder_vis=%.2f < min=%.2f "
-                        "(furniture? streak=%d)",
-                        self.label, _avg_vis, _min_vis, _furniture_rejection_streak,
+                        "[%s] pose rejected: avg_vis=%.2f (min=%.2f) "
+                        "sh_y=%.2f position_ok=%s (furniture? streak=%d)",
+                        self.label, _avg_vis, _min_vis,
+                        _sh_y_avg, _position_ok, _furniture_rejection_streak,
                     )
                     if _furniture_rejection_streak >= FURNITURE_RESET_FRAMES:
                         log.info(
                             "[%s] Breaking furniture tracking lock — recreating pose model "
-                            "(avg_vis=%.2f)",
-                            self.label, _avg_vis,
+                            "(avg_vis=%.2f sh_y=%.2f)",
+                            self.label, _avg_vis, _sh_y_avg,
                         )
                         pose.close()
                         pose = mp_pose.Pose(
