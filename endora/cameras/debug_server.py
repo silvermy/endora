@@ -587,10 +587,84 @@ class _Handler(BaseHTTPRequestHandler):
 
 # ── Start ─────────────────────────────────────────────────────────────────────
 
-def start(port: int) -> None:
+# ── Start ─────────────────────────────────────────────────────────────────────
+
+_INGRESS_HTML = """\
+<!DOCTYPE html>
+<html>
+<head>
+<title>Endora</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{
+  background:#0d0d0d;
+  font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+  color:#d0d0d0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:100vh;gap:24px;padding:32px
+}}
+h1{{font-size:22px;font-weight:600;letter-spacing:2px;color:#e8c040}}
+p{{font-size:13px;color:#555;text-align:center;max-width:320px;line-height:1.6}}
+.links{{display:flex;flex-direction:column;gap:12px;width:100%;max-width:320px}}
+a.btn{{
+  display:block;padding:14px 20px;border-radius:8px;text-decoration:none;
+  font-size:14px;font-weight:600;text-align:center;letter-spacing:0.5px
+}}
+a.btn-primary{{background:#163016;border:1px solid #2e6e2e;color:#5c5}}
+a.btn-primary:hover{{background:#1e4a1e}}
+a.btn-secondary{{background:#161616;border:1px solid #2a2a2a;color:#999}}
+a.btn-secondary:hover{{background:#1e1e1e}}
+</style>
+</head>
+<body>
+<h1>✋ Endora</h1>
+<p>Gesture detection for Home Assistant</p>
+<div class="links">
+  <a class="btn btn-primary" href="/hassio/addon/local_endora/info" target="_top">
+    ⚙️ &nbsp; Add-on Settings
+  </a>
+  <a class="btn btn-secondary" href="http://homeassistant.local:{port}/" target="_blank">
+    📷 &nbsp; Debug Stream
+  </a>
+</div>
+</body>
+</html>
+"""
+
+
+class _IngressHandler(BaseHTTPRequestHandler):
+    debug_port: int = 8765
+
+    def log_message(self, *_):
+        pass
+
+    def do_GET(self):
+        body = _INGRESS_HTML.format(port=self.debug_port).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def start(port: int, ingress_port: int = 8766) -> None:
     class _Server(socketserver.ThreadingMixIn, HTTPServer):
         daemon_threads = True
-    server = _Server(("0.0.0.0", port), _Handler)
-    threading.Thread(target=server.serve_forever, daemon=True,
+
+    # Debug stream server
+    debug_server = _Server(("0.0.0.0", port), _Handler)
+    threading.Thread(target=debug_server.serve_forever, daemon=True,
                      name="DebugServer").start()
     log.info("Debug stream: http://homeassistant.local:%d/", port)
+
+    # Ingress landing page server (sidebar link)
+    _IngressHandler.debug_port = port
+
+    class _IngressServer(socketserver.ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
+    ingress_server = _IngressServer(("0.0.0.0", ingress_port), _IngressHandler)
+    threading.Thread(target=ingress_server.serve_forever, daemon=True,
+                     name="IngressServer").start()
+    log.info("Ingress page: port %d (sidebar link active)", ingress_port)
