@@ -144,7 +144,7 @@ class PrintBackend(BaseBackend):
         Gesture.SNAP:        "☝️  endora-snap       ",
         Gesture.HOLD:        "✋  endora-hold       ",
         Gesture.DOUBLE_SNAP: "✌️  endora-double-snap",
-        Gesture.THUMBS_UP:   "👍  endora-thumbs-up  ",
+        Gesture.PEACE:       "✌️  endora-peace      ",
     }
 
     def __init__(self):

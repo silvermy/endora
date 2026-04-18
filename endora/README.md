@@ -19,7 +19,7 @@ All gestures require the arm to be **raised above the head** — wrist above sho
 | `endora-snap` | Raise arm straight up — fires immediately when arm goes vertical |
 | `endora-hold` | Raise arm and keep it up — fires `hold_duration_s` seconds after snap |
 | `endora-double-snap` | Raise arm twice within `double_snap_window_s` seconds |
-| `endora-thumbs-up` | Raise arm with thumb extended upward, other fingers curled |
+| `endora-peace` | Raise arm with index + middle fingers extended (V sign) |
 
 **SNAP → HOLD sequence:** raising your arm always fires `endora-snap` first. If you keep your arm up, `endora-hold` fires after `hold_duration_s` (default 1.5s). Lower and raise again within `double_snap_window_s` (default 3s) for `endora-double-snap`.
 
@@ -132,12 +132,12 @@ Every gesture fires event type `gesture_detected`:
     target:
       entity_id: scene.movie_mode
 
-- alias: "Endora — thumbs-up → volume up"
+- alias: "Endora — peace sign → volume up"
   trigger:
     platform: event
     event_type: gesture_detected
     event_data:
-      gesture: endora-thumbs-up
+      gesture: endora-peace
   action:
     service: media_player.volume_up
     target:
@@ -194,7 +194,7 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream — this pre
 | SNAP fires when arm is sideways | Raise `snap_forearm_min` toward `0.13` |
 | HOLD fires too soon / too late | Adjust `hold_duration_s` |
 | DOUBLE_SNAP window too tight | Raise `double_snap_window_s` to `4` or `5` |
-| THUMBS_UP not detecting | Set `log_level: debug` and watch `thumbs_up=` in logs; lower `fist_curl_threshold` |
+| PEACE not detecting | Set `log_level: debug` and watch `peace=` in logs; lower `fist_curl_threshold` |
 | Feet-up on couch fires false snaps | Raise `leg_raise_margin` toward `0.25` |
 | Sitting cross-legged suppresses gestures | Lower `leg_raise_margin` toward `0.15` |
 | High CPU on Pi | Set `pose_model_complexity: 0` |
@@ -218,7 +218,7 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream — this pre
 | `snap_forearm_min` | `0.10` | Minimum forearm verticality for SNAP/HOLD (`forearm_dy` in debug) |
 | `hold_duration_s` | `1.5` | Seconds after SNAP that arm must stay up to fire HOLD |
 | `double_snap_window_s` | `3.0` | Seconds within which two snaps count as DOUBLE_SNAP |
-| `fist_curl_threshold` | `0.75` | Fraction of fingers curled for THUMBS_UP detection |
+| `fist_curl_threshold` | `0.75` | Fraction of fingers curled for PEACE detection |
 | `cooldown_s` | `2.0` | Minimum seconds between any two gestures |
 | `pose_visibility_min` | `0.45` | Min shoulder/hip visibility to accept a pose (filters furniture) |
 | `frame_crop_bottom` | `0` | % of frame to crop from bottom (removes coffee table) |

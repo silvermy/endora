@@ -593,4 +593,4 @@ def start(port: int) -> None:
     server = _Server(("0.0.0.0", port), _Handler)
     threading.Thread(target=server.serve_forever, daemon=True,
                      name="DebugServer").start()
-    log.info("Debug stream: http://0.0.0.0:%d/", port)
+    log.info("Debug stream: http://homeassistant.local:%d/", port)
