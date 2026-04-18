@@ -1,18 +1,19 @@
 """
-cameras/analyser.py  — Endora v1.7.29
+cameras/analyser.py  — Endora v1.7.30
 
 Hybrid gesture detection: MediaPipe Pose + Hands.
 
 Pipeline per frame:
   1. (Optional) Fisheye dewarp → crop → CLAHE
   2. Pose  → arm raised above head? (wrist above shoulder + margin)
-  3. Hands → thumb up / two-finger V / open
+  3. Hands → thumb up / open
   4. Classify:
        SNAP        — forearm vertical, fires immediately on raise
-       HOLD        — forearm vertical, held for ~1.5 s (arm stays up)
-       DOUBLE_SNAP — two SNAP events within double_snap_window_s
+       HOLD        — fires hold_duration_s after SNAP (arm kept up after snap)
+       DOUBLE_SNAP — second arm raise within double_snap_window_s of first SNAP
        THUMBS_UP   — arm raised, thumb extended upward, other fingers curled
   5. Sustain N frames → fire → cooldown
+     Note: SNAP does not set arm_must_reset — arm can stay up for HOLD to follow.
 """
 
 from __future__ import annotations
@@ -114,9 +115,10 @@ class CameraAnalyser(threading.Thread):
             Gesture.THUMBS_UP:   2,
         }
 
-        # HOLD state — tracks how long arm has been continuously raised vertical
-        _hold_fired: bool      = False   # True once HOLD fires; reset on arm-down
-        _arm_up_since: float   = 0.0
+        # HOLD state — timer starts when SNAP fires, not when arm goes up.
+        # This means SNAP always registers first; HOLD is a deliberate follow-through.
+        _hold_fired: bool     = False  # True once HOLD fires this raise; reset on arm-down
+        _snap_fired_at: float = 0.0   # monotonic time of last SNAP fire; 0 = not yet fired
 
         # DOUBLE_SNAP state — ring buffer of recent snap fire times
         _snap_times: list[float] = []
@@ -145,7 +147,7 @@ class CameraAnalyser(threading.Thread):
         _wave_dx: float         = 0.0
         _is_fist: bool          = False
 
-        log.info("[%s] Analyser running (v1.7.29 — leg-raise guard + wave/snap fixes)", self.label)
+        log.info("[%s] Analyser running (v1.7.30 — leg-raise guard + wave/snap fixes)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -302,8 +304,8 @@ class CameraAnalyser(threading.Thread):
                         log.debug("[%s] arm lowered — resetting sustain counts", self.label)
                         for g in Gesture:
                             sustain_counts[g] = 0
-                        _hold_fired  = False
-                        _arm_up_since = 0.0
+                        _hold_fired    = False
+                        _snap_fired_at = 0.0
                     last_arm_raised = False
                     # Clear arm_must_reset only once the full cooldown has elapsed.
                     # This prevents re-fire when the arm flickers up/down after a gesture.
@@ -436,7 +438,6 @@ class CameraAnalyser(threading.Thread):
                     _forearm_dy_norm, _elbow_gap_norm,
                 )
                 arm_raised_since = time.monotonic()
-                _arm_up_since    = time.monotonic()
 
             last_arm_raised = True
 
@@ -475,17 +476,18 @@ class CameraAnalyser(threading.Thread):
             snap_forearm_min = float(getattr(self.s, 'snap_forearm_min', 0.10))
             _arm_is_vertical = _forearm_dy_norm >= snap_forearm_min
 
-            # HOLD: arm vertical, held continuously for hold_duration_s,
-            # not yet fired this raise.
-            hold_duration_s = float(getattr(self.s, 'hold_duration_s', 1.5))
-            _arm_held_long  = (
-                _arm_up_since > 0 and
-                (now - _arm_up_since) >= hold_duration_s
+            # HOLD: arm vertical, SNAP already fired this raise, held for
+            # hold_duration_s since snap fired, not yet fired HOLD.
+            hold_duration_s  = float(getattr(self.s, 'hold_duration_s', 1.5))
+            _hold_ready = (
+                _snap_fired_at > 0 and
+                not _hold_fired and
+                (now - _snap_fired_at) >= hold_duration_s
             )
 
             if _is_thumbs_up:
                 candidate = Gesture.THUMBS_UP
-            elif _arm_is_vertical and _arm_held_long and not _hold_fired:
+            elif _arm_is_vertical and _hold_ready:
                 candidate = Gesture.HOLD
             elif _arm_is_vertical:
                 candidate = Gesture.SNAP
@@ -493,12 +495,13 @@ class CameraAnalyser(threading.Thread):
                 candidate = None
 
             if log.isEnabledFor(logging.DEBUG):
+                _hold_elapsed = (now - _snap_fired_at) if _snap_fired_at > 0 else 0.0
                 log.debug(
                     "[%s] arm up | wrist=(%.0f,%.0f) thumbs_up=%s "
-                    "forearm_dy=%.3f vertical=%s held=%.1fs → candidate=%s sustain=%s",
+                    "forearm_dy=%.3f vertical=%s hold_elapsed=%.1fs → candidate=%s sustain=%s",
                     self.label, wx, wy,
                     _is_thumbs_up, _forearm_dy_norm, _arm_is_vertical,
-                    now - _arm_up_since if _arm_up_since > 0 else 0.0,
+                    _hold_elapsed,
                     str(candidate) if candidate else "none",
                     {g.name: sustain_counts[g] for g in Gesture
                      if sustain_counts[g] > 0},
@@ -514,36 +517,37 @@ class CameraAnalyser(threading.Thread):
             needed = SUSTAIN_NEEDED.get(candidate, 1) if candidate else 1
 
             if candidate and sustain_counts.get(candidate, 0) >= needed:
-                now_fire = time.monotonic()
+                now_fire   = time.monotonic()
+                confidence = min(1.0, sustain_counts[candidate] / max(1, needed * 2))
 
-                # HOLD: mark fired so it doesn't re-fire while arm stays up
-                if candidate == Gesture.HOLD:
-                    _hold_fired = True
-
-                # DOUBLE_SNAP: if this is a SNAP, check if a previous snap
-                # fired recently; if so, emit DOUBLE_SNAP instead.
+                # DOUBLE_SNAP: if this is a SNAP, check for a recent prior snap
                 if candidate == Gesture.SNAP:
                     double_snap_window = float(getattr(self.s, 'double_snap_window_s', 3.0))
-                    # Prune old snap times
                     _snap_times[:] = [t for t in _snap_times
                                       if now_fire - t < double_snap_window]
                     if _snap_times:
-                        # A previous snap exists within the window → DOUBLE_SNAP
-                        log.debug("[%s] DOUBLE_SNAP detected (prev snap %.1fs ago)",
+                        log.debug("[%s] DOUBLE_SNAP (prev snap %.1fs ago)",
                                   self.label, now_fire - _snap_times[-1])
                         _snap_times.clear()
                         candidate = Gesture.DOUBLE_SNAP
                     else:
                         _snap_times.append(now_fire)
-                        # First snap — fire SNAP normally, don't suppress
+                        _snap_fired_at = now_fire  # start HOLD timer from here
 
-                confidence = min(1.0, sustain_counts[candidate] / max(1, needed * 2))
+                # HOLD: mark fired; don't require arm-down (arm is still up)
+                if candidate == Gesture.HOLD:
+                    _hold_fired = True
+
                 log.debug("[%s] FIRING %s conf=%.2f", self.label, candidate, confidence)
                 self.on_candidate(candidate, confidence, self.label)
-                sustain_counts         = {g: 0 for g in Gesture}
-                consecutive_arm_raised = 0
-                arm_must_reset         = True
-                _last_gesture_time     = now_fire
+                sustain_counts = {g: 0 for g in Gesture}
+
+                # SNAP does NOT set arm_must_reset — arm can stay up for HOLD.
+                # All other gestures require arm-down before re-firing.
+                if candidate != Gesture.SNAP:
+                    consecutive_arm_raised = 0
+                    arm_must_reset         = True
+                _last_gesture_time = now_fire
 
             # ── Debug overlay ─────────────────────────────────────────────
             if self.debug_frame_cb is not None:
