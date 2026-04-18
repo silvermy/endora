@@ -1,5 +1,5 @@
 """
-cameras/analyser.py  — Endora v1.7.34
+cameras/analyser.py  — Endora v1.7.35
 
 Hybrid gesture detection: MediaPipe Pose + Hands.
 
@@ -120,6 +120,11 @@ class CameraAnalyser(threading.Thread):
         _hold_fired: bool     = False  # True once HOLD fires this raise; reset on arm-down
         _snap_fired_at: float = 0.0   # monotonic time of last SNAP fire; 0 = not yet fired
 
+        # PEACE intent flag — set as soon as a peace sign is detected on any
+        # frame of this arm raise. Once set, SNAP is suppressed for the rest
+        # of the raise so SNAP never fires when the user intends PEACE.
+        _peace_intent: bool = False
+
         # DOUBLE_SNAP state — ring buffer of recent snap fire times
         _snap_times: list[float] = []
 
@@ -147,7 +152,7 @@ class CameraAnalyser(threading.Thread):
         _wave_dx: float         = 0.0
         _is_fist: bool          = False
 
-        log.info("[%s] Analyser running (v1.7.34 — leg-raise guard + wave/snap fixes)", self.label)
+        log.info("[%s] Analyser running (v1.7.35 — leg-raise guard + wave/snap fixes)", self.label)
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -306,6 +311,7 @@ class CameraAnalyser(threading.Thread):
                             sustain_counts[g] = 0
                         _hold_fired    = False
                         _snap_fired_at = 0.0
+                        _peace_intent  = False
                     last_arm_raised = False
                     # Clear arm_must_reset only once the full cooldown has elapsed.
                     # This prevents re-fire when the arm flickers up/down after a gesture.
@@ -485,11 +491,16 @@ class CameraAnalyser(threading.Thread):
                 (now - _snap_fired_at) >= hold_duration_s
             )
 
+            # Set peace intent as soon as we see a peace sign — blocks SNAP
+            # for the rest of this arm raise even if peace flickers off briefly.
+            if _is_peace:
+                _peace_intent = True
+
             if _is_peace:
                 candidate = Gesture.PEACE
             elif _arm_is_vertical and _hold_ready:
                 candidate = Gesture.HOLD
-            elif _arm_is_vertical:
+            elif _arm_is_vertical and not _peace_intent:
                 candidate = Gesture.SNAP
             else:
                 candidate = None
@@ -497,10 +508,10 @@ class CameraAnalyser(threading.Thread):
             if log.isEnabledFor(logging.DEBUG):
                 _hold_elapsed = (now - _snap_fired_at) if _snap_fired_at > 0 else 0.0
                 log.debug(
-                    "[%s] arm up | wrist=(%.0f,%.0f) peace=%s "
+                    "[%s] arm up | wrist=(%.0f,%.0f) peace=%s intent=%s "
                     "forearm_dy=%.3f vertical=%s hold_elapsed=%.1fs → candidate=%s sustain=%s",
                     self.label, wx, wy,
-                    _is_peace, _forearm_dy_norm, _arm_is_vertical,
+                    _is_peace, _peace_intent, _forearm_dy_norm, _arm_is_vertical,
                     _hold_elapsed,
                     str(candidate) if candidate else "none",
                     {g.name: sustain_counts[g] for g in Gesture
