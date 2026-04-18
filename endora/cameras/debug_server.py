@@ -587,103 +587,18 @@ class _Handler(BaseHTTPRequestHandler):
 
 # ── Start ─────────────────────────────────────────────────────────────────────
 
-# ── Start ─────────────────────────────────────────────────────────────────────
-
-_INGRESS_HTML = """\
-<!DOCTYPE html>
-<html>
-<head>
-<title>Endora</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{
-  background:#0d0d0d;
-  font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
-  color:#d0d0d0;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  min-height:100vh;gap:24px;padding:32px
-}}
-h1{{font-size:22px;font-weight:600;letter-spacing:2px;color:#e8c040}}
-p{{font-size:13px;color:#555;text-align:center;max-width:320px;line-height:1.6}}
-.links{{display:flex;flex-direction:column;gap:12px;width:100%;max-width:320px}}
-a.btn{{
-  display:block;padding:14px 20px;border-radius:8px;text-decoration:none;
-  font-size:14px;font-weight:600;text-align:center;letter-spacing:0.5px
-}}
-a.btn-primary{{background:#163016;border:1px solid #2e6e2e;color:#5c5}}
-a.btn-primary:hover{{background:#1e4a1e}}
-a.btn-secondary{{background:#161616;border:1px solid #2a2a2a;color:#999}}
-a.btn-secondary:hover{{background:#1e1e1e}}
-</style>
-</head>
-<body>
-<h1>&#x270B; Endora</h1>
-<p>Gesture detection for Home Assistant</p>
-<div class="links">
-  <a class="btn btn-primary" id="settings-link" href="#" target="_top">
-    &#9881;&#65039; &nbsp; Add-on Settings
-  </a>
-  <a class="btn btn-secondary" href="http://homeassistant.local:{port}/" target="_blank">
-    &#128247; &nbsp; Debug Stream
-  </a>
-</div>
-<script>
-// Derive the add-on slug from the ingress path.
-// HA ingress URLs look like: /api/hassio_ingress/<token>/
-// The add-on info page is at: /hassio/addon/<slug>/info
-// We can't get the slug from the ingress token directly, but we can
-// link to the add-ons overview page which always works.
-(function() {{
-  var link = document.getElementById('settings-link');
-  // Try to extract slug from referrer or parent URL
-  var ref = document.referrer || '';
-  var m = ref.match(/\\/hassio\\/addon\\/([^\\/]+)/);
-  if (m) {{
-    link.href = '/hassio/addon/' + m[1] + '/info';
-  }} else {{
-    // Fallback: go to add-ons overview
-    link.href = '/hassio/store';
-  }}
-}})();
-</script>
-</body>
-</html>
-"""
-
-
-class _IngressHandler(BaseHTTPRequestHandler):
-    debug_port: int = 8765
-
-    def log_message(self, *_):
-        pass
-
-    def do_GET(self):
-        body = _INGRESS_HTML.format(port=self.debug_port).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
 def start(port: int, ingress_port: int = 8766) -> None:
     class _Server(socketserver.ThreadingMixIn, HTTPServer):
         daemon_threads = True
 
-    # Debug stream server
+    # Debug stream server (direct access)
     debug_server = _Server(("0.0.0.0", port), _Handler)
     threading.Thread(target=debug_server.serve_forever, daemon=True,
                      name="DebugServer").start()
     log.info("Debug stream: http://homeassistant.local:%d/", port)
 
-    # Ingress landing page server (sidebar link)
-    _IngressHandler.debug_port = port
-
-    class _IngressServer(socketserver.ThreadingMixIn, HTTPServer):
-        daemon_threads = True
-
-    ingress_server = _IngressServer(("0.0.0.0", ingress_port), _IngressHandler)
+    # Ingress server (HA sidebar) — serves the same full debug UI
+    ingress_server = _Server(("0.0.0.0", ingress_port), _Handler)
     threading.Thread(target=ingress_server.serve_forever, daemon=True,
                      name="IngressServer").start()
-    log.info("Ingress page: port %d (sidebar link active)", ingress_port)
+    log.info("Ingress (sidebar): port %d", ingress_port)
