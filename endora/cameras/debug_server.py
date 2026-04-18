@@ -609,15 +609,18 @@ def start(port: int, ingress_port: int = 8766) -> None:
 
         def do_GET(self):
             body = (
-                f'<!DOCTYPE html><html><head><title>Endora</title>'
-                f'<meta http-equiv="refresh" content="0;url={_direct_url}">'
-                f'</head><body style="background:#0d0d0d;color:#d0d0d0;'
+                f'<!DOCTYPE html><html><head><title>Endora</title></head>'
+                f'<body style="background:#0d0d0d;color:#d0d0d0;'
                 f'font-family:system-ui;display:flex;align-items:center;'
                 f'justify-content:center;height:100vh;flex-direction:column;gap:16px">'
                 f'<p style="color:#e8c040;font-size:18px;font-weight:600">&#x270B; Endora</p>'
                 f'<p style="color:#666;font-size:13px">Opening debug stream&hellip;</p>'
                 f'<a href="{_direct_url}" target="_blank" '
                 f'style="color:#5c5;font-size:13px">Click here if it doesn\'t open</a>'
+                f'<script>'
+                f'try{{window.top.location.href="{_direct_url}";}}'
+                f'catch(e){{window.open("{_direct_url}","_blank");}}'
+                f'</script>'
                 f'</body></html>'
             ).encode()
             self.send_response(200)
