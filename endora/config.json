@@ -1,8 +1,8 @@
 {
   "name": "Endora",
-  "version": "1.7.28",
+  "version": "1.7.29",
   "slug": "endora",
-  "description": "Gesture detection \u2014 arm above head + wrist flick/orientation/fist pump. Works from couch or standing.",
+  "description": "Gesture detection — SNAP, HOLD, DOUBLE_SNAP, THUMBS_UP. Works from couch or standing.",
   "url": "https://github.com/silvermy/endora",
   "init": false,
   "arch": [
@@ -20,15 +20,16 @@
 
     "arm_above_head_tolerance": 0.15,
     "body_upright_min": -0.15,
-    "leg_raise_margin": 0.05,
-    "fist_curl_threshold": 0.85,
+    "leg_raise_margin": 0.20,
+    "fist_curl_threshold": 0.75,
     "flip_image": false,
     "snap_forearm_min": 0.10,
-    "wave_lateral_fraction": 0.10,
-    "wave_velocity_threshold_px": 150.0,
+    "hold_duration_s": 1.5,
+    "double_snap_window_s": 3.0,
     "cooldown_s": 2.0,
-    "pose_visibility_min": 0.35,
+    "pose_visibility_min": 0.45,
     "frame_crop_bottom": 0,
+    "mirror_camera": false,
 
     "low_light_enhance": false,
 
@@ -52,14 +53,14 @@
     "body_upright_min": "float",
     "leg_raise_margin": "float",
     "fist_curl_threshold": "float",
-    "wave_velocity_threshold_px": "float",
     "flip_image": "bool",
     "snap_forearm_min": "float",
-    "wave_lateral_fraction": "float",
-    "mirror_camera": "bool",
+    "hold_duration_s": "float",
+    "double_snap_window_s": "float",
     "cooldown_s": "float",
     "pose_visibility_min": "float",
     "frame_crop_bottom": "int",
+    "mirror_camera": "bool",
 
     "low_light_enhance": "bool",
 
