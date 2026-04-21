@@ -107,11 +107,16 @@ class GestureStateMachine:
             self._sustain.entered_at.clear()
             return None
 
-        # Global cooldown gate
-        if now - self._last_fired_any < self.c.cooldown_s:
-            return None
-
         state = reading.state
+
+        # Cooldown gate for sustained-state gestures only — these need the
+        # cooldown to avoid rapid re-fire while the user holds the pose.
+        # SINGLE_UP doesn't need the cooldown because the per-raise flags
+        # (_snap_fired, _hold_fired) already prevent repeated firing, and
+        # enforcing cooldown here blocks DOUBLE_SNAP from working after SNAP.
+        if state != ArmState.SINGLE_UP:
+            if now - self._last_fired_any < self.c.cooldown_s:
+                return None
 
         # Dispatch per state
         if state == ArmState.SINGLE_UP:
