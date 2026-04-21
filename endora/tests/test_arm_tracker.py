@@ -71,6 +71,28 @@ def test_low_visibility_returns_none():
     assert r is None
 
 
+def test_hands_in_lap_is_not_cross_arms():
+    # Seated, hands resting in lap (around hip level, near midline)
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        left_wrist=Point(0.45, 0.70),   # near midline, at hip height
+        right_wrist=Point(0.55, 0.70),
+    )
+    r = _tracker().classify(lm, 1280, 720)
+    assert r.state != ArmState.CROSS_ARMS, f"got {r.state}"
+
+
+def test_hands_uncrossed_at_chest_is_not_cross_arms():
+    # Both hands on same side — not crossed
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        left_wrist=Point(0.35, 0.45),
+        right_wrist=Point(0.42, 0.45),
+    )
+    r = _tracker().classify(lm, 1280, 720)
+    assert r.state != ArmState.CROSS_ARMS, f"got {r.state}"
+
+
 def test_none_landmarks_returns_none():
     r = _tracker().classify(None, 1280, 720)
     assert r is None
