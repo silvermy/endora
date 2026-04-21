@@ -10,7 +10,8 @@ import logging
 import time
 
 from cameras.capture import RtspCapture
-from cameras.analyser import CameraAnalyser, Gesture
+from cameras.analyser import CameraAnalyser
+from core.state_machine import Gesture
 from cameras import debug_server
 from core.fusion import GestureFusion
 from output.backends import make_backend

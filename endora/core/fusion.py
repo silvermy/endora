@@ -15,7 +15,7 @@ import threading
 import time
 from typing import Callable, Dict, List, Tuple
 
-from cameras.analyser import Gesture
+from core.state_machine import Gesture
 
 log = logging.getLogger(__name__)
 

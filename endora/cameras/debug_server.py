@@ -617,10 +617,7 @@ def start(port: int, ingress_port: int = 8766) -> None:
                 f'<p style="color:#666;font-size:13px">Opening debug stream&hellip;</p>'
                 f'<a href="{_direct_url}" target="_blank" '
                 f'style="color:#5c5;font-size:13px">Click here if it doesn\'t open</a>'
-                f'<script>'
-                f'try{{window.top.location.href="{_direct_url}";}}'
-                f'catch(e){{window.open("{_direct_url}","_blank");}}'
-                f'</script>'
+                f'<script>window.open("{_direct_url}","_blank");</script>'
                 f'</body></html>'
             ).encode()
             self.send_response(200)

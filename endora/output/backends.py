@@ -39,7 +39,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
-from cameras.analyser import Gesture
+from core.state_machine import Gesture
 
 log = logging.getLogger(__name__)
 
@@ -141,10 +141,12 @@ class HABackend(BaseBackend):
 
 class PrintBackend(BaseBackend):
     SYMBOLS = {
-        Gesture.SNAP:        "☝️  endora-snap       ",
-        Gesture.HOLD:        "✋  endora-hold       ",
-        Gesture.DOUBLE_SNAP: "✌️  endora-double-snap",
-        Gesture.PEACE:       "✌️  endora-peace      ",
+        Gesture.SNAP:        "☝️   endora-snap        ",
+        Gesture.HOLD:        "✋  endora-hold        ",
+        Gesture.DOUBLE_SNAP: "☝️☝️  endora-double-snap ",
+        Gesture.CROSS_ARMS:  "❌  endora-cross-arms  ",
+        Gesture.T_POSE:      "🕴️  endora-t-pose      ",
+        Gesture.RAISE_BOTH:  "🙌  endora-raise-both  ",
     }
 
     def __init__(self):
