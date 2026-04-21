@@ -6,7 +6,8 @@
 
 set -e
 
-bashio::log.info "Endora v1.7.45 starting..."
+VERSION="$(grep -oP '__version__\s*=\s*"\K[^"]+' /app/version.py 2>/dev/null || echo '?')"
+bashio::log.info "Endora v${VERSION} starting..."
 
 if ! bashio::config.has_value "rtsp_url_a"; then
     bashio::log.fatal "rtsp_url_a is not configured"

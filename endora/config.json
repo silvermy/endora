@@ -1,36 +1,31 @@
 {
   "name": "Endora",
-  "version": "1.7.45",
+  "version": "1.8.0",
   "slug": "endora",
-  "description": "Gesture detection — SNAP, HOLD, DOUBLE_SNAP, PEACE. Works from couch or standing.",
+  "description": "Pose-based gesture detection — SNAP, HOLD, DOUBLE_SNAP, CROSS_ARMS, T_POSE, RAISE_BOTH.",
   "url": "https://github.com/silvermy/endora",
   "init": false,
-  "arch": [
-    "aarch64",
-    "amd64"
-  ],
+  "arch": ["aarch64", "amd64"],
   "startup": "application",
   "boot": "auto",
   "options": {
     "rtsp_url_a": "rtsp://user:pass@192.168.1.100:554/stream1",
-    "rtsp_url_b": "rtsp://user:pass@192.168.1.101:554/stream1",
+    "rtsp_url_b": "rtsp://user:pass@192.168.1.100:554/stream1",
     "debug_port": 8765,
     "ha_event_name": "gesture_detected",
     "log_level": "info",
 
     "arm_above_head_tolerance": 0.15,
     "body_upright_min": -0.15,
-    "leg_raise_margin": 0.20,
-    "fist_curl_threshold": 0.75,
-    "flip_image": false,
+    "pose_visibility_min": 0.45,
     "snap_forearm_min": 0.10,
     "hold_duration_s": 1.5,
     "double_snap_window_s": 3.0,
+    "sustain_s": 0.5,
     "cooldown_s": 2.0,
-    "pose_visibility_min": 0.45,
     "frame_crop_bottom": 0,
+    "flip_image": false,
     "mirror_camera": false,
-
     "low_light_enhance": false,
 
     "dewarp_enable": false,
@@ -51,17 +46,15 @@
 
     "arm_above_head_tolerance": "float",
     "body_upright_min": "float",
-    "leg_raise_margin": "float",
-    "fist_curl_threshold": "float",
-    "flip_image": "bool",
+    "pose_visibility_min": "float",
     "snap_forearm_min": "float",
     "hold_duration_s": "float",
     "double_snap_window_s": "float",
+    "sustain_s": "float",
     "cooldown_s": "float",
-    "pose_visibility_min": "float",
     "frame_crop_bottom": "int",
+    "flip_image": "bool",
     "mirror_camera": "bool",
-
     "low_light_enhance": "bool",
 
     "dewarp_enable": "bool",
@@ -73,9 +66,7 @@
     "dewarp_out_width": "int",
     "dewarp_out_height": "int"
   },
-  "map": [
-    "data"
-  ],
+  "map": ["data"],
   "host_network": false,
   "homeassistant_api": true,
   "hassio_api": true,

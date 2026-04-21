@@ -14,6 +14,7 @@ import sys
 
 from config.settings import Settings
 from core.system import GestureSystem
+from version import __version__
 
 
 def setup_logging(level_str: str):
@@ -34,15 +35,7 @@ def main():
     setup_logging(settings.log_level)
 
     log = logging.getLogger("main")
-    try:
-        import json as _json
-        _ver = _json.loads(
-            ((__import__("pathlib").Path(__file__).parent / "config.json")
-             .read_text())
-        ).get("version", "?")
-    except Exception:
-        _ver = "?"
-    log.info("Endora v%s starting (HA add-on mode)", _ver)
+    log.info("Endora v%s starting (HA add-on mode)", __version__)
     log.info("RTSP A: %s", _mask(settings.rtsp_url_a))
     log.info("RTSP B: %s", _mask(settings.rtsp_url_b))
     log.info("HA event: %s → %s/events/%s",

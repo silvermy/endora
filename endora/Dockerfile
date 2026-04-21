@@ -36,6 +36,7 @@ COPY config/     config/
 COPY core/       core/
 COPY output/     output/
 COPY main.py     .
+COPY version.py  .
 COPY config.json .
 
 # ── S6 service definition ─────────────────────────────────────────────────────
