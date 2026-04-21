@@ -71,6 +71,19 @@ def test_low_visibility_returns_none():
     assert r is None
 
 
+def test_hands_on_chest_is_cross_arms():
+    """Hands clasped on chest (realistic cross-arms pose) should fire."""
+    from tests.fake_landmarks import _build, Point
+    # Midline at ~0.50, shoulders at y=0.40, hips at y=0.65.
+    # Hands on chest: wrists at ~chest height, slightly past midline each way.
+    lm = _build(
+        left_wrist=Point(0.54, 0.50),   # just past midline to the right
+        right_wrist=Point(0.46, 0.50),  # just past midline to the left
+    )
+    r = _tracker().classify(lm, 1280, 720)
+    assert r.state == ArmState.CROSS_ARMS, f"got {r.state}"
+
+
 def test_hands_in_lap_is_not_cross_arms():
     # Seated, hands resting in lap (around hip level, near midline)
     from tests.fake_landmarks import _build, Point

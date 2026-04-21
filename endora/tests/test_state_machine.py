@@ -145,13 +145,24 @@ def test_brief_t_pose_while_raising_both_does_not_fire():
 
 # ── Cooldown ─────────────────────────────────────────────────────────────────
 
-def test_cooldown_blocks_immediate_refire():
-    m = _machine(snap_sustain_frames=1, cooldown_s=2.0)
+def test_cooldown_blocks_sustained_refire():
+    """Cooldown prevents rapid re-fire of sustained gestures like RAISE_BOTH."""
+    m = _machine(sustain_s=0.5, cooldown_s=2.0)
+    assert m.tick(_state(ArmState.BOTH_UP), now=0.0) is None
+    assert m.tick(_state(ArmState.BOTH_UP), now=0.6) == Gesture.RAISE_BOTH
+    # Immediately after, cooldown blocks re-entry
+    m.tick(_down(), now=0.7)
+    assert m.tick(_state(ArmState.BOTH_UP), now=0.9) is None
+    assert m.tick(_state(ArmState.BOTH_UP), now=1.5) is None
+
+
+def test_cooldown_does_not_block_double_snap():
+    """SINGLE_UP must not be cooldown-blocked — otherwise DOUBLE_SNAP can't fire."""
+    m = _machine(snap_sustain_frames=1, cooldown_s=2.0, double_snap_window_s=3.0)
     assert m.tick(_vertical_up(), now=0.0) == Gesture.SNAP
     m.tick(_down(), now=0.5)
-    # Only 1s after first fire — cooldown is 2s → no fire
-    assert m.tick(_vertical_up(), now=1.0) is None
-    assert m.tick(_vertical_up(), now=1.1) is None
+    # Only 1.0s after first snap — cooldown is 2s but SNAP bypasses it
+    assert m.tick(_vertical_up(), now=1.0) == Gesture.DOUBLE_SNAP
 
 
 # ── Missing/None reading ─────────────────────────────────────────────────────

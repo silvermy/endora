@@ -156,6 +156,15 @@ class CameraAnalyser(threading.Thread):
                 pose_res and pose_res.pose_landmarks) else None
 
             reading = self._arm_tracker.classify(landmarks, pw, ph)
+
+            # Log state transitions at INFO so the user can see recognition
+            # without having to enable debug logging.
+            if reading is not None:
+                state_now = reading.state
+                if state_now != getattr(self, '_last_logged_state', None):
+                    log.info("[%s] state → %s", self.label, state_now.name)
+                    self._last_logged_state = state_now
+
             now = time.monotonic()
             gesture = self._state_machine.tick(reading, now)
 
