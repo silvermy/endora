@@ -84,8 +84,11 @@ class ArmTrackerConfig:
     # Wrists must be this far lateral from body midline (frame fraction of width).
     tpose_lateral_min: float = 0.18
 
-    # Cross-arms: wrists within this radius of the *opposite* shoulder (frame fraction).
-    cross_arms_radius: float = 0.15
+    # Cross-arms:
+    #   - Each wrist must be this much past body midline toward opposite side.
+    #   - Each wrist must be within this radius of the opposite shoulder.
+    cross_arms_min_crossing: float = 0.05
+    cross_arms_radius: float = 0.18
 
 
 class ArmTracker:
@@ -119,11 +122,31 @@ class ArmTracker:
         mid_x = (ls.x + rs.x) / 2.0
 
         # ── CROSS_ARMS check (before T_POSE / SINGLE_UP / BOTH_UP) ────────
-        # Each wrist must be near the OPPOSITE shoulder.
+        # True cross-arms requires all of:
+        #   1. Wrists actually crossed: right wrist on LEFT of midline,
+        #      left wrist on RIGHT of midline (at least by cross_arms_min_crossing).
+        #   2. Both wrists at roughly chest height (between shoulders and hips).
+        #   3. Each wrist near the OPPOSITE shoulder (distance < cross_arms_radius).
+        #
+        # This rules out: hands in lap, hands resting on belly, asymmetric poses.
+        min_cross = self.c.cross_arms_min_crossing
+        rw_on_left  = rw.x < mid_x - min_cross
+        lw_on_right = lw.x > mid_x + min_cross
+
+        # Chest height: between shoulders (top) and hips (bottom), with a little
+        # slack on both sides. Using frame-y (smaller = higher).
+        chest_top    = avg_sh_y - 0.02
+        chest_bottom = avg_hp_y + 0.02
+        rw_at_chest  = chest_top < rw.y < chest_bottom
+        lw_at_chest  = chest_top < lw.y < chest_bottom
+
         r = self.c.cross_arms_radius
-        rw_near_left  = ((rw.x - ls.x) ** 2 + (rw.y - ls.y) ** 2) ** 0.5 < r
-        lw_near_right = ((lw.x - rs.x) ** 2 + (lw.y - rs.y) ** 2) ** 0.5 < r
-        if rw_near_left and lw_near_right:
+        rw_near_left_sh  = ((rw.x - ls.x) ** 2 + (rw.y - ls.y) ** 2) ** 0.5 < r
+        lw_near_right_sh = ((lw.x - rs.x) ** 2 + (lw.y - rs.y) ** 2) ** 0.5 < r
+
+        if (rw_on_left and lw_on_right
+                and rw_at_chest and lw_at_chest
+                and rw_near_left_sh and lw_near_right_sh):
             return ArmReading(state=ArmState.CROSS_ARMS, upright=upright)
 
         # ── T_POSE check ──────────────────────────────────────────────────
