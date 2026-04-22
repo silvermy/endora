@@ -73,7 +73,7 @@ class ArmTrackerConfig:
     """Thresholds for arm-state classification. All values are frame fractions."""
     arm_above_head_tolerance: float = 0.15
     body_upright_min: float = -0.15
-    pose_visibility_min: float = 0.45
+    pose_visibility_min: float = 0.55
 
     # Both-arms-up: each wrist must clear its shoulder by this margin.
     both_arms_margin: float = 0.10
@@ -90,13 +90,95 @@ class ArmTrackerConfig:
     cross_arms_min_crossing: float = 0.03
     cross_arms_wrist_proximity: float = 0.22
 
+    # ── Hysteresis ─────────────────────────────────────────────────────────
+    # How many consecutive frames a new non-DOWN state must be seen before
+    # it's accepted. Kills single-frame phantoms (furniture, flicker, shadows).
+    # At 10fps, 3 frames ≈ 0.3s to confirm a real gesture onset.
+    state_confirm_frames: int = 3
+    # How many consecutive frames of the new state before transitioning AWAY
+    # from a stable non-DOWN state back to DOWN. This prevents mid-gesture
+    # dropouts when MediaPipe momentarily loses the person.
+    state_release_frames: int = 4
+
 
 class ArmTracker:
     def __init__(self, config: ArmTrackerConfig):
         self.c = config
+        # Hysteresis state
+        self._stable_reading: Optional[ArmReading] = None
+        self._pending_state: Optional[ArmState] = None
+        self._pending_count: int = 0
 
     def classify(self, landmarks: Optional[_Landmarks],
                  frame_w: int, frame_h: int) -> Optional[ArmReading]:
+        """
+        Public entry point — applies hysteresis to the raw classification.
+        A new state must appear for state_confirm_frames consecutive frames
+        before being accepted; a stable state is held for state_release_frames
+        of contradictory frames before releasing.
+        """
+        raw = self._classify_raw(landmarks, frame_w, frame_h)
+        raw_state = raw.state if raw is not None else ArmState.DOWN
+
+        # First call or we had no stable reading yet
+        if self._stable_reading is None:
+            # Only accept a non-DOWN state after the confirm window
+            if raw_state == ArmState.DOWN:
+                self._stable_reading = raw
+                self._pending_state = None
+                self._pending_count = 0
+                return raw
+
+            # Non-DOWN candidate: need state_confirm_frames to confirm
+            if self._pending_state == raw_state:
+                self._pending_count += 1
+            else:
+                self._pending_state = raw_state
+                self._pending_count = 1
+
+            if self._pending_count >= self.c.state_confirm_frames:
+                self._stable_reading = raw
+                self._pending_state = None
+                self._pending_count = 0
+                return raw
+
+            # Not confirmed yet — report DOWN to downstream
+            return ArmReading(state=ArmState.DOWN)
+
+        # We have a stable reading — check if a change is underway
+        stable_state = self._stable_reading.state
+        if raw_state == stable_state:
+            # Same state; refresh the stable reading (positions may update)
+            self._stable_reading = raw if raw is not None else self._stable_reading
+            self._pending_state = None
+            self._pending_count = 0
+            return self._stable_reading
+
+        # State change candidate
+        if self._pending_state == raw_state:
+            self._pending_count += 1
+        else:
+            self._pending_state = raw_state
+            self._pending_count = 1
+
+        # Faster to release a stable non-DOWN state to DOWN (release_frames),
+        # slower to promote a new non-DOWN state (confirm_frames).
+        if raw_state == ArmState.DOWN:
+            needed = self.c.state_release_frames
+        else:
+            needed = self.c.state_confirm_frames
+
+        if self._pending_count >= needed:
+            self._stable_reading = raw if raw is not None else ArmReading(state=ArmState.DOWN)
+            self._pending_state = None
+            self._pending_count = 0
+            return self._stable_reading
+
+        # Change not confirmed — keep reporting the previous stable state
+        return self._stable_reading
+
+    def _classify_raw(self, landmarks: Optional[_Landmarks],
+                      frame_w: int, frame_h: int) -> Optional[ArmReading]:
         """
         Classify pose landmarks into an ArmReading.
         Returns None if landmarks are missing or visibility is too low.

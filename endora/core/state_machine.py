@@ -54,9 +54,9 @@ class StateMachineConfig:
     # while raising both arms).
     sustain_s: float = 0.5
 
-    # SNAP fires this many consecutive SINGLE_UP frames after arm-up.
-    # Gives competing gestures a window to register first.
-    snap_sustain_frames: int = 2
+    # SNAP sustain — hysteresis in ArmTracker already confirms a stable
+    # SINGLE_UP state before it reaches here, so 1 frame is enough.
+    snap_sustain_frames: int = 1
 
 
 # ── Internal per-arm-raise state ──────────────────────────────────────────────
