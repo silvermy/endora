@@ -52,6 +52,12 @@ def test_snap_fires_after_snap_sustain_frames():
     assert m.tick(_vertical_up(), now=0.1) == Gesture.SNAP   # frame 2
 
 
+def test_snap_fires_immediately_with_default_config():
+    # Default snap_sustain_frames=1 relies on ArmTracker hysteresis upstream
+    m = _machine()
+    assert m.tick(_vertical_up(), now=0.0) == Gesture.SNAP
+
+
 def test_snap_does_not_fire_for_non_vertical_arm():
     m = _machine(snap_sustain_frames=2)
     for i in range(10):

@@ -21,12 +21,12 @@ def _tracker() -> ArmTracker:
 
 
 def test_arm_down_returns_down_state():
-    r = _tracker().classify(arm_down(), 1280, 720)
+    r = _tracker()._classify_raw(arm_down(), 1280, 720)
     assert r.state == ArmState.DOWN
 
 
 def test_right_arm_vertical_is_single_up_right():
-    r = _tracker().classify(right_arm_up_vertical(), 1280, 720)
+    r = _tracker()._classify_raw(right_arm_up_vertical(), 1280, 720)
     assert r.state == ArmState.SINGLE_UP
     assert r.raised_side == Side.RIGHT
     assert r.forearm_dy > 0.10, f"forearm_dy should be vertical, got {r.forearm_dy}"
@@ -34,22 +34,22 @@ def test_right_arm_vertical_is_single_up_right():
 
 def test_right_arm_horizontal_is_not_single_up():
     # Wrist at same height as shoulder → not raised above head
-    r = _tracker().classify(right_arm_up_horizontal(), 1280, 720)
+    r = _tracker()._classify_raw(right_arm_up_horizontal(), 1280, 720)
     assert r.state == ArmState.DOWN
 
 
 def test_both_arms_up_is_both_up():
-    r = _tracker().classify(both_arms_up(), 1280, 720)
+    r = _tracker()._classify_raw(both_arms_up(), 1280, 720)
     assert r.state == ArmState.BOTH_UP
 
 
 def test_t_pose_is_t_pose():
-    r = _tracker().classify(t_pose(), 1280, 720)
+    r = _tracker()._classify_raw(t_pose(), 1280, 720)
     assert r.state == ArmState.T_POSE
 
 
 def test_cross_arms_is_cross_arms():
-    r = _tracker().classify(cross_arms(), 1280, 720)
+    r = _tracker()._classify_raw(cross_arms(), 1280, 720)
     assert r.state == ArmState.CROSS_ARMS
 
 
@@ -61,13 +61,13 @@ def test_lying_down_single_up_rejected():
         left_hip=Point(0.42, 0.20), right_hip=Point(0.58, 0.20),
         right_elbow=Point(0.65, 0.25), right_wrist=Point(0.65, 0.10),
     )
-    r = _tracker().classify(lm, 1280, 720)
+    r = _tracker()._classify_raw(lm, 1280, 720)
     assert r.state == ArmState.DOWN
     assert r.upright is False
 
 
 def test_low_visibility_returns_none():
-    r = _tracker().classify(low_visibility(), 1280, 720)
+    r = _tracker()._classify_raw(low_visibility(), 1280, 720)
     assert r is None
 
 
@@ -80,7 +80,7 @@ def test_hands_on_chest_is_cross_arms():
         left_wrist=Point(0.54, 0.50),   # just past midline to the right
         right_wrist=Point(0.46, 0.50),  # just past midline to the left
     )
-    r = _tracker().classify(lm, 1280, 720)
+    r = _tracker()._classify_raw(lm, 1280, 720)
     assert r.state == ArmState.CROSS_ARMS, f"got {r.state}"
 
 
@@ -91,7 +91,7 @@ def test_hands_in_lap_is_not_cross_arms():
         left_wrist=Point(0.45, 0.70),   # near midline, at hip height
         right_wrist=Point(0.55, 0.70),
     )
-    r = _tracker().classify(lm, 1280, 720)
+    r = _tracker()._classify_raw(lm, 1280, 720)
     assert r.state != ArmState.CROSS_ARMS, f"got {r.state}"
 
 
@@ -102,24 +102,24 @@ def test_hands_uncrossed_at_chest_is_not_cross_arms():
         left_wrist=Point(0.35, 0.45),
         right_wrist=Point(0.42, 0.45),
     )
-    r = _tracker().classify(lm, 1280, 720)
+    r = _tracker()._classify_raw(lm, 1280, 720)
     assert r.state != ArmState.CROSS_ARMS, f"got {r.state}"
 
 
 def test_none_landmarks_returns_none():
-    r = _tracker().classify(None, 1280, 720)
+    r = _tracker()._classify_raw(None, 1280, 720)
     assert r is None
 
 
 def test_both_up_prefers_both_over_single():
     # Ambiguity: both arms raised — must return BOTH_UP, not SINGLE_UP
-    r = _tracker().classify(both_arms_up(), 1280, 720)
+    r = _tracker()._classify_raw(both_arms_up(), 1280, 720)
     assert r.state == ArmState.BOTH_UP
 
 
 def test_t_pose_prefers_t_over_both():
     # T-pose wrists are at shoulder height, not above → not BOTH_UP
-    r = _tracker().classify(t_pose(), 1280, 720)
+    r = _tracker()._classify_raw(t_pose(), 1280, 720)
     assert r.state == ArmState.T_POSE
 
 
