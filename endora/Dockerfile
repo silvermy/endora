@@ -26,6 +26,7 @@ COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --prefer-binary \
        -r /tmp/requirements.txt \
+    && /opt/venv/bin/pip install --no-cache-dir --no-deps grlib==1.0.12 \
     && rm /tmp/requirements.txt
 ENV PATH="/opt/venv/bin:$PATH"
 

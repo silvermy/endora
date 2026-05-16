@@ -6,13 +6,13 @@
 # Official arm64/amd64 wheels; nano pose model (~7 MB) is downloaded at build time.
 ultralytics>=8.3.0
 
-# grlib: hand gesture feature-extraction pipeline
-# Uses MediaPipe Hands internally for landmark detection.
-grlib>=1.0.12
-
-# MediaPipe: still required by grlib for hand landmark detection
+# MediaPipe: required by grlib for hand landmark detection
 # Official arm64 wheels exist from v0.10.9 (works on Pi 4/5 64-bit, amd64)
 mediapipe>=0.10.9
+
+# grlib runtime deps (grlib itself is installed --no-deps in the Dockerfile to
+# avoid its numpy~=1.21.4 pin conflicting with ultralytics>=1.23.0 requirement).
+pandas>=1.1.4
 
 # OpenCV headless — no Qt/GTK, smaller image, all we need is VideoCapture
 # Must be built with FFmpeg support for RTSP (the PyPI wheel includes it)
