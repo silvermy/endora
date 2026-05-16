@@ -58,6 +58,11 @@ class StateMachineConfig:
     # SINGLE_UP state before it reaches here, so 1 frame is enough.
     snap_sustain_frames: int = 1
 
+    # grlib snap_roll threshold: if |reading.snap_roll| >= this value,
+    # snap fires even when forearm_dy is below snap_forearm_min.
+    # 0.0 = disabled (rely on forearm_dy only).
+    snap_roll_threshold: float = 0.0
+
 
 # ── Internal per-arm-raise state ──────────────────────────────────────────────
 
@@ -136,15 +141,20 @@ class GestureStateMachine:
         r.up_frames += 1
 
         arm_vertical = reading.forearm_dy >= self.c.snap_forearm_min
+        roll_snap = (
+            self.c.snap_roll_threshold > 0
+            and abs(reading.snap_roll) >= self.c.snap_roll_threshold
+        )
+        snap_condition = arm_vertical or roll_snap
 
         # HOLD: arm still vertical, SNAP already fired, enough time passed
-        if (r.snap_fired and not r.hold_fired and arm_vertical
+        if (r.snap_fired and not r.hold_fired and snap_condition
                 and (now - r.snap_fired_at) >= self.c.hold_duration_s):
             r.hold_fired = True
             return self._fire(Gesture.HOLD, now)
 
         # SNAP: first N vertical-arm frames of this raise, before HOLD fires
-        if (not r.snap_fired and arm_vertical
+        if (not r.snap_fired and snap_condition
                 and r.up_frames >= self.c.snap_sustain_frames):
             return self._fire_snap(now)
 

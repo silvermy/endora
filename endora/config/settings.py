@@ -39,10 +39,17 @@ class Settings:
 
     # ── Pose (arm-raise detection) ────────────────────────────────────────
     # Advanced: override in settings.yaml if needed
-    # Complexity 2 gives best detection; 0 is fastest. Max valid value is 2.
-    pose_model_complexity: int = 2
+    # YOLO pose model weights file.  "yolo11n-pose.pt" is fastest (nano);
+    # other sizes: yolo11s/m/l/x-pose.pt for more accuracy at the cost of speed.
+    # The model is pre-downloaded into the Docker image at build time.
+    yolo_pose_model: str = "yolo11n-pose.pt"
+    # Minimum keypoint confidence for YOLO to count a landmark as visible.
     pose_min_detection_confidence: float = 0.3
+    # Deprecated — no longer used (was MediaPipe tracking threshold).
     pose_min_tracking_confidence: float = 0.3
+    # Deprecated — was MediaPipe model complexity (0/1/2).  Kept so old
+    # settings.yaml files don't cause load errors.
+    pose_model_complexity: int = 2
     # 0.15 = wrist must be 15 % of frame height above shoulder.
     # Prevents scratching the top of the head from triggering gestures.
     # Lower (0.05) is more permissive but can fire on incidental head touches.

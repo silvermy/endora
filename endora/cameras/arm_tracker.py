@@ -3,15 +3,18 @@ cameras/arm_tracker.py
 
 Pure classifier: pose landmarks → ArmState.
 
-No MediaPipe dependency in the classifier itself — it takes a dict-like
-landmarks object with x/y per PoseLandmark enum value, so tests can pass
-fake landmarks without installing MediaPipe.
+No pose-backend dependency in the classifier itself — it takes a dict-like
+landmarks object with x/y/visibility per landmark index, so tests can pass
+fake landmarks without installing any inference library.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, Protocol
+
+import numpy as np
 
 
 class ArmState(Enum):
@@ -40,6 +43,9 @@ class ArmReading:
     forearm_dy: float = 0.0
     # True if the body pose is upright enough to trust (hips below shoulders).
     upright: bool = True
+    # Palm roll from grlib hand landmarks: (index_mcp.x - pinky_mcp.x) / hand_width.
+    # Ranges roughly -1 to +1; only populated when hand_lm is provided to classify().
+    snap_roll: float = 0.0
 
 
 # ── Landmark protocol for type hints ──────────────────────────────────────────
@@ -54,8 +60,8 @@ class _Landmarks(Protocol):
     def __getitem__(self, idx: int) -> _Point: ...
 
 
-# Indices match mediapipe.solutions.pose.PoseLandmark.
-# Kept as constants so tests don't need mediapipe installed.
+# Landmark indices used by ArmTracker.  These match MediaPipe PoseLandmark
+# values; the YOLO backend remaps COCO indices to these before calling classify().
 LEFT_SHOULDER  = 11
 RIGHT_SHOULDER = 12
 LEFT_ELBOW     = 13
@@ -64,6 +70,23 @@ LEFT_WRIST     = 15
 RIGHT_WRIST    = 16
 LEFT_HIP       = 23
 RIGHT_HIP      = 24
+
+
+def _hand_snap_roll(hand_lm: np.ndarray) -> float:
+    """Compute palm roll from a flat grlib hand-landmark array (1 hand, 63 floats).
+
+    roll = (index_mcp.x - pinky_mcp.x) / hand_width
+    MediaPipe hand indices: INDEX_FINGER_MCP=5, PINKY_MCP=17.
+    Ranges roughly -1 to +1; sign depends on which hand is raised.
+    """
+    if len(hand_lm) < 21 * 3:
+        return 0.0
+    idx_mcp_x = float(hand_lm[5 * 3])    # INDEX_FINGER_MCP.x
+    pnk_mcp_x = float(hand_lm[17 * 3])   # PINKY_MCP.x
+    hand_w = abs(idx_mcp_x - pnk_mcp_x)
+    if hand_w < 1e-6:
+        return 0.0
+    return (idx_mcp_x - pnk_mcp_x) / hand_w
 
 
 # ── Tracker ───────────────────────────────────────────────────────────────────
@@ -109,10 +132,27 @@ class ArmTracker:
         self._pending_state: Optional[ArmState] = None
         self._pending_count: int = 0
 
-    def classify(self, landmarks: Optional[_Landmarks],
-                 frame_w: int, frame_h: int) -> Optional[ArmReading]:
+    def classify(
+        self,
+        landmarks: Optional[_Landmarks],
+        frame_w: int,
+        frame_h: int,
+        hand_lm: Optional[np.ndarray] = None,
+    ) -> Optional[ArmReading]:
+        """Public entry point — hysteresis + optional grlib hand snap_roll.
+
+        hand_lm: flat numpy array from grlib Pipeline (21*3 floats, 1 hand).
+        snap_roll is attached to SINGLE_UP readings only.
         """
-        Public entry point — applies hysteresis to the raw classification.
+        result = self._hyst_classify(landmarks, frame_w, frame_h)
+        if result is not None and result.state == ArmState.SINGLE_UP and hand_lm is not None:
+            result = dataclasses.replace(result, snap_roll=_hand_snap_roll(hand_lm))
+        return result
+
+    def _hyst_classify(self, landmarks: Optional[_Landmarks],
+                       frame_w: int, frame_h: int) -> Optional[ArmReading]:
+        """Applies hysteresis to the raw classification.
+
         A new state must appear for state_confirm_frames consecutive frames
         before being accepted; a stable state is held for state_release_frames
         of contradictory frames before releasing.
