@@ -29,6 +29,11 @@ RUN python3 -m venv /opt/venv \
     && rm /tmp/requirements.txt
 ENV PATH="/opt/venv/bin:$PATH"
 
+# ── Pre-download YOLO pose model ──────────────────────────────────────────────
+# Downloads yolo11n-pose.pt (~7 MB) so the container starts without internet.
+# Change the model name here if you override yolo_pose_model in settings.yaml.
+RUN python3 -c "from ultralytics import YOLO; YOLO('yolo11n-pose.pt')"
+
 # ── Application code ──────────────────────────────────────────────────────────
 WORKDIR /app
 COPY cameras/    cameras/

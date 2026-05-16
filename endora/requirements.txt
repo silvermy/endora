@@ -2,7 +2,15 @@
 # Built into the Docker image at build time.
 
 # ── Computer vision ───────────────────────────────────────────────────────────
-# MediaPipe: pose skeleton + hand landmark detection
+# Ultralytics YOLO: body pose estimation (replaces MediaPipe Pose)
+# Official arm64/amd64 wheels; nano pose model (~7 MB) is downloaded at build time.
+ultralytics>=8.3.0
+
+# grlib: hand gesture feature-extraction pipeline
+# Uses MediaPipe Hands internally for landmark detection.
+grlib>=1.0.12
+
+# MediaPipe: still required by grlib for hand landmark detection
 # Official arm64 wheels exist from v0.10.9 (works on Pi 4/5 64-bit, amd64)
 mediapipe>=0.10.9
 

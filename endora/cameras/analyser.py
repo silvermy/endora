@@ -3,19 +3,23 @@ cameras/analyser.py
 
 Thin orchestration layer. Per frame:
   1. Preprocess (dewarp / crop / CLAHE)
-  2. Run MediaPipe Pose
-  3. ArmTracker.classify() → ArmReading
-  4. GestureStateMachine.tick() → Gesture or None
-  5. Debug overlay render
+  2. Run YOLO Pose → body keypoints
+  3. Run grlib Pipeline → hand landmarks (optional; NoHandDetectedException → None)
+  4. ArmTracker.classify() → ArmReading
+  5. GestureStateMachine.tick() → Gesture or None
+  6. Debug overlay render
 """
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
-from typing import Callable
+from dataclasses import dataclass
+from typing import Callable, Optional
 
 import cv2
+import numpy as np
 
 from version import __version__
 from cameras.arm_tracker import ArmTracker, ArmTrackerConfig
@@ -24,6 +28,65 @@ from core.state_machine import (
 )
 
 log = logging.getLogger(__name__)
+
+# ── COCO → MediaPipe index remap ──────────────────────────────────────────────
+# YOLO Pose outputs 17 COCO keypoints; ArmTracker uses MediaPipe PoseLandmark
+# indices.  This map translates at read-time so ArmTracker needs no changes.
+_COCO_TO_MP: dict[int, int] = {
+    5:  11,  # left shoulder
+    6:  12,  # right shoulder
+    7:  13,  # left elbow
+    8:  14,  # right elbow
+    9:  15,  # left wrist
+    10: 16,  # right wrist
+    11: 23,  # left hip
+    12: 24,  # right hip
+}
+
+# COCO upper-body skeleton connections (used for debug overlay)
+_COCO_UPPER_BODY = [
+    (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),
+    (5, 11), (6, 12), (11, 12),
+]
+
+
+@dataclass
+class _KP:
+    x: float          # normalised 0-1
+    y: float          # normalised 0-1
+    visibility: float # keypoint confidence
+
+
+class _YOLOLandmarks:
+    """YOLO COCO keypoints wrapped to match ArmTracker's _Landmarks protocol."""
+
+    def __init__(self, kps: np.ndarray, frame_w: int, frame_h: int) -> None:
+        # kps: shape [17, 3] — (x_px, y_px, conf)
+        self._pts: dict[int, _KP] = {
+            mp_idx: _KP(
+                x=float(kps[coco_idx, 0]) / frame_w,
+                y=float(kps[coco_idx, 1]) / frame_h,
+                visibility=float(kps[coco_idx, 2]),
+            )
+            for coco_idx, mp_idx in _COCO_TO_MP.items()
+        }
+
+    def __getitem__(self, idx: int) -> _KP:
+        return self._pts[idx]
+
+
+def _yolo_to_landmarks(
+    results, frame_w: int, frame_h: int
+) -> Optional[_YOLOLandmarks]:
+    """Return the best-person YOLO landmarks, or None if no detection."""
+    if not results:
+        return None
+    kps_data = results[0].keypoints
+    if kps_data is None or kps_data.data.shape[0] == 0:
+        return None
+    kps = kps_data.data.cpu().numpy()  # [num_persons, 17, 3]
+    best = int(kps[:, :, 2].mean(axis=1).argmax())
+    return _YOLOLandmarks(kps[best], frame_w, frame_h)
 
 
 class CameraAnalyser(threading.Thread):
@@ -47,7 +110,6 @@ class CameraAnalyser(threading.Thread):
         self._clahe_obj = None
         self._clahe_clip: float = -1.0
 
-        # Build subsystems from settings
         self._arm_tracker = ArmTracker(ArmTrackerConfig(
             arm_above_head_tolerance=float(getattr(settings, 'arm_above_head_tolerance', 0.15)),
             body_upright_min=float(getattr(settings, 'body_upright_min', -0.15)),
@@ -59,6 +121,7 @@ class CameraAnalyser(threading.Thread):
             hold_duration_s=float(getattr(settings, 'hold_duration_s', 1.5)),
             double_snap_window_s=float(getattr(settings, 'double_snap_window_s', 3.0)),
             sustain_s=float(getattr(settings, 'sustain_s', 0.5)),
+            snap_roll_threshold=float(getattr(settings, 'snap_roll_threshold', 0.0)),
         ))
 
     def stop(self):
@@ -123,21 +186,20 @@ class CameraAnalyser(threading.Thread):
     # ── Main loop ─────────────────────────────────────────────────────────
 
     def run(self):
-        import mediapipe as mp
-        mp_pose = mp.solutions.pose
+        from ultralytics import YOLO
 
-        complexity = max(0, min(2, int(getattr(self.s, 'pose_model_complexity', 1))))
-        pose = mp_pose.Pose(
-            model_complexity=complexity,
-            min_detection_confidence=float(getattr(
-                self.s, 'pose_min_detection_confidence', 0.5)),
-            min_tracking_confidence=float(getattr(
-                self.s, 'pose_min_tracking_confidence', 0.5)),
-            enable_segmentation=False,
-            static_image_mode=False,
-        )
+        # grlib uses cv2.cv2 (old internal module name); patch before import.
+        sys.modules.setdefault('cv2.cv2', cv2)
+        from grlib.feature_extraction.pipeline import Pipeline
+        from grlib.exceptions import NoHandDetectedException
 
-        log.info("[%s] Analyser running (v%s — pose-only gesture set)",
+        model_name = getattr(self.s, 'yolo_pose_model', 'yolo11n-pose.pt')
+        yolo = YOLO(model_name)
+
+        hand_pipeline = Pipeline(num_hands=1, optimize_pipeline=True)
+        hand_pipeline.add_stage()
+
+        log.info("[%s] Analyser running (v%s — YOLO pose + grlib hands)",
                  self.label, __version__)
 
         while not self._stop_evt.is_set():
@@ -147,18 +209,23 @@ class CameraAnalyser(threading.Thread):
                 continue
 
             proc_frame, pw, ph = self._preprocess(frame)
-            rgb = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2RGB)
-            rgb.flags.writeable = False
-            pose_res = pose.process(rgb)
-            rgb.flags.writeable = True
 
-            landmarks = pose_res.pose_landmarks.landmark if (
-                pose_res and pose_res.pose_landmarks) else None
+            # ── Body pose (YOLO) ──────────────────────────────────────────
+            yolo_results = yolo(proc_frame, verbose=False)
+            landmarks = _yolo_to_landmarks(yolo_results, pw, ph)
 
-            reading = self._arm_tracker.classify(landmarks, pw, ph)
+            # ── Hand landmarks (grlib / MediaPipe Hands) ──────────────────
+            hand_lm: Optional[np.ndarray] = None
+            try:
+                flat_lm, _handedness = hand_pipeline.get_landmarks_from_image(proc_frame)
+                hand_lm = flat_lm
+            except NoHandDetectedException:
+                pass
+            except Exception as e:
+                log.debug("[%s] grlib hand error: %s", self.label, e)
 
-            # Log state transitions at INFO so the user can see recognition
-            # without having to enable debug logging.
+            reading = self._arm_tracker.classify(landmarks, pw, ph, hand_lm)
+
             if reading is not None:
                 state_now = reading.state
                 if state_now != getattr(self, '_last_logged_state', None):
@@ -173,33 +240,43 @@ class CameraAnalyser(threading.Thread):
 
             if self.debug_frame_cb is not None:
                 try:
-                    dbg = _draw_debug(proc_frame, pose_res, reading, gesture)
+                    dbg = _draw_debug(proc_frame, yolo_results, hand_lm, reading, gesture)
                     self.debug_frame_cb(self.label, dbg)
                 except Exception as e:
                     log.debug("[%s] debug render error: %s", self.label, e)
 
-        pose.close()
         log.info("[%s] Analyser stopped", self.label)
 
 
 # ── Debug overlay ─────────────────────────────────────────────────────────────
 
-def _draw_debug(frame, pose_res, reading, fired_gesture):
-    """Draw skeleton + gesture state overlay."""
-    import mediapipe as mp
+def _draw_debug(frame, yolo_results, hand_lm, reading, fired_gesture):
+    """Draw YOLO skeleton + grlib hand indicator + gesture state overlay."""
     img = frame.copy()
     h, w = img.shape[:2]
 
-    if pose_res and pose_res.pose_landmarks:
-        mp.solutions.drawing_utils.draw_landmarks(
-            img, pose_res.pose_landmarks,
-            mp.solutions.pose.POSE_CONNECTIONS,
-            landmark_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(
-                color=(0, 255, 0), thickness=2, circle_radius=3),
-            connection_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(
-                color=(0, 200, 0), thickness=2),
-        )
-    else:
+    detected = False
+    if yolo_results and yolo_results[0].keypoints is not None:
+        kps_data = yolo_results[0].keypoints.data
+        if kps_data.shape[0] > 0:
+            detected = True
+            kps = kps_data.cpu().numpy()
+            best = int(kps[:, :, 2].mean(axis=1).argmax())
+            person = kps[best]  # [17, 3]
+
+            for a, b in _COCO_UPPER_BODY:
+                x1, y1, c1 = person[a]
+                x2, y2, c2 = person[b]
+                if c1 > 0.5 and c2 > 0.5:
+                    cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)),
+                             (0, 200, 0), 2)
+
+            for i in range(5, 13):
+                x, y, c = person[i]
+                if c > 0.5:
+                    cv2.circle(img, (int(x), int(y)), 4, (0, 255, 0), -1)
+
+    if not detected:
         msg = "NO POSE DETECTED"
         fs = max(0.6, w / 800)
         (tw, th), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, fs, 2)
@@ -219,9 +296,12 @@ def _draw_debug(frame, pose_res, reading, fired_gesture):
     if reading is not None:
         state_name = reading.state.name
         forearm = reading.forearm_dy if reading.state.name == 'SINGLE_UP' else 0.0
+        snap_roll = reading.snap_roll if reading.state.name == 'SINGLE_UP' else 0.0
+        hand_str = f"{snap_roll:+.2f}" if hand_lm is not None else "none"
         lines = [
             (f"state: {state_name}", (0, 255, 100)),
             (f"forearm_dy: {forearm:.3f}", (255, 255, 255)),
+            (f"snap_roll:  {hand_str}", (255, 255, 255)),
             (f"upright: {reading.upright}", (255, 255, 255)),
         ]
     else:
