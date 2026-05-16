@@ -13,6 +13,7 @@ mediapipe>=0.10.9
 # grlib runtime deps (grlib itself is installed --no-deps in the Dockerfile to
 # avoid its numpy~=1.21.4 pin conflicting with ultralytics>=1.23.0 requirement).
 pandas>=1.1.4
+imutils>=0.5.4
 
 # OpenCV headless — no Qt/GTK, smaller image, all we need is VideoCapture
 # Must be built with FFmpeg support for RTSP (the PyPI wheel includes it)
