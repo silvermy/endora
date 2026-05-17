@@ -62,6 +62,7 @@ _PARAMS = [
     ("arm_above_head_tolerance", "Arm raise margin",            0.0,  0.30, 0.01, "Gesture"),
     ("palm_twist_threshold",     "Snap sensitivity",            0.10, 1.20, 0.05, "Gesture"),
     ("cooldown_s",               "Cooldown (s)",                0,    10,   0.25, "Gesture"),
+    ("yolo_conf",                "YOLO confidence (ghost filter)", 0.10, 0.80, 0.01, "Body"),
     ("pose_visibility_min",      "Min visibility (furniture)",  0.05, 0.8,  0.01, "Body"),
     ("frame_crop_bottom",        "Crop bottom (%)",             0,    60,   1,    "Body"),
     ("dewarp_tilt",              "Tilt (° down)",              -10,   80,   1,    "Dewarp"),
