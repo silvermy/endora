@@ -8,7 +8,8 @@ FROM ghcr.io/home-assistant/base-debian:bookworm
 
 ENV S6_KEEP_ENV=1 \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
-    LANG=C.UTF-8
+    LANG=C.UTF-8 \
+    YOLO_CONFIG_DIR=/tmp/Ultralytics
 
 # ── System dependencies ───────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
