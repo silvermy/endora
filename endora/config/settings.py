@@ -42,7 +42,7 @@ class Settings:
     # YOLO pose model weights file.  "yolo11n-pose.pt" is fastest (nano);
     # other sizes: yolo11s/m/l/x-pose.pt for more accuracy at the cost of speed.
     # The model is pre-downloaded into the Docker image at build time.
-    yolo_pose_model: str = "yolo11n-pose.pt"
+    yolo_pose_model: str = "yolo11n-pose.onnx"
     # Minimum keypoint confidence for YOLO to count a landmark as visible.
     pose_min_detection_confidence: float = 0.3
     # Deprecated — no longer used (was MediaPipe tracking threshold).

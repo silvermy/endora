@@ -15,6 +15,12 @@ mediapipe>=0.10.9
 pandas>=1.1.4
 imutils>=0.5.4
 
+# ONNX Runtime — used instead of PyTorch for YOLO inference on ARM64.
+# The standard PyTorch conv2d kernel uses ARMv8.2-A dot-product instructions
+# absent on Cortex-A72 (Pi 4), causing SIGILL.  ONNX Runtime is compiled
+# conservatively and works on all ARMv8-A CPUs.
+onnxruntime>=1.16.0
+
 # OpenCV headless — no Qt/GTK, smaller image, all we need is VideoCapture
 # Must be built with FFmpeg support for RTSP (the PyPI wheel includes it)
 opencv-python-headless>=4.9.0.80
