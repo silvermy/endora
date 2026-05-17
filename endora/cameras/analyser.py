@@ -235,7 +235,19 @@ class CameraAnalyser(threading.Thread):
             raise
 
     def _run(self):
+        import os
+        import torch
+        # oneDNN/MKLDNN uses ARMv8.2-A dot-product instructions absent on
+        # Cortex-A72 (Pi 4) — disable it so PyTorch falls back to generic NEON.
+        torch.backends.mkldnn.enabled = False
+        torch.set_num_threads(1)  # avoid parallel BLAS paths on ARM
+        # Disable ultralytics telemetry thread — it spawns HTTPS requests that
+        # also SIGILL on this CPU's SSL library.
+        os.environ.setdefault('ULTRALYTICS_SYNC', 'False')
+
         from ultralytics import YOLO
+        from ultralytics import settings as _yolo_settings
+        _yolo_settings.update({'sync': False, 'analytics': False})
         _patch_yolo_arm64_fusion()
 
         model_name = getattr(self.s, 'yolo_pose_model', 'yolo11n-pose.pt')
