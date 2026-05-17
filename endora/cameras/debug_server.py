@@ -598,35 +598,11 @@ def start(port: int, ingress_port: int = 8766) -> None:
                      name="DebugServer").start()
     log.info("Debug stream: http://homeassistant.local:%d/", port)
 
-    # Ingress server (HA sidebar) — redirects browser to the direct debug
-    # URL in a new tab. Cannot embed the stream in HA's HTTPS iframe because
-    # browsers block mixed HTTP/HTTPS content.
-    _direct_url = f"http://homeassistant.local:{port}/"
-
-    class _RedirectHandler(BaseHTTPRequestHandler):
-        def log_message(self, *_):
-            pass
-
-        def do_GET(self):
-            body = (
-                f'<!DOCTYPE html><html><head><title>Endora</title></head>'
-                f'<body style="background:#0d0d0d;color:#d0d0d0;'
-                f'font-family:system-ui;display:flex;align-items:center;'
-                f'justify-content:center;height:100vh;flex-direction:column;gap:16px">'
-                f'<p style="color:#e8c040;font-size:18px;font-weight:600">&#x270B; Endora</p>'
-                f'<p style="color:#666;font-size:13px">Opening debug stream&hellip;</p>'
-                f'<a href="{_direct_url}" target="_blank" '
-                f'style="color:#5c5;font-size:13px">Click here if it doesn\'t open</a>'
-                f'<script>window.open("{_direct_url}","_blank");</script>'
-                f'</body></html>'
-            ).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    ingress_server = _Server(("0.0.0.0", ingress_port), _RedirectHandler)
+    # Ingress server (HA sidebar) — serves the full debug UI directly so it
+    # works through HA's HTTPS ingress proxy without popup/mixed-content issues.
+    # All URLs in the HTML are relative (/stream, /settings, /set, /save) so
+    # they resolve correctly whether accessed via ingress or the direct port.
+    ingress_server = _Server(("0.0.0.0", ingress_port), _Handler)
     threading.Thread(target=ingress_server.serve_forever, daemon=True,
                      name="IngressServer").start()
-    log.info("Ingress (sidebar): port %d → redirects to port %d", ingress_port, port)
+    log.info("Ingress (sidebar): port %d serving full debug UI", ingress_port)
