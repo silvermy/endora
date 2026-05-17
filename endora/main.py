@@ -7,10 +7,13 @@ When running as a HA add-on, settings come from /data/options.json
 automatically by the Supervisor for API access.
 """
 
+import faulthandler
 import logging
 import os
 import signal
 import sys
+
+faulthandler.enable()  # dump native stack trace on SIGSEGV/SIGFPE/etc.
 
 from config.settings import Settings
 from core.system import GestureSystem

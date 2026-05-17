@@ -186,6 +186,13 @@ class CameraAnalyser(threading.Thread):
     # ── Main loop ─────────────────────────────────────────────────────────
 
     def run(self):
+        try:
+            self._run()
+        except Exception:
+            log.exception("[%s] Analyser crashed", self.label)
+            raise
+
+    def _run(self):
         from ultralytics import YOLO
 
         model_name = getattr(self.s, 'yolo_pose_model', 'yolo11n-pose.pt')
@@ -264,6 +271,8 @@ class CameraAnalyser(threading.Thread):
                     log.debug("[%s] debug render error: %s", self.label, e)
 
         log.info("[%s] Analyser stopped", self.label)
+
+
 
 
 # ── Debug overlay ─────────────────────────────────────────────────────────────
