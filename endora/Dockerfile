@@ -30,20 +30,27 @@ RUN python3 -m venv /opt/venv \
     && rm /tmp/requirements.txt
 ENV PATH="/opt/venv/bin:$PATH"
 
-# ── Pre-download YOLO pose model ──────────────────────────────────────────────
-# Downloads yolo11n-pose.pt (~7 MB) so the container starts without internet.
-# Change the model name here if you override yolo_pose_model in settings.yaml.
-RUN python3 -c "from ultralytics import YOLO; YOLO('yolo11n-pose.pt')"
-
 # ── Application code ──────────────────────────────────────────────────────────
+# yolo11n-pose.onnx must be generated on an x86/macOS machine first:
+#   python3 -c "from ultralytics import YOLO; YOLO('yolo11n-pose.pt').export(format='onnx', opset=12)"
+# then committed to the repo alongside this Dockerfile.
 WORKDIR /app
-COPY cameras/    cameras/
-COPY config/     config/
-COPY core/       core/
-COPY output/     output/
-COPY main.py     .
-COPY version.py  .
-COPY config.json .
+COPY cameras/           cameras/
+COPY config/            config/
+COPY core/              core/
+COPY output/            output/
+COPY main.py            .
+COPY version.py         .
+COPY config.json        .
+COPY yolo11n-pose.onnx  .
+
+# ── Validate ONNX model (no PyTorch inference — safe on all ARM64 CPUs) ───────
+RUN python3 -c "
+import onnxruntime as ort
+s = ort.InferenceSession('yolo11n-pose.onnx', providers=['CPUExecutionProvider'])
+inp = s.get_inputs()[0]
+print(f'ONNX model OK — input: {inp.name} {inp.shape}')
+"
 
 # ── S6 service definition ─────────────────────────────────────────────────────
 # S6 looks for services in /etc/services.d/<name>/run
