@@ -21,14 +21,21 @@ from version import __version__
 
 
 def setup_logging(level_str: str):
+    # Force line-buffering so log messages appear immediately in the container
+    # without needing PYTHONUNBUFFERED=1 (which would invalidate slow Docker layers).
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass  # Python < 3.7 fallback; not expected
     level = getattr(logging, level_str.upper(), logging.INFO)
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         datefmt="%H:%M:%S",
         stream=sys.stdout,
+        force=True,  # reconfigure even if a library already added handlers
     )
-    # basicConfig is a no-op if any library already added handlers; force level:
     logging.getLogger().setLevel(level)
     # Silence noisy third-party loggers regardless of our log level
     for _noisy in ("matplotlib", "PIL", "ultralytics", "urllib3",

@@ -10,6 +10,7 @@ fake landmarks without installing any inference library.
 from __future__ import annotations
 
 import dataclasses
+import time
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, Protocol
@@ -114,23 +115,20 @@ class ArmTrackerConfig:
     cross_arms_wrist_proximity: float = 0.22
 
     # ── Hysteresis ─────────────────────────────────────────────────────────
-    # How many consecutive frames a new non-DOWN state must be seen before
-    # it's accepted. Kills single-frame phantoms (furniture, flicker, shadows).
-    # At 10fps, 3 frames ≈ 0.3s to confirm a real gesture onset.
-    state_confirm_frames: int = 3
-    # How many consecutive frames of the new state before transitioning AWAY
-    # from a stable non-DOWN state back to DOWN. This prevents mid-gesture
-    # dropouts when MediaPipe momentarily loses the person.
-    state_release_frames: int = 4
+    # Seconds a new non-DOWN state must be seen before being accepted.
+    # Kills single-frame phantoms without adding noticeable latency.
+    state_confirm_s: float = 0.20
+    # Seconds of contradictory frames before releasing a stable state back to
+    # DOWN. Allows brief keypoint dropouts mid-gesture without resetting.
+    state_release_s: float = 0.30
 
 
 class ArmTracker:
     def __init__(self, config: ArmTrackerConfig):
         self.c = config
-        # Hysteresis state
         self._stable_reading: Optional[ArmReading] = None
         self._pending_state: Optional[ArmState] = None
-        self._pending_count: int = 0
+        self._pending_since: float = 0.0
 
     def classify(
         self,
@@ -138,83 +136,64 @@ class ArmTracker:
         frame_w: int,
         frame_h: int,
         hand_lm: Optional[np.ndarray] = None,
+        now: Optional[float] = None,
     ) -> Optional[ArmReading]:
-        """Public entry point — hysteresis + optional grlib hand snap_roll.
+        """Public entry point — time-based hysteresis + optional grlib snap_roll.
 
         hand_lm: flat numpy array from grlib Pipeline (21*3 floats, 1 hand).
         snap_roll is attached to SINGLE_UP readings only.
+        now: monotonic timestamp; defaults to time.monotonic().
         """
-        result = self._hyst_classify(landmarks, frame_w, frame_h)
+        if now is None:
+            now = time.monotonic()
+        result = self._hyst_classify(landmarks, frame_w, frame_h, now)
         if result is not None and result.state == ArmState.SINGLE_UP and hand_lm is not None:
             result = dataclasses.replace(result, snap_roll=_hand_snap_roll(hand_lm))
         return result
 
     def _hyst_classify(self, landmarks: Optional[_Landmarks],
-                       frame_w: int, frame_h: int) -> Optional[ArmReading]:
-        """Applies hysteresis to the raw classification.
-
-        A new state must appear for state_confirm_frames consecutive frames
-        before being accepted; a stable state is held for state_release_frames
-        of contradictory frames before releasing.
+                       frame_w: int, frame_h: int, now: float) -> Optional[ArmReading]:
+        """Time-based hysteresis: a new state must persist for state_confirm_s
+        seconds before being accepted; a stable state requires state_release_s
+        seconds of contradictory frames before being released.
         """
         raw = self._classify_raw(landmarks, frame_w, frame_h)
         raw_state = raw.state if raw is not None else ArmState.DOWN
 
-        # First call or we had no stable reading yet
         if self._stable_reading is None:
-            # Only accept a non-DOWN state after the confirm window
             if raw_state == ArmState.DOWN:
                 self._stable_reading = raw
                 self._pending_state = None
-                self._pending_count = 0
                 return raw
 
-            # Non-DOWN candidate: need state_confirm_frames to confirm
-            if self._pending_state == raw_state:
-                self._pending_count += 1
-            else:
+            if self._pending_state != raw_state:
                 self._pending_state = raw_state
-                self._pending_count = 1
+                self._pending_since = now
 
-            if self._pending_count >= self.c.state_confirm_frames:
+            if (now - self._pending_since) >= self.c.state_confirm_s:
                 self._stable_reading = raw
                 self._pending_state = None
-                self._pending_count = 0
                 return raw
 
-            # Not confirmed yet — report DOWN to downstream
             return ArmReading(state=ArmState.DOWN)
 
-        # We have a stable reading — check if a change is underway
         stable_state = self._stable_reading.state
         if raw_state == stable_state:
-            # Same state; refresh the stable reading (positions may update)
             self._stable_reading = raw if raw is not None else self._stable_reading
             self._pending_state = None
-            self._pending_count = 0
             return self._stable_reading
 
-        # State change candidate
-        if self._pending_state == raw_state:
-            self._pending_count += 1
-        else:
+        if self._pending_state != raw_state:
             self._pending_state = raw_state
-            self._pending_count = 1
+            self._pending_since = now
 
-        # Faster to release a stable non-DOWN state to DOWN (release_frames),
-        # slower to promote a new non-DOWN state (confirm_frames).
-        if raw_state == ArmState.DOWN:
-            needed = self.c.state_release_frames
-        else:
-            needed = self.c.state_confirm_frames
+        needed = self.c.state_release_s if raw_state == ArmState.DOWN else self.c.state_confirm_s
 
-        if self._pending_count >= needed:
+        if (now - self._pending_since) >= needed:
             self._stable_reading = raw if raw is not None else ArmReading(state=ArmState.DOWN)
             self._pending_state = None
-            self._pending_count = 0
             return self._stable_reading
 
-        # Change not confirmed — keep reporting the previous stable state
         return self._stable_reading
 
     def _classify_raw(self, landmarks: Optional[_Landmarks],
