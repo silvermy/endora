@@ -19,6 +19,7 @@ imutils>=0.5.4
 # The standard PyTorch conv2d kernel uses ARMv8.2-A dot-product instructions
 # absent on Cortex-A72 (Pi 4), causing SIGILL.  ONNX Runtime is compiled
 # conservatively and works on all ARMv8-A CPUs.
+onnx>=1.12.0
 onnxruntime>=1.16.0
 
 # OpenCV headless — no Qt/GTK, smaller image, all we need is VideoCapture
