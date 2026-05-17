@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 
 from version import __version__
-from cameras.arm_tracker import ArmTracker, ArmTrackerConfig
+from cameras.arm_tracker import ArmState, ArmTracker, ArmTrackerConfig
 from core.state_machine import (
     Gesture, GestureStateMachine, StateMachineConfig,
 )
@@ -188,19 +188,20 @@ class CameraAnalyser(threading.Thread):
     def run(self):
         from ultralytics import YOLO
 
-        # grlib uses cv2.cv2 (old internal module name); patch before import.
-        sys.modules.setdefault('cv2.cv2', cv2)
-        from grlib.feature_extraction.pipeline import Pipeline
-        from grlib.exceptions import NoHandDetectedException
-
         model_name = getattr(self.s, 'yolo_pose_model', 'yolo11n-pose.pt')
         yolo = YOLO(model_name)
 
-        hand_pipeline = Pipeline(num_hands=1, optimize_pipeline=True)
-        hand_pipeline.add_stage()
+        # grlib/MediaPipe Hands is initialized lazily on the first SINGLE_UP
+        # frame to avoid loading two ML runtimes simultaneously at startup
+        # (causes silent segfault/OOM on embedded hardware).
+        _hand_pipeline = None
+        _NoHandDetected = None
+        _grlib_ok = True
 
         log.info("[%s] Analyser running (v%s — YOLO pose + grlib hands)",
                  self.label, __version__)
+
+        _last_arm_state: ArmState = ArmState.DOWN
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -215,22 +216,39 @@ class CameraAnalyser(threading.Thread):
             landmarks = _yolo_to_landmarks(yolo_results, pw, ph)
 
             # ── Hand landmarks (grlib / MediaPipe Hands) ──────────────────
+            # Only run when arm is already raised — avoids running both ML
+            # models every frame on resource-constrained hardware.
             hand_lm: Optional[np.ndarray] = None
-            try:
-                flat_lm, _handedness = hand_pipeline.get_landmarks_from_image(proc_frame)
-                hand_lm = flat_lm
-            except NoHandDetectedException:
-                pass
-            except Exception as e:
-                log.debug("[%s] grlib hand error: %s", self.label, e)
+            if _last_arm_state == ArmState.SINGLE_UP and _grlib_ok:
+                if _hand_pipeline is None:
+                    try:
+                        sys.modules.setdefault('cv2.cv2', cv2)
+                        from grlib.feature_extraction.pipeline import Pipeline
+                        from grlib.exceptions import NoHandDetectedException as _NHD
+                        _NoHandDetected = _NHD
+                        _hand_pipeline = Pipeline(num_hands=1, optimize_pipeline=True)
+                        _hand_pipeline.add_stage()
+                        log.info("[%s] grlib hand pipeline ready", self.label)
+                    except Exception as e:
+                        log.warning("[%s] grlib init failed, snap_roll disabled: %s",
+                                    self.label, e)
+                        _grlib_ok = False
+
+                if _hand_pipeline is not None:
+                    try:
+                        flat_lm, _ = _hand_pipeline.get_landmarks_from_image(proc_frame)
+                        hand_lm = flat_lm
+                    except Exception as e:
+                        if _NoHandDetected is None or not isinstance(e, _NoHandDetected):
+                            log.debug("[%s] grlib hand error: %s", self.label, e)
 
             reading = self._arm_tracker.classify(landmarks, pw, ph, hand_lm)
 
             if reading is not None:
-                state_now = reading.state
-                if state_now != getattr(self, '_last_logged_state', None):
-                    log.info("[%s] state → %s", self.label, state_now.name)
-                    self._last_logged_state = state_now
+                _last_arm_state = reading.state
+                if reading.state != getattr(self, '_last_logged_state', None):
+                    log.info("[%s] state → %s", self.label, reading.state.name)
+                    self._last_logged_state = reading.state
 
             now = time.monotonic()
             gesture = self._state_machine.tick(reading, now)
