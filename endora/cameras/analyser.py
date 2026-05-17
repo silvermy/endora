@@ -222,6 +222,11 @@ class CameraAnalyser(threading.Thread):
                  self.label, __version__)
 
         _last_arm_state: ArmState = ArmState.DOWN
+        _frame_count: int = 0
+        _cached_yolo: object = None
+        _cached_lm: object = None
+        _cached_pw: int = 1
+        _cached_ph: int = 1
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -232,8 +237,18 @@ class CameraAnalyser(threading.Thread):
             proc_frame, pw, ph = self._preprocess(frame)
 
             # ── Body pose (YOLO) ──────────────────────────────────────────
-            yolo_results = yolo(proc_frame, verbose=False)
-            landmarks = _yolo_to_landmarks(yolo_results, pw, ph)
+            # yolo_frame_skip=N skips N frames between YOLO runs so the state
+            # machine ticks at full camera rate but inference only runs every
+            # N+1 frames.  Cached results are reused for skipped frames.
+            skip_n = int(getattr(self.s, 'yolo_frame_skip', 1))
+            yolo_conf = float(getattr(self.s, 'yolo_conf', 0.45))
+            _frame_count += 1
+            if skip_n == 0 or (_frame_count % (skip_n + 1)) == 1:
+                _cached_yolo = yolo(proc_frame, verbose=False, conf=yolo_conf)
+                _cached_lm   = _yolo_to_landmarks(_cached_yolo, pw, ph)
+                _cached_pw, _cached_ph = pw, ph
+            yolo_results = _cached_yolo
+            landmarks    = _cached_lm
 
             # ── Hand landmarks (grlib / MediaPipe Hands) ──────────────────
             # Only run when arm is already raised — avoids running both ML

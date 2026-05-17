@@ -43,6 +43,14 @@ class Settings:
     # other sizes: yolo11s/m/l/x-pose.pt for more accuracy at the cost of speed.
     # The model is pre-downloaded into the Docker image at build time.
     yolo_pose_model: str = "yolo11n-pose.onnx"
+    # Minimum YOLO detection confidence (0–1). Raise to reduce false detections
+    # from furniture/shadows, especially in low light. Default 0.25 is too
+    # permissive; 0.45 filters most ghost detections without missing real people.
+    yolo_conf: float = 0.45
+    # Number of frames to skip between YOLO inference runs. 0 = every frame.
+    # 1 = run YOLO every other frame (the state machine still ticks every frame
+    # using cached pose data). Effectively doubles apparent fps on slow hardware.
+    yolo_frame_skip: int = 1
     # Minimum keypoint confidence for YOLO to count a landmark as visible.
     pose_min_detection_confidence: float = 0.3
     # Deprecated — no longer used (was MediaPipe tracking threshold).
