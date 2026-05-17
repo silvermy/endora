@@ -204,7 +204,9 @@ class CameraAnalyser(threading.Thread):
         except Exception:
             pass
 
-        model_name = getattr(self.s, 'yolo_pose_model', 'yolo11n-pose.pt')
+        model_name = getattr(self.s, 'yolo_pose_model', 'yolo11n-pose.onnx')
+        if not os.path.isabs(model_name):
+            model_name = os.path.join('/app', model_name)
         yolo = YOLO(model_name)
 
         # grlib/MediaPipe Hands is initialized lazily on the first SINGLE_UP
