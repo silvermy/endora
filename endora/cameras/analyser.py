@@ -89,6 +89,48 @@ def _yolo_to_landmarks(
     return _YOLOLandmarks(kps[best], frame_w, frame_h)
 
 
+def _patch_yolo_arm64_fusion():
+    """Replace fuse_conv_and_bn with a BLAS-free implementation.
+
+    The default ultralytics implementation calls torch.mm() on a diagonal
+    matrix, which PyTorch dispatches to a BLAS routine compiled with ARM
+    dot-product or SVE instructions.  On CPUs that lack those extensions
+    (Cortex-A72 / Pi 4 and older) this raises SIGILL and kills the process.
+
+    The replacement uses element-wise multiply, which is mathematically
+    identical (diagonal matrix * M == scale_vector * M row-wise) but only
+    requires baseline NEON — available on every ARMv8 CPU.
+    """
+    try:
+        import torch
+        import torch.nn as nn
+        import ultralytics.utils.torch_utils as _tu
+        import ultralytics.nn.tasks as _tasks
+
+        def _safe_fuse(conv, bn):
+            fused = nn.Conv2d(
+                conv.in_channels, conv.out_channels,
+                kernel_size=conv.kernel_size, stride=conv.stride,
+                padding=conv.padding, dilation=conv.dilation,
+                groups=conv.groups, bias=True,
+            ).requires_grad_(False).to(conv.weight.device)
+            scale = bn.weight.div(torch.sqrt(bn.eps + bn.running_var))
+            w = conv.weight.clone().view(conv.out_channels, -1)
+            fused.weight.copy_((w * scale.unsqueeze(1)).view(fused.weight.shape))
+            b = (torch.zeros(conv.weight.size(0), device=conv.weight.device)
+                 if conv.bias is None else conv.bias)
+            fused.bias.copy_(scale * b + bn.bias
+                             - bn.weight * bn.running_mean
+                             / torch.sqrt(bn.running_var + bn.eps))
+            return fused
+
+        _tu.fuse_conv_and_bn = _safe_fuse
+        _tasks.fuse_conv_and_bn = _safe_fuse  # tasks.py has its own local binding
+        log.debug("Applied ARM64-safe YOLO fusion patch")
+    except Exception as e:
+        log.warning("Could not apply YOLO fusion patch: %s", e)
+
+
 class CameraAnalyser(threading.Thread):
     def __init__(
         self,
@@ -194,6 +236,7 @@ class CameraAnalyser(threading.Thread):
 
     def _run(self):
         from ultralytics import YOLO
+        _patch_yolo_arm64_fusion()
 
         model_name = getattr(self.s, 'yolo_pose_model', 'yolo11n-pose.pt')
         yolo = YOLO(model_name)
