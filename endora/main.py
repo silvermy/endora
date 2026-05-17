@@ -25,9 +25,12 @@ def setup_logging(level_str: str):
         datefmt="%H:%M:%S",
         stream=sys.stdout,
     )
+    # basicConfig is a no-op if any library already added handlers; force level:
+    logging.getLogger().setLevel(level)
     # Silence noisy third-party loggers regardless of our log level
-    logging.getLogger("matplotlib").setLevel(logging.WARNING)
-    logging.getLogger("PIL").setLevel(logging.WARNING)
+    for _noisy in ("matplotlib", "PIL", "ultralytics", "urllib3",
+                   "absl", "tensorflow"):
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 
 def main():
