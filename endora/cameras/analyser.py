@@ -246,8 +246,11 @@ class CameraAnalyser(threading.Thread):
         os.environ.setdefault('ULTRALYTICS_SYNC', 'False')
 
         from ultralytics import YOLO
-        from ultralytics import settings as _yolo_settings
-        _yolo_settings.update({'sync': False, 'analytics': False})
+        try:
+            from ultralytics import settings as _yolo_settings
+            _yolo_settings.update({'sync': False})
+        except Exception:
+            pass
         _patch_yolo_arm64_fusion()
 
         model_name = getattr(self.s, 'yolo_pose_model', 'yolo11n-pose.pt')
