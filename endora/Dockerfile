@@ -45,12 +45,7 @@ COPY config.json        .
 COPY yolo11n-pose.onnx  .
 
 # ── Validate ONNX model (no PyTorch inference — safe on all ARM64 CPUs) ───────
-RUN python3 -c "
-import onnxruntime as ort
-s = ort.InferenceSession('yolo11n-pose.onnx', providers=['CPUExecutionProvider'])
-inp = s.get_inputs()[0]
-print(f'ONNX model OK — input: {inp.name} {inp.shape}')
-"
+RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose.onnx', providers=['CPUExecutionProvider']); print('ONNX model OK:', s.get_inputs()[0].shape)"
 
 # ── S6 service definition ─────────────────────────────────────────────────────
 # S6 looks for services in /etc/services.d/<name>/run
