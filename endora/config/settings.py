@@ -118,6 +118,14 @@ class Settings:
     # without a cross-raise swing baseline.  0.65 = palm tilted >~40° from neutral.
     snap_roll_threshold: float = 0.65
 
+    # ── Hysteresis timing ─────────────────────────────────────────────────
+    # Seconds a new arm state must be seen before being accepted.
+    # Lower = more responsive but may get single-frame false positives.
+    state_confirm_s: float = 0.20
+    # Seconds of contradictory frames before dropping a confirmed arm state.
+    # Higher = more stable mid-gesture but slower to release after arm down.
+    state_release_s: float = 0.30
+
     # ── Fusion ────────────────────────────────────────────────────────────
     # Advanced: override in settings.yaml if needed
     fusion_agreement_window_s: float = 1.0

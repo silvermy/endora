@@ -115,6 +115,8 @@ class CameraAnalyser(threading.Thread):
             arm_above_head_tolerance=float(getattr(settings, 'arm_above_head_tolerance', 0.15)),
             body_upright_min=float(getattr(settings, 'body_upright_min', -0.15)),
             pose_visibility_min=float(getattr(settings, 'pose_visibility_min', 0.45)),
+            state_confirm_s=float(getattr(settings, 'state_confirm_s', 0.20)),
+            state_release_s=float(getattr(settings, 'state_release_s', 0.30)),
         ))
         self._state_machine = GestureStateMachine(StateMachineConfig(
             cooldown_s=float(getattr(settings, 'cooldown_s', 2.0)),
@@ -260,6 +262,13 @@ class CameraAnalyser(threading.Thread):
                         if _NoHandDetected is None or not isinstance(e, _NoHandDetected):
                             log.debug("[%s] grlib hand error: %s", self.label, e)
 
+            n_persons = (
+                yolo_results[0].keypoints.data.shape[0]
+                if yolo_results and yolo_results[0].keypoints is not None
+                else 0
+            )
+            log.debug("[%s] YOLO: %d person(s) detected", self.label, n_persons)
+
             reading = self._arm_tracker.classify(landmarks, pw, ph, hand_lm)
 
             if reading is not None:
@@ -267,11 +276,15 @@ class CameraAnalyser(threading.Thread):
                 if reading.state != getattr(self, '_last_logged_state', None):
                     log.info("[%s] state → %s", self.label, reading.state.name)
                     self._last_logged_state = reading.state
+                if reading.state.name == 'SINGLE_UP':
+                    log.debug("[%s] SINGLE_UP forearm_dy=%.3f snap_roll=%.3f",
+                              self.label, reading.forearm_dy, reading.snap_roll)
 
             now = time.monotonic()
             gesture = self._state_machine.tick(reading, now)
 
             if gesture is not None:
+                log.debug("[%s] gesture candidate: %s", self.label, gesture)
                 self.on_candidate(gesture, 1.0, self.label)
 
             if self.debug_frame_cb is not None:

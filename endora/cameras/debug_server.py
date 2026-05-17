@@ -3,6 +3,7 @@ cameras/debug_server.py — MJPEG debug stream + live parameter tuning UI
 """
 from __future__ import annotations
 
+import collections
 import json
 import logging
 import re
@@ -24,6 +25,34 @@ _lock = threading.Lock()
 _last_gesture: Dict = {"label": "", "ts": 0.0}
 _single_camera: bool = False
 _settings = None
+
+# ── In-browser live log ───────────────────────────────────────────────────────
+_LOG_BUF: collections.deque = collections.deque(maxlen=300)
+_log_lock = threading.Lock()
+
+
+class _LogHandler(logging.Handler):
+    """Captures log records into a ring buffer for the /log endpoint."""
+
+    _LEVEL_CHAR = {
+        logging.DEBUG:    "D",
+        logging.INFO:     "I",
+        logging.WARNING:  "W",
+        logging.ERROR:    "E",
+        logging.CRITICAL: "E",
+    }
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            with _log_lock:
+                _LOG_BUF.append({
+                    "t": record.created,
+                    "l": self._LEVEL_CHAR.get(record.levelno, "I"),
+                    "n": record.name.split(".")[-1],
+                    "m": record.getMessage(),
+                })
+        except Exception:
+            self.handleError(record)
 
 
 # ── Tunable parameter definitions ────────────────────────────────────────────
@@ -337,6 +366,29 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
   #wrap{flex-direction:column}
   #panel{flex:none;width:100%;max-height:none}
 }
+/* ── live log panel ── */
+#logbox{
+  width:100%;max-width:1300px;
+  background:#080808;border:1px solid #1a1a1a;border-radius:6px;
+  display:flex;flex-direction:column;height:220px;
+}
+.log-hdr{
+  display:flex;align-items:center;gap:10px;
+  padding:5px 10px;border-bottom:1px solid #1a1a1a;flex-shrink:0;
+}
+.log-title{font-size:10px;letter-spacing:2px;color:#555;text-transform:uppercase;font-weight:600;flex:1}
+.log-hdr label{font-size:11px;color:#555;display:flex;align-items:center;gap:4px;cursor:pointer}
+.log-hdr button{font-size:11px;color:#444;background:none;border:none;cursor:pointer;padding:0 4px}
+.log-hdr button:hover{color:#888}
+#loglines{
+  overflow-y:auto;flex:1;padding:3px 8px;
+  font-family:'SF Mono','Consolas','Fira Mono',monospace;font-size:11px;line-height:1.65;
+}
+.logline{white-space:pre-wrap;word-break:break-all}
+.ll-D{color:#3a7a3a}
+.ll-I{color:#6a6a6a}
+.ll-W{color:#a07820}
+.ll-E{color:#a03030}
 </style>
 </head>
 <body>
@@ -344,7 +396,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 <div id="wrap">
   <div id="vbox">
     <img src="/stream" alt="stream">
-    <div id="legend">cyan&nbsp;=&nbsp;ready &nbsp;·&nbsp; orange&nbsp;=&nbsp;warming &nbsp;·&nbsp; arrow&nbsp;=&nbsp;peak&nbsp;velocity</div>
+    <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine</div>
   </div>
   <div id="panel">
     <div class="togrow">
@@ -362,6 +414,14 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     <button id="savebtn" onclick="doSave()">&#128190;&nbsp; Save to settings.yaml</button>
     <div id="savemsg"></div>
   </div>
+</div>
+<div id="logbox">
+  <div class="log-hdr">
+    <span class="log-title">Live Log</span>
+    <label><input type="checkbox" id="autoscroll" checked>&nbsp;auto-scroll</label>
+    <button id="clearlog">clear</button>
+  </div>
+  <div id="loglines"></div>
 </div>
 <script>
 const PARAMS = __PARAMS_JSON__;
@@ -467,6 +527,37 @@ function doSave() {
 
 fetch('/settings').then(r=>r.json()).then(build).catch(()=>build({}));
 
+// ── Live log ────────────────────────────────────────────────────────────────
+(function() {
+  var _since = 0;
+  function pollLog() {
+    fetch('/log?since=' + _since)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.entries && data.entries.length) {
+          var box = document.getElementById('loglines');
+          var auto = document.getElementById('autoscroll').checked;
+          data.entries.forEach(function(e) {
+            var d = document.createElement('div');
+            d.className = 'logline ll-' + e.l;
+            var t = new Date(e.t * 1000).toTimeString().slice(0, 8);
+            d.textContent = t + ' [' + e.n + '] ' + e.m;
+            box.appendChild(d);
+          });
+          while (box.children.length > 300) box.removeChild(box.firstChild);
+          if (auto) box.scrollTop = box.scrollHeight;
+          _since = data.next_since;
+        }
+      })
+      .catch(function() {})
+      .then(function() { setTimeout(pollLog, 1000); });
+  }
+  document.getElementById('clearlog').addEventListener('click', function() {
+    document.getElementById('loglines').innerHTML = '';
+  });
+  pollLog();
+})();
+
 // ── MJPEG stream reconnect ──────────────────────────────────────────────────
 // The <img> tag can silently stall if the TCP connection drops (e.g. add-on
 // restart) or if the browser didn't receive the first frame quickly enough.
@@ -563,6 +654,18 @@ class _Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
 
+        elif parsed.path == "/log":
+            since = float(qs.get("since", ["0"])[0])
+            with _log_lock:
+                entries = [e for e in _LOG_BUF if e["t"] > since]
+            next_since = entries[-1]["t"] if entries else since
+            body = json.dumps({"entries": entries, "next_since": next_since}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         else:
             self.send_response(404)
             self.end_headers()
@@ -591,6 +694,12 @@ class _Handler(BaseHTTPRequestHandler):
 def start(port: int, ingress_port: int = 8766) -> None:
     class _Server(socketserver.ThreadingMixIn, HTTPServer):
         daemon_threads = True
+
+    # Attach the in-browser log handler to the root logger so all log records
+    # flow into the ring buffer regardless of which module emitted them.
+    _handler = _LogHandler()
+    _handler.setLevel(logging.DEBUG)
+    logging.getLogger().addHandler(_handler)
 
     # Debug stream server (direct access)
     debug_server = _Server(("0.0.0.0", port), _Handler)
