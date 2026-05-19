@@ -1,10 +1,11 @@
 # ── Endora — Home Assistant Add-on ───────────────────────────────────────────
-# Base: ghcr.io/home-assistant/base-debian:bookworm
+# BUILD_FROM is passed by the HA Supervisor at build time (replaces build.json).
 # S6-overlay is built into this base image. /init is the entrypoint and
 # becomes PID 1. We register our app as an S6 service under /etc/services.d/
 # rather than using CMD, which would bypass S6 entirely.
 
-FROM ghcr.io/home-assistant/base-debian:bookworm
+ARG BUILD_FROM=ghcr.io/home-assistant/base-debian:bookworm
+FROM ${BUILD_FROM}
 
 ENV S6_KEEP_ENV=1 \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
@@ -56,3 +57,10 @@ RUN mkdir -p /etc/services.d/endora
 COPY run.sh /etc/services.d/endora/run
 RUN chmod a+x /etc/services.d/endora/run \
     && sed -i 's/\r$//' /etc/services.d/endora/run
+
+# ── HA Supervisor metadata (replaces build.json) ──────────────────────────────
+ARG BUILD_VERSION
+LABEL \
+    io.hass.version="${BUILD_VERSION}" \
+    io.hass.type="addon" \
+    io.hass.arch="aarch64|amd64"
