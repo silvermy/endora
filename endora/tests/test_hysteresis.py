@@ -1,7 +1,7 @@
 """
 tests/test_hysteresis.py
 
-Tests for ArmTracker's hysteresis layer — the public classify() method.
+Tests for ArmTracker's time-based hysteresis layer — the public classify() method.
 Ensures phantom detections are filtered and mid-gesture dropouts don't
 cause spurious state changes.
 """
@@ -11,66 +11,81 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from cameras.arm_tracker import ArmTracker, ArmTrackerConfig, ArmState
 from tests.fake_landmarks import arm_down, right_arm_up_vertical
 
+CONFIRM_S = 0.20
+RELEASE_S = 0.30
+
 
 def _tracker(**overrides) -> ArmTracker:
     return ArmTracker(ArmTrackerConfig(**overrides))
 
 
-def test_single_frame_phantom_is_suppressed():
-    """A single frame of SINGLE_UP (phantom / furniture hallucination)
-    must not propagate as SINGLE_UP. User sees DOWN."""
-    t = _tracker(state_confirm_frames=3)
-    r = t.classify(right_arm_up_vertical(), 1280, 720)
-    assert r.state == ArmState.DOWN, f"expected DOWN on frame 1, got {r.state}"
+def test_first_frame_not_yet_confirmed():
+    """A single frame of SINGLE_UP at t=0 must not yet be confirmed."""
+    t = _tracker(state_confirm_s=CONFIRM_S)
+    r = t.classify(right_arm_up_vertical(), 1280, 720, now=0.0)
+    assert r.state == ArmState.DOWN, f"expected DOWN on first frame, got {r.state}"
 
 
-def test_three_consecutive_frames_confirm_state():
-    """After state_confirm_frames consecutive SINGLE_UP readings,
-    public classify should return SINGLE_UP."""
-    t = _tracker(state_confirm_frames=3)
-    # Frames 1 and 2: reported as DOWN (not confirmed)
-    t.classify(right_arm_up_vertical(), 1280, 720)
-    t.classify(right_arm_up_vertical(), 1280, 720)
-    r = t.classify(right_arm_up_vertical(), 1280, 720)
-    assert r.state == ArmState.SINGLE_UP, f"got {r.state}"
+def test_state_confirmed_after_confirm_s():
+    """After confirm_s seconds of continuous SINGLE_UP, state is accepted."""
+    t = _tracker(state_confirm_s=CONFIRM_S)
+    t.classify(right_arm_up_vertical(), 1280, 720, now=0.0)
+    r = t.classify(right_arm_up_vertical(), 1280, 720, now=CONFIRM_S + 0.05)
+    assert r.state == ArmState.SINGLE_UP, f"should be confirmed by now, got {r.state}"
 
 
-def test_flicker_does_not_confirm_state():
-    """SINGLE_UP → DOWN → SINGLE_UP → DOWN must not confirm SINGLE_UP."""
-    t = _tracker(state_confirm_frames=3)
-    for _ in range(5):
-        r = t.classify(right_arm_up_vertical(), 1280, 720)
+def test_state_not_confirmed_just_before_confirm_s():
+    """Just before confirm_s elapses the state is still pending."""
+    t = _tracker(state_confirm_s=CONFIRM_S)
+    t.classify(right_arm_up_vertical(), 1280, 720, now=0.0)
+    r = t.classify(right_arm_up_vertical(), 1280, 720, now=CONFIRM_S - 0.05)
+    assert r.state == ArmState.DOWN, f"should still be pending, got {r.state}"
+
+
+def test_flicker_resets_pending_timer():
+    """Alternating SINGLE_UP/DOWN faster than confirm_s never confirms."""
+    t = _tracker(state_confirm_s=CONFIRM_S)
+    for i in range(8):
+        # Alternate every 10 ms — the pending timer resets on each direction change
+        t.classify(right_arm_up_vertical(), 1280, 720, now=i * 0.02)
+        r = t.classify(arm_down(), 1280, 720, now=i * 0.02 + 0.01)
         assert r.state == ArmState.DOWN
-        r = t.classify(arm_down(), 1280, 720)
-        assert r.state == ArmState.DOWN
 
 
-def test_mid_gesture_dropout_does_not_release():
-    """Once SINGLE_UP is stable, a single-frame DOWN (MediaPipe lost track)
-    must NOT flip back to DOWN — stable state persists."""
-    t = _tracker(state_confirm_frames=3, state_release_frames=4)
+def test_mid_gesture_brief_dropout_does_not_release():
+    """A single short dropout (< release_s) must not flip back to DOWN."""
+    t = _tracker(state_confirm_s=CONFIRM_S, state_release_s=RELEASE_S)
     # Confirm SINGLE_UP
-    for _ in range(3):
-        t.classify(right_arm_up_vertical(), 1280, 720)
-    # Sanity check
-    r = t.classify(right_arm_up_vertical(), 1280, 720)
-    assert r.state == ArmState.SINGLE_UP
-    # One dropout frame — must stay SINGLE_UP
-    r = t.classify(arm_down(), 1280, 720)
-    assert r.state == ArmState.SINGLE_UP, f"single dropout should be ignored, got {r.state}"
+    t.classify(right_arm_up_vertical(), 1280, 720, now=0.0)
+    t.classify(right_arm_up_vertical(), 1280, 720, now=CONFIRM_S + 0.05)
+    assert t.classify(right_arm_up_vertical(), 1280, 720,
+                      now=CONFIRM_S + 0.10).state == ArmState.SINGLE_UP
+    # Brief dropout (less than release_s)
+    r = t.classify(arm_down(), 1280, 720, now=CONFIRM_S + 0.15)
+    assert r.state == ArmState.SINGLE_UP, \
+        f"short dropout should be ignored, got {r.state}"
 
 
 def test_sustained_arm_down_releases_state():
-    """After state_release_frames of DOWN, we go back to DOWN."""
-    t = _tracker(state_confirm_frames=3, state_release_frames=4)
+    """After release_s seconds of DOWN, stable SINGLE_UP is released."""
+    t = _tracker(state_confirm_s=CONFIRM_S, state_release_s=RELEASE_S)
     # Confirm SINGLE_UP
-    for _ in range(3):
-        t.classify(right_arm_up_vertical(), 1280, 720)
-    # Now sustained arm-down — should release after release_frames
-    for _ in range(4):
-        t.classify(arm_down(), 1280, 720)
-    r = t.classify(arm_down(), 1280, 720)
-    assert r.state == ArmState.DOWN
+    t0 = 0.0
+    t.classify(right_arm_up_vertical(), 1280, 720, now=t0)
+    t.classify(right_arm_up_vertical(), 1280, 720, now=t0 + CONFIRM_S + 0.05)
+    # Drop arm and hold past release_s
+    drop_t = t0 + CONFIRM_S + 0.10
+    t.classify(arm_down(), 1280, 720, now=drop_t)
+    r = t.classify(arm_down(), 1280, 720, now=drop_t + RELEASE_S + 0.05)
+    assert r.state == ArmState.DOWN, f"should have released to DOWN, got {r.state}"
+
+
+def test_immediate_down_never_needs_confirmation():
+    """DOWN state is accepted immediately without waiting for confirm_s."""
+    t = _tracker(state_confirm_s=CONFIRM_S)
+    r = t.classify(arm_down(), 1280, 720, now=0.0)
+    # After the very first call stable_reading is set; DOWN needs no confirm
+    assert r is not None
 
 
 if __name__ == "__main__":

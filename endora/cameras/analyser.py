@@ -111,6 +111,9 @@ class CameraAnalyser(threading.Thread):
         self._clahe_obj = None
         self._clahe_clip: float = -1.0
 
+        # Optional test recorder (set by main.py when ENDORA_RECORD_TESTS=1)
+        self._recorder = None
+
         self._arm_tracker = ArmTracker(ArmTrackerConfig(
             arm_above_head_tolerance=float(getattr(settings, 'arm_above_head_tolerance', 0.15)),
             body_upright_min=float(getattr(settings, 'body_upright_min', -0.15)),
@@ -222,11 +225,12 @@ class CameraAnalyser(threading.Thread):
                  self.label, __version__)
 
         _last_arm_state: ArmState = ArmState.DOWN
-        _frame_count: int = 0
         _cached_yolo: object = None
         _cached_lm: object = None
         _cached_pw: int = 1
         _cached_ph: int = 1
+        _prev_small: Optional[np.ndarray] = None   # for motion gate
+        _frames_since_yolo: int = 999              # force run on first frame
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -236,17 +240,53 @@ class CameraAnalyser(threading.Thread):
 
             proc_frame, pw, ph = self._preprocess(frame)
 
-            # ── Body pose (YOLO) ──────────────────────────────────────────
-            # yolo_frame_skip=N skips N frames between YOLO runs so the state
-            # machine ticks at full camera rate but inference only runs every
-            # N+1 frames.  Cached results are reused for skipped frames.
-            skip_n = int(getattr(self.s, 'yolo_frame_skip', 1))
-            yolo_conf = float(getattr(self.s, 'yolo_conf', 0.45))
-            _frame_count += 1
-            if skip_n == 0 or (_frame_count % (skip_n + 1)) == 1:
+            # ── Motion gate ───────────────────────────────────────────────
+            # Resize to 80×60 (~0.1 ms) and diff against previous frame.
+            # Skip YOLO when the scene is static — reuse cached landmarks.
+            # Always run YOLO when:
+            #   • significant motion detected  (something is moving)
+            #   • arm already raised           (responsive snap detection)
+            #   • heartbeat interval reached   (catch slow arm lifts)
+            mot_thresh = float(getattr(self.s, 'motion_threshold', 0.015))
+            max_skip   = int(getattr(self.s,   'yolo_max_skip',    12))
+            yolo_conf  = float(getattr(self.s, 'yolo_conf',        0.45))
+
+            gray  = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(gray, (80, 60), interpolation=cv2.INTER_AREA)
+            if _prev_small is None:
+                motion = True
+            else:
+                motion = (
+                    float(cv2.absdiff(small, _prev_small).mean()) / 255.0
+                ) > mot_thresh
+            _prev_small = small
+            _frames_since_yolo += 1
+
+            arm_is_up = (_last_arm_state != ArmState.DOWN)
+            run_yolo  = motion or arm_is_up or (_frames_since_yolo >= max_skip)
+
+            if run_yolo:
                 _cached_yolo = yolo(proc_frame, verbose=False, conf=yolo_conf)
                 _cached_lm   = _yolo_to_landmarks(_cached_yolo, pw, ph)
                 _cached_pw, _cached_ph = pw, ph
+                _frames_since_yolo = 0
+                log.debug("[%s] YOLO ran (motion=%s arm_up=%s)",
+                          self.label, motion, arm_is_up)
+                # Feed recorder if active (keypoints for regression tests)
+                if self._recorder is not None:
+                    kps_data = (
+                        _cached_yolo[0].keypoints.data.cpu().numpy()
+                        if _cached_yolo and _cached_yolo[0].keypoints is not None
+                        and _cached_yolo[0].keypoints.data.shape[0] > 0
+                        else np.zeros((17, 3), dtype=np.float32)
+                    )
+                    best = int(kps_data[:, :, 2].mean(axis=1).argmax()) \
+                        if kps_data.ndim == 3 and kps_data.shape[0] > 1 else 0
+                    self._recorder.on_frame(
+                        kps_data[best] if kps_data.ndim == 3 else kps_data,
+                        pw, ph, now,
+                    )
+
             yolo_results = _cached_yolo
             landmarks    = _cached_lm
 
@@ -301,6 +341,9 @@ class CameraAnalyser(threading.Thread):
             if gesture is not None:
                 log.debug("[%s] gesture candidate: %s", self.label, gesture)
                 self.on_candidate(gesture, 1.0, self.label)
+                # Feed the test recorder if active
+                if self._recorder is not None:
+                    self._recorder.on_gesture(gesture, self.label)
 
             if self.debug_frame_cb is not None:
                 try:

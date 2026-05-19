@@ -47,10 +47,13 @@ class Settings:
     # from furniture/shadows, especially in low light. Default 0.25 is too
     # permissive; 0.45 filters most ghost detections without missing real people.
     yolo_conf: float = 0.45
-    # Number of frames to skip between YOLO inference runs. 0 = every frame.
-    # 1 = run YOLO every other frame (the state machine still ticks every frame
-    # using cached pose data). Effectively doubles apparent fps on slow hardware.
-    yolo_frame_skip: int = 1
+    # Motion gate: only run YOLO when the frame changes by more than this
+    # fraction (0–1 mean absolute pixel difference over an 80×60 thumbnail).
+    # 0.015 ≈ any visible arm movement; 0.0 = always run YOLO (no gate).
+    motion_threshold: float = 0.015
+    # Heartbeat: even with no motion, run YOLO at least every N frames so
+    # slow arm lifts are eventually detected. 12 ≈ re-confirm every ~5s at 2.5fps.
+    yolo_max_skip: int = 12
     # Minimum keypoint confidence for YOLO to count a landmark as visible.
     pose_min_detection_confidence: float = 0.3
     # Deprecated — no longer used (was MediaPipe tracking threshold).
