@@ -7,12 +7,14 @@ Wires RTSP capture → analyser → fusion → HA event backend.
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 from cameras.capture import RtspCapture
 from cameras.analyser import CameraAnalyser
 from core.state_machine import Gesture
 from cameras import debug_server
+from cameras.recorder import TestRecorder
 from core.fusion import GestureFusion
 from output.backends import make_backend
 
@@ -61,16 +63,26 @@ class GestureSystem:
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
 
+        # Regression-test recorder — activated by ENDORA_RECORD_TESTS=1
+        self._recorder: TestRecorder | None = None
+        if os.environ.get("ENDORA_RECORD_TESTS", "").strip() == "1":
+            self._recorder = TestRecorder()
+            debug_server.set_recorder(self._recorder)
+
         self.analyser_a = CameraAnalyser(
             camera=self.cam_a, settings=settings,
             on_candidate=self.fusion.receive, label="A",
             debug_frame_cb=dbg_cb,
         )
+        self.analyser_a._recorder = self._recorder
+
         self.analyser_b = None if self._single else CameraAnalyser(
             camera=self.cam_b, settings=settings,
             on_candidate=self.fusion.receive, label="B",
             debug_frame_cb=dbg_cb,
         )
+        if self.analyser_b:
+            self.analyser_b._recorder = self._recorder
 
     def run(self):
         self.cam_a.start()

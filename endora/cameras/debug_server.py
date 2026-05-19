@@ -25,6 +25,7 @@ _lock = threading.Lock()
 _last_gesture: Dict = {"label": "", "ts": 0.0}
 _single_camera: bool = False
 _settings = None
+_recorder = None
 
 # ── In-browser live log ───────────────────────────────────────────────────────
 _LOG_BUF: collections.deque = collections.deque(maxlen=300)
@@ -87,6 +88,11 @@ def configure(camera_count: int) -> None:
 def set_settings(s) -> None:
     global _settings
     _settings = s
+
+
+def set_recorder(r) -> None:
+    global _recorder
+    _recorder = r
 
 
 def update_frame(label: str, frame: np.ndarray) -> None:
@@ -414,6 +420,8 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     <div id="sliders"></div>
     <button id="savebtn" onclick="doSave()">&#128190;&nbsp; Save to settings.yaml</button>
     <div id="savemsg"></div>
+    <button id="capturebtn" onclick="doCapture()" style="display:none">&#128249;&nbsp; Capture test case</button>
+    <div id="capturemsg" style="font-size:12px;min-height:16px;text-align:center;padding-top:3px"></div>
   </div>
 </div>
 <div id="logbox">
@@ -527,6 +535,30 @@ function doSave() {
 }
 
 fetch('/settings').then(r=>r.json()).then(build).catch(()=>build({}));
+
+// Show capture button only when recorder is active
+fetch('/recorder_status').then(r=>r.json()).then(function(d){
+  if(d.active) document.getElementById('capturebtn').style.display='';
+}).catch(function(){});
+
+function doCapture() {
+  var btn = document.getElementById('capturebtn');
+  var msg = document.getElementById('capturemsg');
+  var label = prompt('Test case label (e.g. snap_right_arm):', 'manual');
+  if (label === null) return;
+  btn.disabled = true;
+  msg.style.color='#888'; msg.textContent='saving…';
+  fetch('/capture', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({label: label})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      msg.style.color = d.ok ? '#5c5' : '#c55';
+      msg.textContent = d.ok ? '✓ saved: '+d.file.split('/').pop() : '✗ '+(d.error||'error');
+    })
+    .catch(function(){ msg.style.color='#c55'; msg.textContent='✗ request failed'; })
+    .finally(function(){ btn.disabled=false; });
+}
 
 // ── Live log ────────────────────────────────────────────────────────────────
 (function() {
@@ -655,6 +687,14 @@ class _Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
 
+        elif parsed.path == "/recorder_status":
+            body = json.dumps({"active": _recorder is not None}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         elif parsed.path == "/log":
             since = float(qs.get("since", ["0"])[0])
             with _log_lock:
@@ -672,7 +712,36 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        if urlparse(self.path).path == "/save":
+        path = urlparse(self.path).path
+        if path == "/capture":
+            if _recorder is None:
+                body = json.dumps({
+                    "ok": False,
+                    "error": "recorder not active — set ENDORA_RECORD_TESTS=1 and restart",
+                }).encode()
+                self.send_response(503)
+            else:
+                import urllib.parse as _up
+                length = int(self.headers.get("Content-Length", 0))
+                raw = self.rfile.read(length) if length else b""
+                try:
+                    payload = json.loads(raw) if raw else {}
+                except Exception:
+                    payload = {}
+                label = str(payload.get("label", "manual")).strip() or "manual"
+                saved = _recorder.manual_capture(label=label)
+                if saved:
+                    body = json.dumps({"ok": True, "file": str(saved)}).encode()
+                    self.send_response(200)
+                else:
+                    body = json.dumps({"ok": False, "error": "buffer empty"}).encode()
+                    self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/save":
             ok, err = _save_to_yaml()
             if ok:
                 body = b'{"ok":true}'
