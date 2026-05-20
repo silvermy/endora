@@ -20,6 +20,20 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
+
+def _host_ip() -> str:
+    """Return the host's primary outbound IP (no packet sent)."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "homeassistant.local"
+
 _latest: Dict[str, Optional[np.ndarray]] = {"A": None, "B": None}
 _lock = threading.Lock()
 _last_gesture: Dict = {"label": "", "ts": 0.0}
@@ -775,7 +789,8 @@ def start(port: int, ingress_port: int = 8766) -> None:
     debug_server = _Server(("0.0.0.0", port), _Handler)
     threading.Thread(target=debug_server.serve_forever, daemon=True,
                      name="DebugServer").start()
-    log.info("Debug stream: http://homeassistant.local:%d/", port)
+    ip = _host_ip()
+    log.info("Debug stream: http://%s:%d/", ip, port)
 
     # Ingress server (HA sidebar) — serves the full debug UI directly so it
     # works through HA's HTTPS ingress proxy without popup/mixed-content issues.

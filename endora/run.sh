@@ -29,7 +29,8 @@ export DEBUG_PORT="$(bashio::config 'debug_port')"
 export LOG_LEVEL="$(bashio::config 'log_level')"
 
 if [ "${DEBUG_PORT}" != "0" ] && [ -n "${DEBUG_PORT}" ]; then
-    bashio::log.info "Debug stream: http://homeassistant.local:${DEBUG_PORT}/"
+    HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    bashio::log.info "Debug stream: http://${HOST_IP:-homeassistant.local}:${DEBUG_PORT}/"
 fi
 
 exec /opt/venv/bin/python3 /app/main.py
