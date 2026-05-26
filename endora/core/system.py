@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 import time
 
 from cameras.capture import RtspCapture
@@ -59,6 +60,7 @@ class GestureSystem:
         if self._debug_enabled:
             debug_server.configure(camera_count=1 if self._single else 2)
             debug_server.set_settings(settings)
+            debug_server.set_host_info(_detect_host_ip(), settings.debug_port)
             debug_server.start(settings.debug_port, ingress_port=8766)
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
@@ -152,3 +154,15 @@ class GestureSystem:
                 self.cam_a.frames_captured, self.cam_a._fps_actual,
                 self.fusion.total_emitted,
             )
+
+
+def _detect_host_ip() -> str:
+    """Return the host's LAN IP by probing an external address (no data sent)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "homeassistant.local"

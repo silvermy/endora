@@ -54,8 +54,15 @@ def main():
     log.info("HA event: %s → %s/events/%s",
              settings.ha_event_name, settings.ha_url, settings.ha_event_name)
     if settings.debug_port > 0:
-        from cameras.debug_server import _host_ip
-        log.info("Debug stream: http://%s:%d/", _host_ip(), settings.debug_port)
+        import socket as _sock
+        try:
+            _s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+            _s.connect(("8.8.8.8", 80))
+            _ip = _s.getsockname()[0]
+            _s.close()
+        except Exception:
+            _ip = "homeassistant.local"
+        log.info("Debug stream: http://%s:%d/", _ip, settings.debug_port)
     else:
         log.warning("Debug stream DISABLED (debug_port=0). "
                     "Set debug_port=8765 in the add-on Configuration tab to enable.")
