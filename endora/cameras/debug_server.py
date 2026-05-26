@@ -40,6 +40,8 @@ _last_gesture: Dict = {"label": "", "ts": 0.0}
 _single_camera: bool = False
 _settings = None
 _recorder = None
+_host_ip: str = "homeassistant.local"
+_debug_port: int = 8765
 
 # ── In-browser live log ───────────────────────────────────────────────────────
 _LOG_BUF: collections.deque = collections.deque(maxlen=300)
@@ -107,6 +109,12 @@ def set_settings(s) -> None:
 def set_recorder(r) -> None:
     global _recorder
     _recorder = r
+
+
+def set_host_info(ip: str, port: int) -> None:
+    global _host_ip, _debug_port
+    _host_ip = ip
+    _debug_port = port
 
 
 def update_frame(label: str, frame: np.ndarray) -> None:
@@ -416,7 +424,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 <h3>Endora Debug</h3>
 <div id="wrap">
   <div id="vbox">
-    <img src="/stream" alt="stream">
+    <img src="__STREAM_URL__" alt="stream" id="streamimg">
     <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine</div>
   </div>
   <div id="panel">
@@ -606,26 +614,22 @@ function doCapture() {
 })();
 
 // ── MJPEG stream reconnect ──────────────────────────────────────────────────
-// The <img> tag can silently stall if the TCP connection drops (e.g. add-on
-// restart) or if the browser didn't receive the first frame quickly enough.
-// We reconnect by appending a cache-busting timestamp to /stream and
-// swapping the src — the old connection is abandoned by the browser.
+// Stream URL uses the host's LAN IP directly so it works through HA ingress
+// (ingress buffers multipart/x-mixed-replace; direct IP bypasses it).
 (function() {
-  const img = document.querySelector('#vbox img');
+  const img = document.getElementById('streamimg');
+  const baseUrl = img.src.split('?')[0];  // strip any existing cache-buster
   let _stall = null;
 
   function reconnect() {
-    img.src = '/stream?' + Date.now();
+    img.src = baseUrl + '?' + Date.now();
   }
 
-  // Reconnect immediately on any load error (connection refused, reset, etc.)
   img.addEventListener('error', function() {
     clearTimeout(_stall);
     _stall = setTimeout(reconnect, 2000);
   });
 
-  // Watchdog: if the naturalWidth stays 0 for 4 s after page load, the stream
-  // never started — reconnect.  After that we trust the error event.
   setTimeout(function() {
     if (img.naturalWidth === 0) reconnect();
   }, 4000);
@@ -646,9 +650,11 @@ class _Handler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         if parsed.path == "/":
+            stream_url = f"http://{_host_ip}:{_debug_port}/stream"
             html = (_HTML_TEMPLATE
-                    .replace("__PARAMS_JSON__", json.dumps(_PARAMS))
+                    .replace("__PARAMS_JSON__",  json.dumps(_PARAMS))
                     .replace("__TOGGLES_JSON__", json.dumps(_TOGGLES))
+                    .replace("__STREAM_URL__",   stream_url)
                     )
             body = html.encode()
             self.send_response(200)
