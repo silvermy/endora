@@ -424,7 +424,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 <h3>Endora Debug</h3>
 <div id="wrap">
   <div id="vbox">
-    <img src="__STREAM_URL__" alt="stream" id="streamimg">
+    <img id="streamimg" alt="stream">
     <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine</div>
   </div>
   <div id="panel">
@@ -523,14 +523,14 @@ const _t = {};
 function onCom(key, value) {
   clearTimeout(_t[key]);
   _t[key] = setTimeout(() =>
-    fetch('/set?key='+encodeURIComponent(key)+'&value='+encodeURIComponent(value))
+    fetch('set?key='+encodeURIComponent(key)+'&value='+encodeURIComponent(value))
       .catch(e => console.warn('set', e)), 60);
 }
 
 function setBool(key, on) {
   const lbl = document.getElementById('lbl_' + key);
   if (lbl) { lbl.textContent = on ? 'ON' : 'OFF'; lbl.style.color = on ? '#e8c040' : '#555'; }
-  fetch('/set?key='+encodeURIComponent(key)+'&value='+(on?'true':'false'))
+  fetch('set?key='+encodeURIComponent(key)+'&value='+(on?'true':'false'))
     .catch(e => console.warn(e));
 }
 
@@ -538,7 +538,7 @@ function setLog(isDebug) {
   const level = isDebug ? 'debug' : 'info';
   document.getElementById('loglabel').textContent = isDebug ? 'DEBUG' : 'INFO';
   document.getElementById('loglabel').style.color = isDebug ? '#e8c040' : '#555';
-  fetch('/set?key=log_level&value=' + level).catch(e => console.warn(e));
+  fetch('set?key=log_level&value=' + level).catch(e => console.warn(e));
 }
 
 function doSave() {
@@ -546,7 +546,7 @@ function doSave() {
   const msg = document.getElementById('savemsg');
   btn.disabled = true;
   msg.style.color = '#888'; msg.textContent = 'saving\u2026';
-  fetch('/save', {method:'POST'})
+  fetch('save', {method:'POST'})
     .then(r => r.json())
     .then(d => {
       msg.style.color = d.ok ? '#5c5' : '#c55';
@@ -556,10 +556,10 @@ function doSave() {
     .finally(() => { btn.disabled = false; });
 }
 
-fetch('/settings').then(r=>r.json()).then(build).catch(()=>build({}));
+fetch('settings').then(r=>r.json()).then(build).catch(()=>build({}));
 
 // Show capture button only when recorder is active
-fetch('/recorder_status').then(r=>r.json()).then(function(d){
+fetch('recorder_status').then(r=>r.json()).then(function(d){
   if(d.active) document.getElementById('capturebtn').style.display='';
 }).catch(function(){});
 
@@ -570,7 +570,7 @@ function doCapture() {
   if (label === null) return;
   btn.disabled = true;
   msg.style.color='#888'; msg.textContent='saving…';
-  fetch('/capture', {method:'POST',
+  fetch('capture', {method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({label: label})})
     .then(function(r){return r.json();})
@@ -586,7 +586,7 @@ function doCapture() {
 (function() {
   var _since = 0;
   function pollLog() {
-    fetch('/log?since=' + _since)
+    fetch('log?since=' + _since)
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.entries && data.entries.length) {
@@ -613,26 +613,36 @@ function doCapture() {
   pollLog();
 })();
 
-// ── MJPEG stream reconnect ──────────────────────────────────────────────────
-// Stream URL uses the host's LAN IP directly so it works through HA ingress
-// (ingress buffers multipart/x-mixed-replace; direct IP bypasses it).
+// ── Frame-by-frame polling ──────────────────────────────────────────────────
+// Fetches individual JPEGs from the relative 'frame' endpoint at ~10 fps.
+// Relative URL works through both HA ingress (HTTPS) and direct HTTP access.
+// Avoids multipart/x-mixed-replace (Safari issues, ingress buffering) and
+// mixed-content blocking (no hardcoded http:// stream URL needed).
 (function() {
-  const img = document.getElementById('streamimg');
-  const baseUrl = img.src.split('?')[0];  // strip any existing cache-buster
-  let _stall = null;
+  var img = document.getElementById('streamimg');
+  var _prevUrl = null;
+  var _delay = 100;
 
-  function reconnect() {
-    img.src = baseUrl + '?' + Date.now();
+  function fetchFrame() {
+    fetch('frame?' + Date.now())
+      .then(function(r) {
+        if (!r.ok) throw new Error(r.status);
+        return r.blob();
+      })
+      .then(function(blob) {
+        var url = URL.createObjectURL(blob);
+        img.src = url;
+        if (_prevUrl) URL.revokeObjectURL(_prevUrl);
+        _prevUrl = url;
+        _delay = 100;
+        setTimeout(fetchFrame, _delay);
+      })
+      .catch(function() {
+        _delay = Math.min(_delay * 2, 5000);
+        setTimeout(fetchFrame, _delay);
+      });
   }
-
-  img.addEventListener('error', function() {
-    clearTimeout(_stall);
-    _stall = setTimeout(reconnect, 2000);
-  });
-
-  setTimeout(function() {
-    if (img.naturalWidth === 0) reconnect();
-  }, 4000);
+  fetchFrame();
 })();
 </script>
 </body>
@@ -650,11 +660,9 @@ class _Handler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         if parsed.path == "/":
-            stream_url = f"http://{_host_ip}:{_debug_port}/stream"
             html = (_HTML_TEMPLATE
                     .replace("__PARAMS_JSON__",  json.dumps(_PARAMS))
                     .replace("__TOGGLES_JSON__", json.dumps(_TOGGLES))
-                    .replace("__STREAM_URL__",   stream_url)
                     )
             body = html.encode()
             self.send_response(200)
@@ -684,6 +692,17 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        elif parsed.path == "/frame":
+            # Single JPEG — used by the JS frame-poller (works in all browsers
+            # including Safari, and through HA ingress without mixed content).
+            jpg = _compose()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(jpg)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(jpg)
 
         elif parsed.path == "/stream":
             self.send_response(200)
