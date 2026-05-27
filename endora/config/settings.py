@@ -47,6 +47,10 @@ class Settings:
     # from furniture/shadows, especially in low light. Default 0.25 is too
     # permissive; 0.45 filters most ghost detections without missing real people.
     yolo_conf: float = 0.45
+    # Inference resolution (square, must be multiple of 32).
+    # 320 uses one-quarter the FLOPs of 640 — default and recommended on Pi.
+    # Increase to 640 only if you need to detect very distant or small people.
+    yolo_imgsz: int = 320
     # Motion gate: only run YOLO when the frame changes by more than this
     # fraction (0–1 mean absolute pixel difference over an 80×60 thumbnail).
     # 0.015 ≈ any visible arm movement; 0.0 = always run YOLO (no gate).

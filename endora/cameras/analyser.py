@@ -137,22 +137,21 @@ def _select_person(
     return best
 
 
-def _yolo_to_landmarks(
-    results, frame_w: int, frame_h: int,
+def _kps_to_landmarks(
+    kps: Optional[np.ndarray],
+    frame_w: int,
+    frame_h: int,
     tracked_xy: Optional[tuple] = None,
 ) -> tuple:
     """Return *(landmarks, new_centroid)* for the selected person.
 
-    *new_centroid* is the pixel (x, y) of the selected person — the caller
-    should store this as the next frame's *tracked_xy*.  Both values are None
-    when no person is detected.
+    *kps* is the [N, 17, 3] array returned by PoseModel (or None).
+    *new_centroid* is the pixel (x, y) centre of the selected person —
+    store it as the next frame's *tracked_xy*.  Both values are None when
+    no person is detected.
     """
-    if not results:
+    if kps is None or kps.shape[0] == 0:
         return None, None
-    kps_data = results[0].keypoints
-    if kps_data is None or kps_data.data.shape[0] == 0:
-        return None, None
-    kps = kps_data.data.cpu().numpy()          # [num_persons, 17, 3]
     best = _select_person(kps, tracked_xy, frame_w, frame_h)
     return _YOLOLandmarks(kps[best], frame_w, frame_h), _person_centroid(kps[best])
 
@@ -272,19 +271,20 @@ class CameraAnalyser(threading.Thread):
 
     def _run(self):
         import os
-        os.environ.setdefault('ULTRALYTICS_SYNC', 'False')
-
-        from ultralytics import YOLO
-        try:
-            from ultralytics import settings as _yolo_settings
-            _yolo_settings.update({'sync': False})
-        except Exception:
-            pass
+        from cameras.pose_model import PoseModel
 
         model_name = getattr(self.s, 'yolo_pose_model', 'yolo11n-pose.onnx')
         if not os.path.isabs(model_name):
             model_name = os.path.join('/app', model_name)
-        yolo = YOLO(model_name)
+
+        yolo_imgsz = int(getattr(self.s, 'yolo_imgsz', 320))
+        yolo_conf  = float(getattr(self.s, 'yolo_conf',  0.45))
+        model = PoseModel(
+            model_path=model_name,
+            imgsz=yolo_imgsz,
+            conf=yolo_conf,
+            num_threads=0,          # 0 = all CPU cores
+        )
 
         # grlib/MediaPipe Hands is initialized lazily on the first SINGLE_UP
         # frame to avoid loading two ML runtimes simultaneously at startup
@@ -297,7 +297,7 @@ class CameraAnalyser(threading.Thread):
                  self.label, __version__)
 
         _last_arm_state: ArmState = ArmState.DOWN
-        _cached_yolo: object = None
+        _cached_kps: Optional[np.ndarray] = None   # [N, 17, 3] from PoseModel
         _cached_lm: object = None
         _cached_pw: int = 1
         _cached_ph: int = 1
@@ -340,31 +340,32 @@ class CameraAnalyser(threading.Thread):
             now = time.monotonic()
 
             if run_yolo:
-                _cached_yolo = yolo(proc_frame, verbose=False, conf=yolo_conf)
-                _cached_lm, new_centroid = _yolo_to_landmarks(
-                    _cached_yolo, pw, ph, self._track_xy
+                # Allow runtime conf/imgsz changes from the debug page
+                model.conf  = float(getattr(self.s, 'yolo_conf',  0.45))
+                model.imgsz = int(getattr(self.s,   'yolo_imgsz', 320))
+
+                _cached_kps = model(proc_frame)    # Optional[ndarray [N,17,3]]
+                _cached_lm, new_centroid = _kps_to_landmarks(
+                    _cached_kps, pw, ph, self._track_xy
                 )
                 if new_centroid is not None:
                     self._track_xy = new_centroid
-                # If no one detected, keep _track_xy so we can re-acquire quickly
+                # Keep _track_xy when nobody detected — quick re-acquisition
                 _cached_pw, _cached_ph = pw, ph
                 _frames_since_yolo = 0
                 log.debug("[%s] YOLO ran (motion=%s arm_up=%s)",
                           self.label, motion, arm_is_up)
                 # Feed recorder if active (keypoints for regression tests)
                 if self._recorder is not None:
-                    if (_cached_yolo and _cached_yolo[0].keypoints is not None
-                            and _cached_yolo[0].keypoints.data.shape[0] > 0):
-                        kps_all = _cached_yolo[0].keypoints.data.cpu().numpy()
-                        best = _select_person(kps_all, self._track_xy, pw, ph)
-                        self._recorder.on_frame(kps_all[best], pw, ph, now)
+                    if _cached_kps is not None and _cached_kps.shape[0] > 0:
+                        best = _select_person(_cached_kps, self._track_xy, pw, ph)
+                        self._recorder.on_frame(_cached_kps[best], pw, ph, now)
                     else:
                         self._recorder.on_frame(
                             np.zeros((17, 3), dtype=np.float32), pw, ph, now
                         )
 
-            yolo_results = _cached_yolo
-            landmarks    = _cached_lm
+            landmarks = _cached_lm
 
             # ── Hand landmarks (grlib / MediaPipe Hands) ──────────────────
             # Only run when arm is already raised — avoids running both ML
@@ -393,11 +394,7 @@ class CameraAnalyser(threading.Thread):
                         if _NoHandDetected is None or not isinstance(e, _NoHandDetected):
                             log.debug("[%s] grlib hand error: %s", self.label, e)
 
-            n_persons = (
-                yolo_results[0].keypoints.data.shape[0]
-                if yolo_results and yolo_results[0].keypoints is not None
-                else 0
-            )
+            n_persons = 0 if _cached_kps is None else _cached_kps.shape[0]
             log.debug("[%s] YOLO: %d person(s) detected", self.label, n_persons)
 
             reading = self._arm_tracker.classify(landmarks, pw, ph, hand_lm)
@@ -422,13 +419,11 @@ class CameraAnalyser(threading.Thread):
 
             if self.debug_frame_cb is not None:
                 try:
-                    # Resolve the selected person's raw kps row for the overlay
+                    # _cached_kps is already [N,17,3]; pick the tracked person
                     _dbg_kps = None
-                    if (yolo_results and yolo_results[0].keypoints is not None
-                            and yolo_results[0].keypoints.data.shape[0] > 0):
-                        _all = yolo_results[0].keypoints.data.cpu().numpy()
-                        _idx = _select_person(_all, self._track_xy, pw, ph)
-                        _dbg_kps = _all[_idx]
+                    if _cached_kps is not None and _cached_kps.shape[0] > 0:
+                        _idx = _select_person(_cached_kps, self._track_xy, pw, ph)
+                        _dbg_kps = _cached_kps[_idx]
                     dbg = _draw_debug(proc_frame, _dbg_kps, hand_lm, reading, gesture)
                     self.debug_frame_cb(self.label, dbg)
                 except Exception as e:
