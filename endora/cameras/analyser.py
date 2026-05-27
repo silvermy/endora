@@ -75,17 +75,42 @@ class _YOLOLandmarks:
         return self._pts[idx]
 
 
+def _largest_person(kps: np.ndarray) -> int:
+    """Return index of the person with the largest keypoint bounding box.
+
+    Bounding box area (from visible keypoints) is far more stable frame-to-frame
+    than average confidence, so this avoids flip-flopping when multiple people
+    are in frame. The largest person is almost always the one closest to the
+    camera — i.e. the one most likely to be doing the gesture.
+    """
+    if kps.shape[0] == 1:
+        return 0
+    best, best_area = 0, -1.0
+    for i in range(kps.shape[0]):
+        vis = kps[i][kps[i, :, 2] > 0.3]   # only confident keypoints
+        if len(vis) < 2:
+            continue
+        area = float(
+            (vis[:, 0].max() - vis[:, 0].min()) *
+            (vis[:, 1].max() - vis[:, 1].min())
+        )
+        if area > best_area:
+            best_area = area
+            best = i
+    return best
+
+
 def _yolo_to_landmarks(
     results, frame_w: int, frame_h: int
 ) -> Optional[_YOLOLandmarks]:
-    """Return the best-person YOLO landmarks, or None if no detection."""
+    """Return landmarks for the largest (closest) detected person, or None."""
     if not results:
         return None
     kps_data = results[0].keypoints
     if kps_data is None or kps_data.data.shape[0] == 0:
         return None
     kps = kps_data.data.cpu().numpy()  # [num_persons, 17, 3]
-    best = int(kps[:, :, 2].mean(axis=1).argmax())
+    best = _largest_person(kps)
     return _YOLOLandmarks(kps[best], frame_w, frame_h)
 
 
@@ -280,7 +305,7 @@ class CameraAnalyser(threading.Thread):
                         and _cached_yolo[0].keypoints.data.shape[0] > 0
                         else np.zeros((17, 3), dtype=np.float32)
                     )
-                    best = int(kps_data[:, :, 2].mean(axis=1).argmax()) \
+                    best = _largest_person(kps_data) \
                         if kps_data.ndim == 3 and kps_data.shape[0] > 1 else 0
                     self._recorder.on_frame(
                         kps_data[best] if kps_data.ndim == 3 else kps_data,
@@ -370,7 +395,7 @@ def _draw_debug(frame, yolo_results, hand_lm, reading, fired_gesture):
         if kps_data.shape[0] > 0:
             detected = True
             kps = kps_data.cpu().numpy()
-            best = int(kps[:, :, 2].mean(axis=1).argmax())
+            best = _largest_person(kps)
             person = kps[best]  # [17, 3]
 
             for a, b in _COCO_UPPER_BODY:
