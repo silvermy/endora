@@ -34,20 +34,24 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # ── Models — kept before application code so this layer is only invalidated ───
 # when the model file itself changes, not on every code commit.
+#
+# 320×320 fast model: PyTorch/ultralytics causes SIGILL on aarch64 (Pi 4/5),
+# so we cannot export at build time. Generate it once on an x86/macOS machine:
+#
+#   python3 -c "from ultralytics import YOLO; \
+#               YOLO('yolo11n-pose.pt').export(format='onnx', imgsz=320, simplify=True)"
+#
+# Then commit the resulting yolo11n-pose-320.onnx alongside yolo11n-pose.onnx.
+# Uncomment the COPY below once the file exists in the repo.
+#
 WORKDIR /app
-COPY yolo11n-pose.onnx  .
 
-# Export a 320×320 version for fast Pi 5 inference (~30 s, runs once per image).
-# ultralytics auto-downloads yolo11n-pose.pt from GitHub (~6 MB) if not cached.
-# The build continues even if the export fails (missing network, etc.) — the
-# app falls back to the 640×640 model with a warning in that case.
-RUN python3 -c "\
-from ultralytics import YOLO; import shutil, pathlib; \
-m = YOLO('yolo11n-pose.pt'); \
-out = pathlib.Path(m.export(format='onnx', imgsz=320, simplify=True)); \
-shutil.copy2(str(out), 'yolo11n-pose-320.onnx'); \
-print('Exported yolo11n-pose-320.onnx OK')" \
-    || echo "WARNING: 320x320 export failed — will use 640x640 fallback"
+# Remove any stale .pt that a previous build may have downloaded into /app/
+# (it would trigger a runtime export attempt → SIGILL on aarch64).
+RUN rm -f yolo11n-pose.pt
+
+COPY yolo11n-pose.onnx  .
+# COPY yolo11n-pose-320.onnx  .    ← uncomment after generating on x86/macOS
 
 # ── Application code (changes frequently — only invalidates these COPY layers)
 COPY cameras/           cameras/
@@ -58,10 +62,8 @@ COPY main.py            .
 COPY version.py         .
 COPY config.json        .
 
-# ── Validate ONNX models ──────────────────────────────────────────────────────
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose.onnx', providers=['CPUExecutionProvider']); print('ONNX 640 OK:', s.get_inputs()[0].shape)"
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose-320.onnx', providers=['CPUExecutionProvider']); print('ONNX 320 OK:', s.get_inputs()[0].shape)" \
-    || echo "yolo11n-pose-320.onnx not present — 640x640 fallback will be used"
+# ── Validate ONNX model ───────────────────────────────────────────────────────
+RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose.onnx', providers=['CPUExecutionProvider']); print('ONNX OK:', s.get_inputs()[0].shape)"
 
 # ── S6 service definition ─────────────────────────────────────────────────────
 # S6 looks for services in /etc/services.d/<name>/run
