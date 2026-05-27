@@ -32,11 +32,24 @@ RUN python3 -m venv /opt/venv \
     && rm /tmp/requirements.txt
 ENV PATH="/opt/venv/bin:$PATH"
 
-# ── Application code ──────────────────────────────────────────────────────────
-# yolo11n-pose.onnx must be generated on an x86/macOS machine first:
-#   python3 -c "from ultralytics import YOLO; YOLO('yolo11n-pose.pt').export(format='onnx', opset=12)"
-# then committed to the repo alongside this Dockerfile.
+# ── Models — kept before application code so this layer is only invalidated ───
+# when the model file itself changes, not on every code commit.
 WORKDIR /app
+COPY yolo11n-pose.onnx  .
+
+# Export a 320×320 version for fast Pi 5 inference (~30 s, runs once per image).
+# ultralytics auto-downloads yolo11n-pose.pt from GitHub (~6 MB) if not cached.
+# The build continues even if the export fails (missing network, etc.) — the
+# app falls back to the 640×640 model with a warning in that case.
+RUN python3 -c "\
+from ultralytics import YOLO; import shutil, pathlib; \
+m = YOLO('yolo11n-pose.pt'); \
+out = pathlib.Path(m.export(format='onnx', imgsz=320, simplify=True)); \
+shutil.copy2(str(out), 'yolo11n-pose-320.onnx'); \
+print('Exported yolo11n-pose-320.onnx OK')" \
+    || echo "WARNING: 320x320 export failed — will use 640x640 fallback"
+
+# ── Application code (changes frequently — only invalidates these COPY layers)
 COPY cameras/           cameras/
 COPY config/            config/
 COPY core/              core/
@@ -44,10 +57,14 @@ COPY output/            output/
 COPY main.py            .
 COPY version.py         .
 COPY config.json        .
-COPY yolo11n-pose.onnx  .
 
-# ── Validate ONNX model (no PyTorch inference — safe on all ARM64 CPUs) ───────
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose.onnx', providers=['CPUExecutionProvider']); print('ONNX model OK:', s.get_inputs()[0].shape)"
+# ── Validate ONNX models ──────────────────────────────────────────────────────
+RUN python3 -c "\
+import onnxruntime as ort, os; \
+for f in ['yolo11n-pose.onnx', 'yolo11n-pose-320.onnx']: \
+    if os.path.exists(f): \
+        s = ort.InferenceSession(f, providers=['CPUExecutionProvider']); \
+        print('ONNX OK:', f, s.get_inputs()[0].shape)"
 
 # ── S6 service definition ─────────────────────────────────────────────────────
 # S6 looks for services in /etc/services.d/<name>/run

@@ -119,13 +119,19 @@ def resolve_model_path(model_path: str, imgsz: int) -> tuple[str, int]:
 
     stem = Path(model_path).stem           # e.g. "yolo11n-pose"
 
-    # Cached resized ONNX from a previous export
+    # 1. Baked into the Docker image alongside the 640×640 model
+    image_small = Path(model_path).parent / f"{stem}-{imgsz}.onnx"
+    if image_small.exists():
+        log.info("Using image-bundled %dx%d model: %s", imgsz, imgsz, image_small)
+        return str(image_small), imgsz
+
+    # 2. Cached in /data/ from a previous lazy export
     cache = Path("/data") / f"{stem}-{imgsz}.onnx"
     if cache.exists():
         log.info("Using cached %dx%d model: %s", imgsz, imgsz, cache)
         return str(cache), imgsz
 
-    # Look for .pt in /data/ first (user-accessible), then alongside the .onnx
+    # 3. Export from .pt — check /data/ first (user-accessible), then /app/
     pt_candidates = [
         Path("/data") / f"{stem}.pt",
         Path(model_path).with_suffix(".pt"),
