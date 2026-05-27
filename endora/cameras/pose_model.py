@@ -13,26 +13,114 @@ overhead can exceed the inference itself.
 Here we own every step:
   1. Letterbox resize (one cv2.resize + numpy fill, ~0.5 ms)
   2. CHW normalisation (numpy, ~0.2 ms)
-  3. ONNX Runtime inference (multi-threaded, on all available cores)
+  3. ONNX Runtime inference (multi-threaded, using all available cores)
   4. Confidence mask + numpy NMS (~0.3 ms)
   5. Coordinate unscale back to original frame pixels
 
 The result is a plain numpy array — no .cpu() calls, no Results wrappers.
 
+Input-size note
+---------------
+YOLO ONNX models are typically exported with *static* input shapes (e.g.
+640×640).  ONNX Runtime refuses to run them at a different resolution.
+
+``_resolve_model_path`` handles this transparently:
+  1. If the on-disk model already has the requested size → use it directly.
+  2. If the model is dynamic-shape → use it with any size.
+  3. If ``yolo11n-pose.pt`` exists alongside the .onnx → export a
+     ``yolo11n-pose-320.onnx`` once into /data/ and cache it there.
+     (This takes ~30 s on first boot but persists across restarts.)
+  4. Otherwise → fall back to the static 640×640 model (still faster than
+     ultralytics due to multi-threading and no Python wrapper overhead).
+
 Typical timing on Pi 5 (Cortex-A76, 4 cores):
-  ultralytics YOLO @ 640×640  ~250 ms
-  PoseModel         @ 320×320  ~25–40 ms  (6–10× faster)
+  ultralytics YOLO  @ 640×640, 1 thread   ~250 ms / frame
+  PoseModel         @ 640×640, 4 threads   ~80 ms  / frame  (3×)
+  PoseModel         @ 320×320, 4 threads   ~25 ms  / frame  (10×)
 """
 from __future__ import annotations
 
 import logging
 import os
+import shutil
+from pathlib import Path
 from typing import Optional
 
 import cv2
 import numpy as np
 
 log = logging.getLogger(__name__)
+
+
+# ── model-path resolution ─────────────────────────────────────────────────────
+
+def _static_input_size(model_path: str) -> Optional[int]:
+    """Return the static input H (=W) of an ONNX model, or None if dynamic."""
+    try:
+        import onnxruntime as ort
+        sess = ort.InferenceSession(
+            model_path, providers=["CPUExecutionProvider"]
+        )
+        shape = sess.get_inputs()[0].shape   # e.g. [1, 3, 640, 640] or [1,3,'h','w']
+        h = shape[2]
+        return int(h) if isinstance(h, int) else None
+    except Exception:
+        return None
+
+
+def _export_at_size(pt_path: str, imgsz: int, dest: str) -> bool:
+    """Export *pt_path* to ONNX at *imgsz*×*imgsz* and save to *dest*.
+
+    Returns True on success.  The export takes ~30 s on a Pi 5 and only
+    happens once (the result is cached in /data/).
+    """
+    try:
+        log.info(
+            "Exporting %dx%d ONNX from %s — this takes ~30 s and only runs once.",
+            imgsz, imgsz, pt_path,
+        )
+        from ultralytics import YOLO  # still installed; only used here
+        m = YOLO(pt_path)
+        exported = str(m.export(format="onnx", imgsz=imgsz, simplify=True))
+        shutil.copy2(exported, dest)
+        log.info("Saved %dx%d model → %s", imgsz, imgsz, dest)
+        return True
+    except Exception as exc:
+        log.warning("Could not export %dx%d model: %s", imgsz, imgsz, exc)
+        return False
+
+
+def resolve_model_path(model_path: str, imgsz: int) -> tuple[str, int]:
+    """Return *(path_to_use, actual_imgsz)* for inference.
+
+    Tries to satisfy *imgsz*; falls back gracefully if impossible.
+    """
+    static_sz = _static_input_size(model_path)
+
+    # Model already has the right static size, or is dynamic
+    if static_sz is None or static_sz == imgsz:
+        return model_path, imgsz
+
+    # Wrong static size — look for a cached resized version
+    stem = Path(model_path).stem          # "yolo11n-pose"
+    cache = Path("/data") / f"{stem}-{imgsz}.onnx"
+
+    if cache.exists():
+        log.info("Using cached %dx%d model: %s", imgsz, imgsz, cache)
+        return str(cache), imgsz
+
+    # Try to export from the .pt file
+    pt_path = str(Path(model_path).with_suffix(".pt"))
+    if Path(pt_path).exists() and _export_at_size(pt_path, imgsz, str(cache)):
+        return str(cache), imgsz
+
+    # Nothing worked — use original model at its native size
+    log.warning(
+        "Model %s has static %dx%d input; .pt not found for re-export. "
+        "Running at %dx%d (still faster than ultralytics via multi-threading).",
+        Path(model_path).name, static_sz, static_sz, static_sz, static_sz,
+    )
+    return model_path, static_sz
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -87,14 +175,13 @@ class PoseModel:
     model_path:
         Absolute path to ``yolo11n-pose.onnx``.
     imgsz:
-        Square inference resolution.  320 uses one-quarter the FLOPs of 640
-        and is sufficient for whole-body pose at typical room-camera distances.
-        Must be a multiple of 32.
+        Requested square inference resolution.  If the on-disk model has a
+        different static size, ``resolve_model_path`` will try to produce or
+        locate a matching one.  Must be a multiple of 32.
     conf:
-        Minimum person confidence to keep a detection (can be changed at
-        runtime via ``model.conf = ...``).
+        Minimum person confidence to keep a detection (mutable at runtime).
     num_threads:
-        ONNX Runtime intra-op thread count.  0 = use ``os.cpu_count()``.
+        ONNX Runtime intra-op thread count.  0 = ``os.cpu_count()``.
     """
 
     def __init__(
@@ -115,6 +202,9 @@ class PoseModel:
         if num_threads <= 0:
             num_threads = os.cpu_count() or 4
 
+        # Resolve model path — may re-export at requested imgsz
+        actual_path, actual_imgsz = resolve_model_path(model_path, imgsz)
+
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = num_threads
         opts.inter_op_num_threads = 1
@@ -122,16 +212,16 @@ class PoseModel:
         opts.log_severity_level = 3  # suppress onnxruntime INFO spam
 
         self._sess = ort.InferenceSession(
-            model_path,
+            actual_path,
             sess_options=opts,
             providers=["CPUExecutionProvider"],
         )
         self._input_name = self._sess.get_inputs()[0].name
-        self.imgsz = imgsz
+        self.imgsz = actual_imgsz
         self.conf = conf
         log.info(
             "PoseModel: %s  imgsz=%d  threads=%d  conf=%.2f",
-            os.path.basename(model_path), imgsz, num_threads, conf,
+            os.path.basename(actual_path), actual_imgsz, num_threads, conf,
         )
 
     # ── inference ─────────────────────────────────────────────────────────

@@ -340,9 +340,8 @@ class CameraAnalyser(threading.Thread):
             now = time.monotonic()
 
             if run_yolo:
-                # Allow runtime conf/imgsz changes from the debug page
-                model.conf  = float(getattr(self.s, 'yolo_conf',  0.45))
-                model.imgsz = int(getattr(self.s,   'yolo_imgsz', 320))
+                # Allow runtime conf changes from the debug page
+                model.conf = float(getattr(self.s, 'yolo_conf', 0.45))
 
                 _cached_kps = model(proc_frame)    # Optional[ndarray [N,17,3]]
                 _cached_lm, new_centroid = _kps_to_landmarks(
