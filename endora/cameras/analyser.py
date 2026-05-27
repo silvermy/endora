@@ -75,43 +75,86 @@ class _YOLOLandmarks:
         return self._pts[idx]
 
 
-def _largest_person(kps: np.ndarray) -> int:
-    """Return index of the person with the largest keypoint bounding box.
+def _person_centroid(kps_row: np.ndarray) -> Optional[tuple]:
+    """Mean (x, y) pixel position of visible keypoints for one person."""
+    vis = kps_row[kps_row[:, 2] > 0.3]
+    if len(vis) == 0:
+        return None
+    return float(vis[:, 0].mean()), float(vis[:, 1].mean())
 
-    Bounding box area (from visible keypoints) is far more stable frame-to-frame
-    than average confidence, so this avoids flip-flopping when multiple people
-    are in frame. The largest person is almost always the one closest to the
-    camera — i.e. the one most likely to be doing the gesture.
+
+def _select_person(
+    kps: np.ndarray,
+    tracked_xy: Optional[tuple],
+    frame_w: int,
+    frame_h: int,
+) -> int:
+    """Pick which detected person to track.
+
+    Strategy
+    --------
+    * If we have a previous centroid (*tracked_xy*), pick the nearest person to
+      it — temporal continuity.  We only abandon the lock if every candidate is
+      more than 30 % of the frame diagonal away, meaning the person genuinely
+      left the frame.
+    * With no history (first frame or after loss), pick the person whose
+      centroid is closest to the frame centre.  Works well for a fixed camera
+      pointed at an activity zone and is immune to fisheye area distortion.
+
+    Both strategies ignore keypoint confidence entirely, so low-contrast
+    clothing or poor lighting does not affect selection stability.
     """
     if kps.shape[0] == 1:
         return 0
-    best, best_area = 0, -1.0
-    for i in range(kps.shape[0]):
-        vis = kps[i][kps[i, :, 2] > 0.3]   # only confident keypoints
-        if len(vis) < 2:
+
+    centroids = [_person_centroid(kps[i]) for i in range(kps.shape[0])]
+
+    if tracked_xy is not None:
+        tx, ty = tracked_xy
+        max_dist = 0.30 * (frame_w ** 2 + frame_h ** 2) ** 0.5
+        best, best_dist = 0, float("inf")
+        for i, c in enumerate(centroids):
+            if c is None:
+                continue
+            d = ((c[0] - tx) ** 2 + (c[1] - ty) ** 2) ** 0.5
+            if d < best_dist:
+                best_dist = d
+                best = i
+        if best_dist <= max_dist:
+            return best
+        # Tracking lost — fall through to centre heuristic
+
+    # No history or re-acquisition: closest to frame centre
+    cx, cy = frame_w * 0.5, frame_h * 0.5
+    best, best_dist = 0, float("inf")
+    for i, c in enumerate(centroids):
+        if c is None:
             continue
-        area = float(
-            (vis[:, 0].max() - vis[:, 0].min()) *
-            (vis[:, 1].max() - vis[:, 1].min())
-        )
-        if area > best_area:
-            best_area = area
+        d = ((c[0] - cx) ** 2 + (c[1] - cy) ** 2) ** 0.5
+        if d < best_dist:
+            best_dist = d
             best = i
     return best
 
 
 def _yolo_to_landmarks(
-    results, frame_w: int, frame_h: int
-) -> Optional[_YOLOLandmarks]:
-    """Return landmarks for the largest (closest) detected person, or None."""
+    results, frame_w: int, frame_h: int,
+    tracked_xy: Optional[tuple] = None,
+) -> tuple:
+    """Return *(landmarks, new_centroid)* for the selected person.
+
+    *new_centroid* is the pixel (x, y) of the selected person — the caller
+    should store this as the next frame's *tracked_xy*.  Both values are None
+    when no person is detected.
+    """
     if not results:
-        return None
+        return None, None
     kps_data = results[0].keypoints
     if kps_data is None or kps_data.data.shape[0] == 0:
-        return None
-    kps = kps_data.data.cpu().numpy()  # [num_persons, 17, 3]
-    best = _largest_person(kps)
-    return _YOLOLandmarks(kps[best], frame_w, frame_h)
+        return None, None
+    kps = kps_data.data.cpu().numpy()          # [num_persons, 17, 3]
+    best = _select_person(kps, tracked_xy, frame_w, frame_h)
+    return _YOLOLandmarks(kps[best], frame_w, frame_h), _person_centroid(kps[best])
 
 
 
@@ -138,6 +181,10 @@ class CameraAnalyser(threading.Thread):
 
         # Optional test recorder (set by main.py when ENDORA_RECORD_TESTS=1)
         self._recorder = None
+
+        # Person tracking — centroid of the last selected person (pixels).
+        # None until the first YOLO detection.
+        self._track_xy: Optional[tuple] = None
 
         self._arm_tracker = ArmTracker(ArmTrackerConfig(
             arm_above_head_tolerance=float(getattr(settings, 'arm_above_head_tolerance', 0.15)),
@@ -290,27 +337,31 @@ class CameraAnalyser(threading.Thread):
             arm_is_up = (_last_arm_state != ArmState.DOWN)
             run_yolo  = motion or arm_is_up or (_frames_since_yolo >= max_skip)
 
+            now = time.monotonic()
+
             if run_yolo:
                 _cached_yolo = yolo(proc_frame, verbose=False, conf=yolo_conf)
-                _cached_lm   = _yolo_to_landmarks(_cached_yolo, pw, ph)
+                _cached_lm, new_centroid = _yolo_to_landmarks(
+                    _cached_yolo, pw, ph, self._track_xy
+                )
+                if new_centroid is not None:
+                    self._track_xy = new_centroid
+                # If no one detected, keep _track_xy so we can re-acquire quickly
                 _cached_pw, _cached_ph = pw, ph
                 _frames_since_yolo = 0
                 log.debug("[%s] YOLO ran (motion=%s arm_up=%s)",
                           self.label, motion, arm_is_up)
                 # Feed recorder if active (keypoints for regression tests)
                 if self._recorder is not None:
-                    kps_data = (
-                        _cached_yolo[0].keypoints.data.cpu().numpy()
-                        if _cached_yolo and _cached_yolo[0].keypoints is not None
-                        and _cached_yolo[0].keypoints.data.shape[0] > 0
-                        else np.zeros((17, 3), dtype=np.float32)
-                    )
-                    best = _largest_person(kps_data) \
-                        if kps_data.ndim == 3 and kps_data.shape[0] > 1 else 0
-                    self._recorder.on_frame(
-                        kps_data[best] if kps_data.ndim == 3 else kps_data,
-                        pw, ph, now,
-                    )
+                    if (_cached_yolo and _cached_yolo[0].keypoints is not None
+                            and _cached_yolo[0].keypoints.data.shape[0] > 0):
+                        kps_all = _cached_yolo[0].keypoints.data.cpu().numpy()
+                        best = _select_person(kps_all, self._track_xy, pw, ph)
+                        self._recorder.on_frame(kps_all[best], pw, ph, now)
+                    else:
+                        self._recorder.on_frame(
+                            np.zeros((17, 3), dtype=np.float32), pw, ph, now
+                        )
 
             yolo_results = _cached_yolo
             landmarks    = _cached_lm
@@ -360,7 +411,6 @@ class CameraAnalyser(threading.Thread):
                     log.debug("[%s] SINGLE_UP forearm_dy=%.3f snap_roll=%.3f",
                               self.label, reading.forearm_dy, reading.snap_roll)
 
-            now = time.monotonic()
             gesture = self._state_machine.tick(reading, now)
 
             if gesture is not None:
@@ -372,7 +422,14 @@ class CameraAnalyser(threading.Thread):
 
             if self.debug_frame_cb is not None:
                 try:
-                    dbg = _draw_debug(proc_frame, yolo_results, hand_lm, reading, gesture)
+                    # Resolve the selected person's raw kps row for the overlay
+                    _dbg_kps = None
+                    if (yolo_results and yolo_results[0].keypoints is not None
+                            and yolo_results[0].keypoints.data.shape[0] > 0):
+                        _all = yolo_results[0].keypoints.data.cpu().numpy()
+                        _idx = _select_person(_all, self._track_xy, pw, ph)
+                        _dbg_kps = _all[_idx]
+                    dbg = _draw_debug(proc_frame, _dbg_kps, hand_lm, reading, gesture)
                     self.debug_frame_cb(self.label, dbg)
                 except Exception as e:
                     log.debug("[%s] debug render error: %s", self.label, e)
@@ -384,31 +441,30 @@ class CameraAnalyser(threading.Thread):
 
 # ── Debug overlay ─────────────────────────────────────────────────────────────
 
-def _draw_debug(frame, yolo_results, hand_lm, reading, fired_gesture):
-    """Draw YOLO skeleton + grlib hand indicator + gesture state overlay."""
+def _draw_debug(frame, person_kps, hand_lm, reading, fired_gesture):
+    """Draw YOLO skeleton + grlib hand indicator + gesture state overlay.
+
+    *person_kps* is a [17, 3] numpy array for the already-selected person,
+    or None if no pose was detected this frame.
+    """
     img = frame.copy()
     h, w = img.shape[:2]
 
-    detected = False
-    if yolo_results and yolo_results[0].keypoints is not None:
-        kps_data = yolo_results[0].keypoints.data
-        if kps_data.shape[0] > 0:
-            detected = True
-            kps = kps_data.cpu().numpy()
-            best = _largest_person(kps)
-            person = kps[best]  # [17, 3]
+    detected = person_kps is not None
+    if detected:
+        person = person_kps   # [17, 3] — already the right person
 
-            for a, b in _COCO_UPPER_BODY:
-                x1, y1, c1 = person[a]
-                x2, y2, c2 = person[b]
-                if c1 > 0.5 and c2 > 0.5:
-                    cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)),
-                             (0, 200, 0), 2)
+        for a, b in _COCO_UPPER_BODY:
+            x1, y1, c1 = person[a]
+            x2, y2, c2 = person[b]
+            if c1 > 0.5 and c2 > 0.5:
+                cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)),
+                         (0, 200, 0), 2)
 
-            for i in range(5, 13):
-                x, y, c = person[i]
-                if c > 0.5:
-                    cv2.circle(img, (int(x), int(y)), 4, (0, 255, 0), -1)
+        for i in range(5, 13):
+            x, y, c = person[i]
+            if c > 0.5:
+                cv2.circle(img, (int(x), int(y)), 4, (0, 255, 0), -1)
 
     if not detected:
         msg = "NO POSE DETECTED"
