@@ -93,32 +93,58 @@ def _export_at_size(pt_path: str, imgsz: int, dest: str) -> bool:
 def resolve_model_path(model_path: str, imgsz: int) -> tuple[str, int]:
     """Return *(path_to_use, actual_imgsz)* for inference.
 
-    Tries to satisfy *imgsz*; falls back gracefully if impossible.
+    Resolution order
+    ----------------
+    1. The on-disk model already has the right static size (or is dynamic).
+    2. A cached ``/data/<stem>-<imgsz>.onnx`` exists from a previous export.
+    3. A ``.pt`` source file is found — checked in this order:
+         a. ``/data/<stem>.pt``          ← user can drop it here via SSH/Samba
+         b. Same directory as the .onnx  ← bundled in the Docker image
+       If found, export once to ``/data/<stem>-<imgsz>.onnx`` (~30 s on Pi 5)
+       and use it immediately (no restart needed).
+    4. Fall back to the original static model at its native size; still faster
+       than ultralytics thanks to multi-threaded ONNX Runtime.
+
+    To unlock 320×320 inference without rebuilding the Docker image:
+      1. Download ``yolo11n-pose.pt`` (~5 MB) from
+         https://github.com/ultralytics/assets/releases
+      2. Copy it into the add-on /data/ folder (SSH, Samba, or HA file editor).
+      3. Restart the add-on once.  Export runs in ~30 s, then persists forever.
     """
     static_sz = _static_input_size(model_path)
 
-    # Model already has the right static size, or is dynamic
+    # Already the right size, or dynamic-shape model
     if static_sz is None or static_sz == imgsz:
         return model_path, imgsz
 
-    # Wrong static size — look for a cached resized version
-    stem = Path(model_path).stem          # "yolo11n-pose"
-    cache = Path("/data") / f"{stem}-{imgsz}.onnx"
+    stem = Path(model_path).stem           # e.g. "yolo11n-pose"
 
+    # Cached resized ONNX from a previous export
+    cache = Path("/data") / f"{stem}-{imgsz}.onnx"
     if cache.exists():
         log.info("Using cached %dx%d model: %s", imgsz, imgsz, cache)
         return str(cache), imgsz
 
-    # Try to export from the .pt file
-    pt_path = str(Path(model_path).with_suffix(".pt"))
-    if Path(pt_path).exists() and _export_at_size(pt_path, imgsz, str(cache)):
-        return str(cache), imgsz
+    # Look for .pt in /data/ first (user-accessible), then alongside the .onnx
+    pt_candidates = [
+        Path("/data") / f"{stem}.pt",
+        Path(model_path).with_suffix(".pt"),
+    ]
+    for pt_path in pt_candidates:
+        if pt_path.exists():
+            log.info("Found .pt at %s", pt_path)
+            if _export_at_size(str(pt_path), imgsz, str(cache)):
+                return str(cache), imgsz
+            break   # export failed; don't try the other candidate
 
     # Nothing worked — use original model at its native size
     log.warning(
-        "Model %s has static %dx%d input; .pt not found for re-export. "
-        "Running at %dx%d (still faster than ultralytics via multi-threading).",
+        "Model %s has static %dx%d input; no .pt found for re-export. "
+        "Running at %dx%d (still ~3x faster than ultralytics via multi-threading). "
+        "To enable %dx%d: copy yolo11n-pose.pt into the add-on /data/ folder "
+        "and restart once.",
         Path(model_path).name, static_sz, static_sz, static_sz, static_sz,
+        imgsz,
     )
     return model_path, static_sz
 
