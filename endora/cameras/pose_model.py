@@ -71,15 +71,25 @@ def _static_input_size(model_path: str) -> Optional[int]:
 def _export_at_size(pt_path: str, imgsz: int, dest: str) -> bool:
     """Export *pt_path* to ONNX at *imgsz*×*imgsz* and save to *dest*.
 
-    Returns True on success.  The export takes ~30 s on a Pi 5 and only
-    happens once (the result is cached in /data/).
+    Returns True on success.  Never attempted on aarch64 — PyTorch causes
+    SIGILL on Cortex-A72/A76 (Pi 4/5) and the error is uncatchable.
+    Generate the model on an x86/macOS machine instead (see Dockerfile).
     """
+    import platform
+    if platform.machine() == "aarch64":
+        log.warning(
+            "Cannot export %dx%d ONNX at runtime on aarch64 — torch is unsafe "
+            "on this CPU.  Generate yolo11n-pose-%d.onnx on an x86/macOS machine "
+            "and either commit it to the repo or copy it to /data/.",
+            imgsz, imgsz, imgsz,
+        )
+        return False
     try:
         log.info(
             "Exporting %dx%d ONNX from %s — this takes ~30 s and only runs once.",
             imgsz, imgsz, pt_path,
         )
-        from ultralytics import YOLO  # still installed; only used here
+        from ultralytics import YOLO  # only runs on x86/macOS
         m = YOLO(pt_path)
         exported = str(m.export(format="onnx", imgsz=imgsz, simplify=True))
         shutil.copy2(exported, dest)
