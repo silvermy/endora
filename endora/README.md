@@ -6,7 +6,7 @@ Watches an RTSP camera stream for pose-based gestures and fires HA events you ca
 
 Designed for use from a couch with a fisheye camera.
 
-**Debug stream:** [http://homeassistant.local:8765/](http://homeassistant.local:8765/) — live camera overlay with skeleton, arm state, and tuning sliders.
+**Debug stream:** `http://<your-ha-ip>:8765/` — live camera overlay with skeleton, arm state, and tuning sliders. The exact URL is printed in the add-on log on startup.
 
 ---
 
@@ -49,7 +49,7 @@ log_level: info
 
 ### 3. Start
 
-Click **Start** → check the **Log** tab for stream connection. Open the debug stream at [http://homeassistant.local:8765/](http://homeassistant.local:8765/) to verify camera view and tune.
+Click **Start** → check the **Log** tab for stream connection and the exact debug URL (logged as `Debug stream: http://<ip>:8765/`). Open that URL to verify camera view and tune.
 
 ### 4. Sidebar (optional)
 
