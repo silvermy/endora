@@ -814,8 +814,7 @@ def start(port: int, ingress_port: int = 8766) -> None:
     debug_server = _Server(("0.0.0.0", port), _Handler)
     threading.Thread(target=debug_server.serve_forever, daemon=True,
                      name="DebugServer").start()
-    ip = _host_ip()
-    log.info("Debug stream: http://%s:%d/", ip, port)
+    log.info("Debug stream: http://%s:%d/", _host_ip, port)
 
     # Ingress server (HA sidebar) — serves the full debug UI directly so it
     # works through HA's HTTPS ingress proxy without popup/mixed-content issues.
