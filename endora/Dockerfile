@@ -50,8 +50,8 @@ WORKDIR /app
 # (it would trigger a runtime export attempt → SIGILL on aarch64).
 RUN rm -f yolo11n-pose.pt
 
-COPY yolo11n-pose.onnx  .
-# COPY yolo11n-pose-320.onnx  .    ← uncomment after generating on x86/macOS
+COPY yolo11n-pose.onnx      .
+COPY yolo11n-pose-320.onnx  .
 
 # ── Application code (changes frequently — only invalidates these COPY layers)
 COPY cameras/           cameras/
@@ -62,8 +62,9 @@ COPY main.py            .
 COPY version.py         .
 COPY config.json        .
 
-# ── Validate ONNX model ───────────────────────────────────────────────────────
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose.onnx', providers=['CPUExecutionProvider']); print('ONNX OK:', s.get_inputs()[0].shape)"
+# ── Validate ONNX models ─────────────────────────────────────────────────────
+RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose.onnx',     providers=['CPUExecutionProvider']); print('ONNX 640 OK:', s.get_inputs()[0].shape)"
+RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose-320.onnx', providers=['CPUExecutionProvider']); print('ONNX 320 OK:', s.get_inputs()[0].shape)"
 
 # ── S6 service definition ─────────────────────────────────────────────────────
 # S6 looks for services in /etc/services.d/<name>/run
