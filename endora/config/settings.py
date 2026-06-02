@@ -47,12 +47,6 @@ class Settings:
     # from furniture/shadows, especially in low light. Default 0.25 is too
     # permissive; 0.45 filters most ghost detections without missing real people.
     yolo_conf: float = 0.45
-    # When a person is already being tracked, multiply yolo_conf by this ratio
-    # for the re-detection pass.  Lower = easier to maintain a lock on someone
-    # in dark clothing against a dark background; furniture ghosts are still
-    # filtered out because they don't match the tracked spatial position.
-    # 0.65 means 0.45 * 0.65 ≈ 0.29 tracking threshold vs 0.45 acquisition.
-    track_conf_ratio: float = 0.65
     # Inference resolution (square, must be multiple of 32).
     # 320 uses one-quarter the FLOPs of 640 — default and recommended on Pi.
     # Increase to 640 only if you need to detect very distant or small people.
