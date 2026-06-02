@@ -340,8 +340,18 @@ class CameraAnalyser(threading.Thread):
             now = time.monotonic()
 
             if run_yolo:
-                # Allow runtime conf changes from the debug page
-                model.conf = float(getattr(self.s, 'yolo_conf', 0.45))
+                # Confidence hysteresis: strict threshold to *acquire* a person
+                # (keeps furniture ghosts out), relaxed threshold to *maintain*
+                # an existing lock (black clothing on black background drops
+                # keypoint confidence when arm raises, but position continuity
+                # via _track_xy means a nearby detection is still the same person).
+                track_conf_ratio = float(getattr(self.s, 'track_conf_ratio', 0.65))
+                base_conf = float(getattr(self.s, 'yolo_conf', 0.45))
+                model.conf = (
+                    base_conf * track_conf_ratio
+                    if self._track_xy is not None
+                    else base_conf
+                )
 
                 _cached_kps = model(proc_frame)    # Optional[ndarray [N,17,3]]
                 _cached_lm, new_centroid = _kps_to_landmarks(
