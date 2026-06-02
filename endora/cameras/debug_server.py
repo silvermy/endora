@@ -76,15 +76,21 @@ class _LogHandler(logging.Handler):
 # (key, label, min, max, step, group)
 # Trimmed to the sliders you actually reach for during live tuning.
 _PARAMS = [
-    ("arm_above_head_tolerance", "Arm raise margin",            0.0,  0.30, 0.01, "Gesture"),
-    ("palm_twist_threshold",     "Snap sensitivity",            0.10, 1.20, 0.05, "Gesture"),
-    ("cooldown_s",               "Cooldown (s)",                0,    10,   0.25, "Gesture"),
-    ("yolo_conf",                "YOLO confidence (ghost filter)", 0.10, 0.80, 0.01, "Body"),
-    ("pose_visibility_min",      "Min visibility (furniture)",  0.05, 0.8,  0.01, "Body"),
-    ("frame_crop_bottom",        "Crop bottom (%)",             0,    60,   1,    "Body"),
-    ("dewarp_tilt",              "Tilt (° down)",              -10,   80,   1,    "Dewarp"),
-    ("dewarp_pan",               "Pan (° right)",              -30,   30,   1,    "Dewarp"),
-    ("dewarp_vfov",              "Vertical FOV (°)",            20,   100,  1,    "Dewarp"),
+    ("arm_above_head_tolerance", "Arm raise margin",   0.0,  0.30, 0.01, "Gesture"),
+    ("palm_twist_threshold",     "Snap sensitivity",   0.10, 1.20, 0.05, "Gesture"),
+    ("cooldown_s",               "Cooldown (s)",       0,    10,   0.25, "Gesture"),
+    ("yolo_conf",                "YOLO confidence",    0.10, 0.80, 0.01, "Body"),
+    # View group — rendered as joystick (pan/tilt) + compact sliders
+    ("dewarp_vfov",              "Vertical FOV (°)",   20,   100,  1,    "View"),
+    ("frame_crop_bottom",        "Crop bottom (%)",    0,    60,   1,    "View"),
+    ("pose_visibility_min",      "Min visibility",     0.05, 0.8,  0.01, "View"),
+]
+
+# Pan/tilt are the joystick axes — not sliders.
+# (key, label, min, max, step)
+_JOY_PARAMS = [
+    ("dewarp_pan",  "Pan",  -30, 30, 1),   # X axis: ← left / right →
+    ("dewarp_tilt", "Tilt", -10, 80, 1),   # Y axis: ↑ up  / down ↓
 ]
 
 # Boolean toggles shown as switches above the sliders
@@ -188,9 +194,11 @@ def _compose() -> bytes:
 def _current_values() -> dict:
     if _settings is None:
         return {}
-    result = {key: getattr(_settings, key, None)
-              for key, *_ in _PARAMS
-              if getattr(_settings, key, None) is not None}
+    result = {}
+    for key, *_ in _PARAMS + _JOY_PARAMS:
+        v = getattr(_settings, key, None)
+        if v is not None:
+            result[key] = v
     if hasattr(_settings, 'log_level'):
         result['log_level'] = _settings.log_level
     for key, *_ in _TOGGLES:
@@ -395,6 +403,27 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
   #wrap{flex-direction:column}
   #panel{flex:none;width:100%;max-height:none}
 }
+/* ── joystick ── */
+.joy-wrap{display:flex;gap:12px;align-items:center;padding:2px 0 8px}
+.joy-pad{
+  position:relative;width:140px;height:140px;flex-shrink:0;
+  background:#080808;border:1px solid #2a2a2a;border-radius:6px;
+  cursor:crosshair;touch-action:none;user-select:none
+}
+.joy-pad::before,.joy-pad::after{content:'';position:absolute;background:#1c1c1c}
+.joy-pad::before{left:50%;top:6px;bottom:6px;width:1px}
+.joy-pad::after {top:50%;left:6px;right:6px;height:1px}
+.joy-dot{
+  position:absolute;width:16px;height:16px;border-radius:50%;
+  background:#e8c040;transform:translate(-50%,-50%);pointer-events:none;
+  box-shadow:0 0 0 2px #0d0d0d,0 0 0 4px #e8c04055
+}
+.joy-axlbl{
+  position:absolute;font-size:9px;color:#333;pointer-events:none;line-height:1
+}
+.joy-info{display:flex;flex-direction:column;gap:8px;justify-content:center}
+.joy-kv{font-size:12px;color:#666}
+.joy-kv b{color:#e8c040;font-variant-numeric:tabular-nums;display:inline-block;min-width:26px;text-align:right}
 /* ── live log panel ── */
 #logbox{
   width:100%;max-width:1300px;
@@ -455,13 +484,80 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
   <div id="loglines"></div>
 </div>
 <script>
-const PARAMS = __PARAMS_JSON__;
+const PARAMS  = __PARAMS_JSON__;
 const TOGGLES = __TOGGLES_JSON__;
+const JOY     = __JOY_PARAMS_JSON__;
 
 function fmt(v, step) {
   const n = +v;
   if (step >= 1) return String(Number.isInteger(n) ? n : n.toFixed(1));
   return n.toFixed(2);
+}
+
+// ── Joystick ────────────────────────────────────────────────────────────────
+var _joyActive = false;
+function buildJoystick(vals) {
+  const [panKey,, panMin, panMax, panStep]   = JOY[0];
+  const [tiltKey,,tiltMin,tiltMax,tiltStep]  = JOY[1];
+  const pv = vals[panKey]  !== undefined ? +vals[panKey]  : 0;
+  const tv = vals[tiltKey] !== undefined ? +vals[tiltKey] : 20;
+
+  // Percentage position so it works before layout
+  const px = ((pv  - panMin)  / (panMax  - panMin)  * 100).toFixed(1) + '%';
+  const py = ((1 - (tv - tiltMin) / (tiltMax - tiltMin)) * 100).toFixed(1) + '%';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'joy-wrap';
+  wrap.innerHTML =
+    '<div class="joy-pad" id="joypad">' +
+      '<div class="joy-dot" id="joydot" style="left:' + px + ';top:' + py + '"></div>' +
+      '<span class="joy-axlbl" style="top:3px;left:50%;transform:translateX(-50%)">up</span>' +
+      '<span class="joy-axlbl" style="bottom:3px;left:50%;transform:translateX(-50%)">down</span>' +
+      '<span class="joy-axlbl" style="left:3px;top:50%;transform:translateY(-50%)">◀</span>' +
+      '<span class="joy-axlbl" style="right:3px;top:50%;transform:translateY(-50%)">▶</span>' +
+    '</div>' +
+    '<div class="joy-info">' +
+      '<div class="joy-kv">Pan&nbsp; <b id="jv_' + panKey  + '">' + pv + '</b>°</div>' +
+      '<div class="joy-kv">Tilt <b id="jv_' + tiltKey + '">' + tv + '</b>°</div>' +
+    '</div>';
+
+  const pad = wrap.querySelector('#joypad');
+  const dot = wrap.querySelector('#joydot');
+
+  function applyXY(x, y) {
+    var r = pad.getBoundingClientRect();
+    var w = r.width || 140, h = r.height || 140;
+    x = Math.max(0, Math.min(w, x));
+    y = Math.max(0, Math.min(h, y));
+    var pan  = panMin  + (x / w) * (panMax  - panMin);
+    var tilt = tiltMin + (1 - y / h) * (tiltMax - tiltMin);
+    var pr = Math.round(pan  / panStep)  * panStep;
+    var tr = Math.round(tilt / tiltStep) * tiltStep;
+    dot.style.left = (x / w * 100).toFixed(1) + '%';
+    dot.style.top  = (y / h * 100).toFixed(1) + '%';
+    var pe = document.getElementById('jv_' + panKey);
+    var te = document.getElementById('jv_' + tiltKey);
+    if (pe) pe.textContent = pr;
+    if (te) te.textContent = tr;
+    onCom(panKey, pr); onCom(tiltKey, tr);
+  }
+
+  function fromEvent(e) {
+    var r = pad.getBoundingClientRect();
+    var src = e.touches ? e.touches[0] : e;
+    applyXY(src.clientX - r.left, src.clientY - r.top);
+  }
+
+  pad.addEventListener('mousedown',  function(e){ _joyActive=true; fromEvent(e); });
+  pad.addEventListener('touchstart', function(e){ _joyActive=true; fromEvent(e); e.preventDefault(); }, {passive:false});
+  if (!pad._joyDoc) {
+    pad._joyDoc = true;
+    document.addEventListener('mousemove',  function(e){ if(_joyActive) fromEvent(e); });
+    document.addEventListener('touchmove',  function(e){ if(_joyActive){ fromEvent(e); e.preventDefault(); }}, {passive:false});
+    document.addEventListener('mouseup',  function(){ _joyActive=false; });
+    document.addEventListener('touchend', function(){ _joyActive=false; });
+  }
+  return wrap;
 }
 
 function build(vals) {
@@ -470,21 +566,18 @@ function build(vals) {
   tc.innerHTML = '';
   TOGGLES.forEach(([key, label, desc]) => {
     const on = vals[key] === true || vals[key] === 'true';
-    const id = 'tog_' + key;
     const row = document.createElement('div');
-    row.className = 'togrow';
-    row.title = desc;
+    row.className = 'togrow'; row.title = desc;
     row.innerHTML =
-      `<span class="rowlabel">${label}</span>` +
-      `<div class="tog-wrap">` +
-      `<span id="lbl_${key}" style="font-size:11px;font-weight:600;min-width:28px;text-align:right;color:${on?'#e8c040':'#555'}">${on?'ON':'OFF'}</span>` +
-      `<label class="toggle">` +
-      `<input type="checkbox" id="${id}" ${on?'checked':''} onchange="setBool('${key}',this.checked)">` +
-      `<span class="tog-track"></span></label></div>`;
+      '<span class="rowlabel">' + label + '</span>' +
+      '<div class="tog-wrap">' +
+      '<span id="lbl_' + key + '" style="font-size:11px;font-weight:600;min-width:28px;text-align:right;color:' + (on?'#e8c040':'#555') + '">' + (on?'ON':'OFF') + '</span>' +
+      '<label class="toggle"><input type="checkbox" id="tog_' + key + '" ' + (on?'checked':'') + ' onchange="setBool(\'' + key + '\',this.checked)">' +
+      '<span class="tog-track"></span></label></div>';
     tc.appendChild(row);
   });
 
-  // ── Sliders ──
+  // ── Sliders (with joystick injected before View group) ──
   const c = document.getElementById('sliders');
   c.innerHTML = '';
   let grp = null;
@@ -494,16 +587,17 @@ function build(vals) {
       const d = document.createElement('div');
       d.className = 'grp'; d.textContent = group;
       c.appendChild(d);
+      if (group === 'View') c.appendChild(buildJoystick(vals));
     }
     const v = vals[key] !== undefined ? vals[key] : ((+mn + +mx) / 2);
     const row = document.createElement('div');
     row.className = 'row';
     row.innerHTML =
-      `<div class="lbl"><span>${label}</span>` +
-      `<span class="val" id="v_${key}">${fmt(v, step)}</span></div>` +
-      `<input type="range" id="s_${key}" min="${mn}" max="${mx}" step="${step}" value="${v}"` +
-      ` oninput="onIn('${key}',this.value,${step})"` +
-      ` onchange="onCom('${key}',this.value)">`;
+      '<div class="lbl"><span>' + label + '</span>' +
+      '<span class="val" id="v_' + key + '">' + fmt(v, step) + '</span></div>' +
+      '<input type="range" id="s_' + key + '" min="' + mn + '" max="' + mx + '" step="' + step + '" value="' + v + '"' +
+      ' oninput="onIn(\'' + key + '\',this.value,' + step + ')"' +
+      ' onchange="onCom(\'' + key + '\',this.value)">';
     c.appendChild(row);
   });
 
@@ -661,8 +755,9 @@ class _Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/":
             html = (_HTML_TEMPLATE
-                    .replace("__PARAMS_JSON__",  json.dumps(_PARAMS))
-                    .replace("__TOGGLES_JSON__", json.dumps(_TOGGLES))
+                    .replace("__PARAMS_JSON__",     json.dumps(_PARAMS))
+                    .replace("__TOGGLES_JSON__",    json.dumps(_TOGGLES))
+                    .replace("__JOY_PARAMS_JSON__", json.dumps(_JOY_PARAMS))
                     )
             body = html.encode()
             self.send_response(200)
