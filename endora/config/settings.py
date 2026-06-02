@@ -46,7 +46,7 @@ class Settings:
     # Minimum YOLO detection confidence (0–1). Raise to reduce false detections
     # from furniture/shadows, especially in low light. Default 0.25 is too
     # permissive; 0.45 filters most ghost detections without missing real people.
-    yolo_conf: float = 0.45
+    yolo_conf: float = 0.30
     # Inference resolution (square, must be multiple of 32).
     # 320 uses one-quarter the FLOPs of 640 — default and recommended on Pi.
     # Increase to 640 only if you need to detect very distant or small people.
