@@ -73,8 +73,10 @@ class Settings:
     # Guards against arm-raise false positives when lying down: when horizontal,
     # hips and shoulders converge; when upright, hips are 0.2–0.4 below shoulders.
     # 0.10 = overhead cameras (hips below shoulders in image).
-    # -0.15 = frontal dewarped fisheye (hips appear above shoulders due to perspective).
-    body_upright_min: float = -0.15
+    # -0.15 = frontal fisheye, fully upright seated.
+    # -0.50 = allows reclined/lounging posture (hips appear much higher in frame)
+    #         while still rejecting fully horizontal (lying flat).
+    body_upright_min: float = -0.50
     # Leg-raise guard: if any ankle or knee is this far above hip level
     # (normalised frame fraction), all gesture detection is suppressed.
     # Prevents feet-up-on-couch from triggering false snaps.
