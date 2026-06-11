@@ -172,7 +172,8 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | HOLD fires too soon / too late | Adjust `hold_duration_s` |
 | T-pose fires when raising both arms | Raise `sustain_s` toward `1.0` |
 | Cross-arms not detecting | Wrists need to be quite close to opposite shoulders; pose must be clean |
-| High CPU | Set `pose_model_complexity: 0` |
+| High CPU | Switch to `yolo_pose_model: yolo11n-pose.onnx` (nano, ~25 ms/frame) |
+| Pose drops on unusual poses | Switch to `yolo_pose_model: yolo11s-pose.onnx` (small, ~50 ms/frame, more accurate) |
 
 ---
 
@@ -180,6 +181,7 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 
 | Option | Default | Description |
 |---|---|---|
+| `yolo_pose_model` | `yolo11s-pose.onnx` | Pose model: `yolo11n-pose.onnx` (fast/nano) or `yolo11s-pose.onnx` (accurate/small) |
 | `rtsp_url_a` | — | RTSP stream URL (required) |
 | `rtsp_url_b` | same as A | Second camera; set equal to A for single-camera mode |
 | `debug_port` | `8765` | Debug stream port |

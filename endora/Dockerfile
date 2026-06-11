@@ -52,6 +52,8 @@ RUN rm -f yolo11n-pose.pt
 
 COPY yolo11n-pose.onnx      .
 COPY yolo11n-pose-320.onnx  .
+COPY yolo11s-pose.onnx      .
+COPY yolo11s-pose-320.onnx  .
 
 # ── Application code (changes frequently — only invalidates these COPY layers)
 COPY cameras/           cameras/
@@ -63,8 +65,10 @@ COPY version.py         .
 COPY config.json        .
 
 # ── Validate ONNX models ─────────────────────────────────────────────────────
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose.onnx',     providers=['CPUExecutionProvider']); print('ONNX 640 OK:', s.get_inputs()[0].shape)"
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose-320.onnx', providers=['CPUExecutionProvider']); print('ONNX 320 OK:', s.get_inputs()[0].shape)"
+RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose.onnx',     providers=['CPUExecutionProvider']); print('ONNX nano-640 OK:', s.get_inputs()[0].shape)"
+RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose-320.onnx', providers=['CPUExecutionProvider']); print('ONNX nano-320 OK:', s.get_inputs()[0].shape)"
+RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11s-pose.onnx',     providers=['CPUExecutionProvider']); print('ONNX small-640 OK:', s.get_inputs()[0].shape)"
+RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11s-pose-320.onnx', providers=['CPUExecutionProvider']); print('ONNX small-320 OK:', s.get_inputs()[0].shape)"
 
 # ── S6 service definition ─────────────────────────────────────────────────────
 # S6 looks for services in /etc/services.d/<name>/run
