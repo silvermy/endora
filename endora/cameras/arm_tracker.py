@@ -208,14 +208,24 @@ class ArmTracker:
         ls, rs = landmarks[LEFT_SHOULDER], landmarks[RIGHT_SHOULDER]
         lh, rh = landmarks[LEFT_HIP], landmarks[RIGHT_HIP]
 
-        # Visibility filter — four key landmarks
-        vis = (ls.visibility + rs.visibility + lh.visibility + rh.visibility) / 4.0
-        if vis < self.c.pose_visibility_min:
+        # Visibility filter — shoulders only.  Hips are frequently hidden by a
+        # blanket or cropped out when the person is lounging; including them in
+        # the average would veto valid arm-raise frames just because the lower
+        # body is obscured.
+        sh_vis = (ls.visibility + rs.visibility) / 2.0
+        if sh_vis < self.c.pose_visibility_min:
             return None
 
         avg_sh_y = (ls.y + rs.y) / 2.0
-        avg_hp_y = (lh.y + rh.y) / 2.0
-        upright = avg_hp_y >= avg_sh_y + self.c.body_upright_min
+        # Upright check: only apply when hips are confidently detected.
+        # If the hips are hidden (blanket, crop) their coordinates are
+        # unreliable, so we treat the pose as upright rather than blocking.
+        hip_vis = (lh.visibility + rh.visibility) / 2.0
+        if hip_vis >= 0.20:
+            avg_hp_y = (lh.y + rh.y) / 2.0
+            upright = avg_hp_y >= avg_sh_y + self.c.body_upright_min
+        else:
+            upright = True  # hips not visible — assume upright
 
         le, re = landmarks[LEFT_ELBOW],  landmarks[RIGHT_ELBOW]
         lw, rw = landmarks[LEFT_WRIST],  landmarks[RIGHT_WRIST]

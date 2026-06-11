@@ -485,7 +485,7 @@ def _draw_debug(frame, person_kps, hand_lm, reading, fired_gesture):
     # Status panel
     if reading is not None:
         state_name = reading.state.name
-        forearm = reading.forearm_dy if reading.state.name == 'SINGLE_UP' else 0.0
+        forearm = reading.forearm_dy
         snap_roll = reading.snap_roll if reading.state.name == 'SINGLE_UP' else 0.0
         hand_str = f"{snap_roll:+.2f}" if hand_lm is not None else "none"
         lines = [
