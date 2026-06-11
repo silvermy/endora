@@ -39,10 +39,13 @@ class Settings:
 
     # ── Pose (arm-raise detection) ────────────────────────────────────────
     # Advanced: override in settings.yaml if needed
-    # YOLO pose model weights file.  "yolo11n-pose.pt" is fastest (nano);
-    # other sizes: yolo11s/m/l/x-pose.pt for more accuracy at the cost of speed.
-    # The model is pre-downloaded into the Docker image at build time.
-    yolo_pose_model: str = "yolo11n-pose.onnx"
+    # YOLO pose model weights file.
+    #   yolo11n-pose.onnx  — nano,  fastest (~25 ms/frame on Pi 5),  least accurate
+    #   yolo11s-pose.onnx  — small, ~2× slower (~50 ms), noticeably better at
+    #                        unusual poses (lounging, arm raised, blanket-covered).
+    #                        Recommended if Pi 5 CPU headroom allows it.
+    # Both models are bundled in the Docker image.
+    yolo_pose_model: str = "yolo11s-pose.onnx"
     # Minimum YOLO detection confidence (0–1). Raise to reduce false detections
     # from furniture/shadows, especially in low light. Default 0.25 is too
     # permissive; 0.45 filters most ghost detections without missing real people.
