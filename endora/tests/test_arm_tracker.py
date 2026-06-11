@@ -53,16 +53,31 @@ def test_cross_arms_is_cross_arms():
     assert r.state == ArmState.CROSS_ARMS
 
 
-def test_lying_down_single_up_rejected():
-    # Even if arm would be up, lying-down body is not upright → DOWN
+def test_lying_down_casual_arm_rejected():
+    # Reclined body + arm only slightly above shoulder → DOWN (not high enough)
     from tests.fake_landmarks import _build, Point
     lm = _build(
         # Hips well above shoulders (lying on back, feet toward camera)
         left_hip=Point(0.42, 0.20), right_hip=Point(0.58, 0.20),
-        right_elbow=Point(0.65, 0.25), right_wrist=Point(0.65, 0.10),
+        # Wrist at y=0.28, shoulder at y=0.40 → margin 0.12 < reclined threshold 0.28
+        right_elbow=Point(0.65, 0.33), right_wrist=Point(0.65, 0.28),
     )
     r = _tracker()._classify_raw(lm, 1280, 720)
     assert r.state == ArmState.DOWN
+    assert r.upright is False
+
+
+def test_lying_down_straight_arm_accepted():
+    # Reclined body + arm pointing straight up → SINGLE_UP fires
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        # Hips well above shoulders (lying on back)
+        left_hip=Point(0.42, 0.20), right_hip=Point(0.58, 0.20),
+        # Wrist at y=0.10, shoulder at y=0.40 → margin 0.30 > reclined threshold 0.28
+        right_elbow=Point(0.65, 0.25), right_wrist=Point(0.65, 0.10),
+    )
+    r = _tracker()._classify_raw(lm, 1280, 720)
+    assert r.state == ArmState.SINGLE_UP
     assert r.upright is False
 
 

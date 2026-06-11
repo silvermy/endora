@@ -74,6 +74,11 @@ class Settings:
     # Lower toward 0.05 if still missing raises; raise toward 0.20 if you get
     # false triggers from resting your hand on top of your head.
     arm_above_head_tolerance: float = 0.10
+    # Stricter threshold used when the body is detected as reclined (not upright).
+    # Requires a more deliberate straight-up arm so that a casually angled arm
+    # while lying down doesn't fire.  0.28 = wrist must be ~28% of frame height
+    # above the shoulder — roughly "arm pointing straight at the ceiling".
+    arm_above_head_tolerance_reclined: float = 0.28
     # Minimum gap (frame fraction) between average hip_y and average shoulder_y.
     # Guards against arm-raise false positives when lying down: when horizontal,
     # hips and shoulders converge; when upright, hips are 0.2–0.4 below shoulders.

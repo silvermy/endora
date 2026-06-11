@@ -96,6 +96,10 @@ def _hand_snap_roll(hand_lm: np.ndarray) -> float:
 class ArmTrackerConfig:
     """Thresholds for arm-state classification. All values are frame fractions."""
     arm_above_head_tolerance: float = 0.15
+    # When body is NOT upright (reclined/lying down), the wrist must clear the
+    # shoulder by this larger margin instead.  Requires a deliberate straight-up
+    # arm rather than one that's just resting at an angle.
+    arm_above_head_tolerance_reclined: float = 0.28
     body_upright_min: float = -0.15
     pose_visibility_min: float = 0.55
 
@@ -279,12 +283,12 @@ class ArmTracker:
         if lw_high and rw_high:
             return ArmReading(state=ArmState.BOTH_UP, upright=upright)
 
-        # Body must be upright for SINGLE_UP to count
-        if not upright:
-            return ArmReading(state=ArmState.DOWN, upright=upright)
+        # When reclined, require a stricter (larger) margin so only a
+        # deliberate straight-up arm triggers — not one resting at an angle.
+        m_single = self.c.arm_above_head_tolerance_reclined if not upright else m
 
-        lw_raised = lw.y < (ls.y - m)
-        rw_raised = rw.y < (rs.y - m)
+        lw_raised = lw.y < (ls.y - m_single)
+        rw_raised = rw.y < (rs.y - m_single)
 
         if rw_raised:
             forearm_dy = re.y - rw.y

@@ -201,6 +201,7 @@ class CameraAnalyser(threading.Thread):
 
         self._arm_tracker = ArmTracker(ArmTrackerConfig(
             arm_above_head_tolerance=float(getattr(settings, 'arm_above_head_tolerance', 0.15)),
+            arm_above_head_tolerance_reclined=float(getattr(settings, 'arm_above_head_tolerance_reclined', 0.28)),
             body_upright_min=float(getattr(settings, 'body_upright_min', -0.15)),
             pose_visibility_min=float(getattr(settings, 'pose_visibility_min', 0.45)),
             state_confirm_s=float(getattr(settings, 'state_confirm_s', 0.20)),
