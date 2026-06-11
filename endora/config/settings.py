@@ -65,10 +65,12 @@ class Settings:
     # Deprecated — was MediaPipe model complexity (0/1/2).  Kept so old
     # settings.yaml files don't cause load errors.
     pose_model_complexity: int = 2
-    # 0.15 = wrist must be 15 % of frame height above shoulder.
-    # Prevents scratching the top of the head from triggering gestures.
-    # Lower (0.05) is more permissive but can fire on incidental head touches.
-    arm_above_head_tolerance: float = 0.15
+    # Wrist must be this fraction of frame height above the shoulder to count
+    # as a raised arm.  0.10 is more permissive than 0.15 — better for seated
+    # or lounging postures where the wrist doesn't travel as high in the frame.
+    # Lower toward 0.05 if still missing raises; raise toward 0.20 if you get
+    # false triggers from resting your hand on top of your head.
+    arm_above_head_tolerance: float = 0.10
     # Minimum gap (frame fraction) between average hip_y and average shoulder_y.
     # Guards against arm-raise false positives when lying down: when horizontal,
     # hips and shoulders converge; when upright, hips are 0.2–0.4 below shoulders.
@@ -86,7 +88,7 @@ class Settings:
     # MediaPipe assigns high visibility to real body landmarks and near-zero
     # to furniture false-detections. 0.35 rejects furniture without touching
     # real people. Lower = more permissive; raise to 0.5 if still seeing table.
-    pose_visibility_min: float = 0.45
+    pose_visibility_min: float = 0.35
 
     # ── Hands (gesture classification) ───────────────────────────────────
     # Advanced: override in settings.yaml if needed
@@ -141,7 +143,9 @@ class Settings:
     state_confirm_s: float = 0.20
     # Seconds of contradictory frames before dropping a confirmed arm state.
     # Higher = more stable mid-gesture but slower to release after arm down.
-    state_release_s: float = 0.30
+    # 0.60 bridges YOLO pose-detection dropouts that occur when the arm is
+    # raised and temporarily changes the body silhouette.
+    state_release_s: float = 0.60
 
     # ── Fusion ────────────────────────────────────────────────────────────
     # Advanced: override in settings.yaml if needed
