@@ -83,6 +83,11 @@ def _person_centroid(kps_row: np.ndarray) -> Optional[tuple]:
     return float(vis[:, 0].mean()), float(vis[:, 1].mean())
 
 
+def _person_visible_kp_count(kps_row: np.ndarray) -> int:
+    """Number of keypoints with confidence > 0.3 — proxy for detection quality."""
+    return int((kps_row[:, 2] > 0.3).sum())
+
+
 def _select_person(
     kps: np.ndarray,
     tracked_xy: Optional[tuple],
@@ -124,15 +129,24 @@ def _select_person(
             return best
         # Tracking lost — fall through to centre heuristic
 
-    # No history or re-acquisition: closest to frame centre
+    # No history or re-acquisition: score by center-distance penalised by
+    # visible-keypoint count.  A real person has many confident keypoints;
+    # a painting or furniture ghost has very few.  Combined score:
+    #   score = (dist / diag) - 0.4 * (visible_kps / 17)
+    # Lower score wins.  The kp bonus can offset up to 0.4 of normalised
+    # distance, so a person 40% of the diagonal away beats a painting 10%
+    # away with only 2 visible keypoints.
     cx, cy = frame_w * 0.5, frame_h * 0.5
-    best, best_dist = 0, float("inf")
+    diag = (frame_w ** 2 + frame_h ** 2) ** 0.5
+    best, best_score = 0, float("inf")
     for i, c in enumerate(centroids):
         if c is None:
             continue
-        d = ((c[0] - cx) ** 2 + (c[1] - cy) ** 2) ** 0.5
-        if d < best_dist:
-            best_dist = d
+        dist = ((c[0] - cx) ** 2 + (c[1] - cy) ** 2) ** 0.5
+        kp_bonus = 0.4 * (_person_visible_kp_count(kps[i]) / 17)
+        score = dist / diag - kp_bonus
+        if score < best_score:
+            best_score = score
             best = i
     return best
 
@@ -340,14 +354,12 @@ class CameraAnalyser(threading.Thread):
             now = time.monotonic()
 
             if run_yolo:
-                # Confidence hysteresis: strict threshold to *acquire* a person
-                # (keeps furniture ghosts out), relaxed threshold to *maintain*
-                # an existing lock (dark clothing against dark background drops
-                # keypoint confidence when arm raises, but position continuity
-                # via _track_xy means a nearby detection is still the same person).
-                # 0.65 is internal — not user-facing. Tune yolo_conf only.
+                # Confidence hysteresis:
+                #   acquire  (no lock): base_conf * 1.3 — strict, rejects paintings/furniture
+                #   maintain (locked):  base_conf * 0.65 — lenient, bridges arm-raise dropouts
+                # Both multipliers are internal — not user-facing. Tune yolo_conf only.
                 base_conf = float(getattr(self.s, 'yolo_conf', 0.45))
-                model.conf = base_conf * 0.65 if self._track_xy is not None else base_conf
+                model.conf = base_conf * 0.65 if self._track_xy is not None else base_conf * 1.3
 
                 _cached_kps = model(proc_frame)    # Optional[ndarray [N,17,3]]
                 _cached_lm, new_centroid = _kps_to_landmarks(
