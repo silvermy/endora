@@ -71,6 +71,8 @@ LEFT_WRIST     = 15
 RIGHT_WRIST    = 16
 LEFT_HIP       = 23
 RIGHT_HIP      = 24
+LEFT_KNEE      = 25
+RIGHT_KNEE     = 26
 
 
 def _hand_snap_roll(hand_lm: np.ndarray) -> float:
@@ -96,10 +98,14 @@ def _hand_snap_roll(hand_lm: np.ndarray) -> float:
 class ArmTrackerConfig:
     """Thresholds for arm-state classification. All values are frame fractions."""
     arm_above_head_tolerance: float = 0.15
-    # When body is NOT upright (reclined/lying down), the wrist must clear the
-    # shoulder by this larger margin instead.  Requires a deliberate straight-up
-    # arm rather than one that's just resting at an angle.
-    arm_above_head_tolerance_reclined: float = 0.28
+    # When body is NOT upright (reclined/lying down), OR when upright status
+    # cannot be determined (hips hidden by blanket), the wrist must clear the
+    # shoulder by this larger margin.  Requires a deliberate straight-up arm.
+    arm_above_head_tolerance_reclined: float = 0.30
+    # Leg-raise guard: if both knees are this far above the average shoulder y
+    # (frame fraction, y increases downward so knee_y < shoulder_y means higher),
+    # suppress all gesture detection.  Catches legs-in-V while lying down.
+    leg_raise_margin: float = 0.05
     body_upright_min: float = -0.15
     pose_visibility_min: float = 0.55
 
@@ -221,15 +227,27 @@ class ArmTracker:
             return None
 
         avg_sh_y = (ls.y + rs.y) / 2.0
-        # Upright check: only apply when hips are confidently detected.
-        # If the hips are hidden (blanket, crop) their coordinates are
-        # unreliable, so we treat the pose as upright rather than blocking.
+        # Upright check: only trust when hips are confidently detected.
+        # When hips are hidden (blanket, crop) we cannot tell sitting from
+        # lying, so upright is set to None — the arm threshold logic below
+        # will use the stricter reclined margin as a precaution.
         hip_vis = (lh.visibility + rh.visibility) / 2.0
         if hip_vis >= 0.20:
             avg_hp_y = (lh.y + rh.y) / 2.0
-            upright = avg_hp_y >= avg_sh_y + self.c.body_upright_min
+            upright: bool | None = avg_hp_y >= avg_sh_y + self.c.body_upright_min
         else:
-            upright = True  # hips not visible — assume upright
+            avg_hp_y = avg_sh_y   # fallback for leg-raise guard below
+            upright = None  # unknown — hips not visible
+
+        # Leg-raise guard: if both knees are above shoulder level, the person
+        # is raising their legs (upside-down V on couch etc.) — suppress to
+        # avoid false positives from leg movement being mistaken for arms.
+        lk, rk = landmarks[LEFT_KNEE], landmarks[RIGHT_KNEE]
+        knee_vis = (lk.visibility + rk.visibility) / 2.0
+        if knee_vis >= 0.20:
+            avg_knee_y = (lk.y + rk.y) / 2.0
+            if avg_knee_y < avg_sh_y - self.c.leg_raise_margin:
+                return ArmReading(state=ArmState.DOWN, upright=bool(upright))
 
         le, re = landmarks[LEFT_ELBOW],  landmarks[RIGHT_ELBOW]
         lw, rw = landmarks[LEFT_WRIST],  landmarks[RIGHT_WRIST]
@@ -257,7 +275,7 @@ class ArmTracker:
         if (rw_on_left and lw_on_right
                 and rw_at_chest and lw_at_chest
                 and wrists_close):
-            return ArmReading(state=ArmState.CROSS_ARMS, upright=upright)
+            return ArmReading(state=ArmState.CROSS_ARMS, upright=bool(upright))
 
         # ── T_POSE check ──────────────────────────────────────────────────
         # Both wrists at shoulder height AND clearly lateral from midline.
@@ -272,7 +290,7 @@ class ArmTracker:
         rw_is_right  = rw.x > mid_x
         if (lw_at_sh_y and rw_at_sh_y and lw_lateral and rw_lateral
                 and lw_is_left and rw_is_right):
-            return ArmReading(state=ArmState.T_POSE, upright=upright)
+            return ArmReading(state=ArmState.T_POSE, upright=bool(upright))
 
         # ── BOTH_UP / SINGLE_UP ───────────────────────────────────────────
         m = self.c.arm_above_head_tolerance
@@ -281,11 +299,12 @@ class ArmTracker:
         rw_high = rw.y < (rs.y - both_m)
 
         if lw_high and rw_high:
-            return ArmReading(state=ArmState.BOTH_UP, upright=upright)
+            return ArmReading(state=ArmState.BOTH_UP, upright=bool(upright))
 
-        # When reclined, require a stricter (larger) margin so only a
-        # deliberate straight-up arm triggers — not one resting at an angle.
-        m_single = self.c.arm_above_head_tolerance_reclined if not upright else m
+        # Use the stricter reclined margin whenever the body is NOT positively
+        # confirmed as upright: covers both clearly reclined (upright=False) and
+        # unknown (upright=None, hips hidden by blanket).
+        m_single = m if upright is True else self.c.arm_above_head_tolerance_reclined
 
         lw_raised = lw.y < (ls.y - m_single)
         rw_raised = rw.y < (rs.y - m_single)
@@ -298,7 +317,7 @@ class ArmTracker:
                 wrist_x=rw.x * frame_w,
                 wrist_y=rw.y * frame_h,
                 forearm_dy=forearm_dy,
-                upright=upright,
+                upright=bool(upright),
             )
         if lw_raised:
             forearm_dy = le.y - lw.y
@@ -308,7 +327,7 @@ class ArmTracker:
                 wrist_x=lw.x * frame_w,
                 wrist_y=lw.y * frame_h,
                 forearm_dy=forearm_dy,
-                upright=upright,
+                upright=bool(upright),
             )
 
-        return ArmReading(state=ArmState.DOWN, upright=upright)
+        return ArmReading(state=ArmState.DOWN, upright=bool(upright))

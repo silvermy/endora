@@ -41,6 +41,8 @@ _COCO_TO_MP: dict[int, int] = {
     10: 16,  # right wrist
     11: 23,  # left hip
     12: 24,  # right hip
+    13: 25,  # left knee
+    14: 26,  # right knee
 }
 
 # COCO upper-body skeleton connections (used for debug overlay)
@@ -201,9 +203,10 @@ class CameraAnalyser(threading.Thread):
 
         self._arm_tracker = ArmTracker(ArmTrackerConfig(
             arm_above_head_tolerance=float(getattr(settings, 'arm_above_head_tolerance', 0.15)),
-            arm_above_head_tolerance_reclined=float(getattr(settings, 'arm_above_head_tolerance_reclined', 0.28)),
+            arm_above_head_tolerance_reclined=float(getattr(settings, 'arm_above_head_tolerance_reclined', 0.30)),
             body_upright_min=float(getattr(settings, 'body_upright_min', -0.15)),
             pose_visibility_min=float(getattr(settings, 'pose_visibility_min', 0.45)),
+            leg_raise_margin=float(getattr(settings, 'leg_raise_margin', 0.05)),
             state_confirm_s=float(getattr(settings, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(settings, 'state_release_s', 0.30)),
         ))
