@@ -33,6 +33,7 @@ LEFT_SHOULDER, RIGHT_SHOULDER = 11, 12
 LEFT_ELBOW,    RIGHT_ELBOW    = 13, 14
 LEFT_WRIST,    RIGHT_WRIST    = 15, 16
 LEFT_HIP,      RIGHT_HIP      = 23, 24
+LEFT_KNEE,     RIGHT_KNEE     = 25, 26
 
 
 def _build(**overrides) -> Landmarks:
@@ -49,12 +50,15 @@ def _build(**overrides) -> Landmarks:
         RIGHT_WRIST:    Point(0.68, 0.70),
         LEFT_HIP:       Point(0.42, 0.65),
         RIGHT_HIP:      Point(0.58, 0.65),
+        LEFT_KNEE:      Point(0.42, 0.80),
+        RIGHT_KNEE:     Point(0.58, 0.80),
     }
     name_to_idx = {
         'left_shoulder':  LEFT_SHOULDER,  'right_shoulder': RIGHT_SHOULDER,
         'left_elbow':     LEFT_ELBOW,     'right_elbow':    RIGHT_ELBOW,
         'left_wrist':     LEFT_WRIST,     'right_wrist':    RIGHT_WRIST,
         'left_hip':       LEFT_HIP,       'right_hip':      RIGHT_HIP,
+        'left_knee':      LEFT_KNEE,      'right_knee':     RIGHT_KNEE,
     }
     for name, point in overrides.items():
         defaults[name_to_idx[name]] = point
