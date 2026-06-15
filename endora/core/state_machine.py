@@ -54,8 +54,14 @@ class StateMachineConfig:
     # while raising both arms).
     sustain_s: float = 0.5
 
-    # SNAP sustain — hysteresis in ArmTracker already confirms a stable
-    # SINGLE_UP state before it reaches here, so 1 frame is enough.
+    # Minimum time the arm must be held up before SNAP fires, measured from
+    # the first confirmed SINGLE_UP frame.  ArmTracker already adds state_confirm_s
+    # (0.20s) before we see SINGLE_UP, so total intentional-raise time is
+    # state_confirm_s + snap_sustain_s.  0.50s filters out casual/accidental
+    # arm movements while remaining instant for deliberate raises.
+    snap_sustain_s: float = 0.50
+
+    # Deprecated — replaced by snap_sustain_s.  Kept so old configs don't error.
     snap_sustain_frames: int = 1
 
     # grlib snap_roll threshold: if |reading.snap_roll| >= this value,
@@ -73,6 +79,7 @@ class _RaiseState:
     hold_fired:    bool  = False
     snap_fired_at: float = 0.0
     up_frames:     int   = 0
+    entered_at:    float = 0.0   # monotonic time of first SINGLE_UP frame
 
 
 @dataclass
@@ -139,6 +146,8 @@ class GestureStateMachine:
     def _tick_single_up(self, reading: ArmReading, now: float) -> Optional[Gesture]:
         r = self._raise
         r.up_frames += 1
+        if r.up_frames == 1:
+            r.entered_at = now  # record when this raise began
 
         arm_vertical = reading.forearm_dy >= self.c.snap_forearm_min
         roll_snap = (
@@ -153,9 +162,9 @@ class GestureStateMachine:
             r.hold_fired = True
             return self._fire(Gesture.HOLD, now)
 
-        # SNAP: first N vertical-arm frames of this raise, before HOLD fires
+        # SNAP: arm has been held up long enough (time-based, rate-independent)
         if (not r.snap_fired and snap_condition
-                and r.up_frames >= self.c.snap_sustain_frames):
+                and (now - r.entered_at) >= self.c.snap_sustain_s):
             return self._fire_snap(now)
 
         return None

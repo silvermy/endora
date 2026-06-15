@@ -224,6 +224,7 @@ class CameraAnalyser(threading.Thread):
             hold_duration_s=float(getattr(settings, 'hold_duration_s', 1.5)),
             double_snap_window_s=float(getattr(settings, 'double_snap_window_s', 3.0)),
             sustain_s=float(getattr(settings, 'sustain_s', 0.5)),
+            snap_sustain_s=float(getattr(settings, 'snap_sustain_s', 0.50)),
             snap_roll_threshold=float(getattr(settings, 'snap_roll_threshold', 0.0)),
         ))
 
