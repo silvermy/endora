@@ -23,6 +23,7 @@ import numpy as np
 
 from version import __version__
 from cameras.arm_tracker import ArmState, ArmTracker, ArmTrackerConfig
+from cameras.frame_capture import FrameCapture
 from core.state_machine import (
     Gesture, GestureStateMachine, StateMachineConfig,
 )
@@ -197,6 +198,13 @@ class CameraAnalyser(threading.Thread):
         # Optional test recorder (set by main.py when ENDORA_RECORD_TESTS=1)
         self._recorder = None
 
+        # Frame capture for gesture debugging
+        try:
+            self._frame_capture: Optional[FrameCapture] = FrameCapture()
+        except Exception as e:
+            log.warning("[%s] FrameCapture unavailable: %s", label, e)
+            self._frame_capture = None
+
         # Person tracking — centroid of the last selected person (pixels).
         # None until the first YOLO detection.
         self._track_xy: Optional[tuple] = None
@@ -315,6 +323,7 @@ class CameraAnalyser(threading.Thread):
                  self.label, __version__)
 
         _last_arm_state: ArmState = ArmState.DOWN
+        _prev_arm_state: ArmState = ArmState.DOWN
         _cached_kps: Optional[np.ndarray] = None   # [N, 17, 3] from PoseModel
         _cached_lm: object = None
         _cached_pw: int = 1
@@ -418,6 +427,7 @@ class CameraAnalyser(threading.Thread):
             n_persons = 0 if _cached_kps is None else _cached_kps.shape[0]
             log.debug("[%s] YOLO: %d person(s) detected", self.label, n_persons)
 
+            _prev_arm_state = _last_arm_state
             reading = self._arm_tracker.classify(landmarks, pw, ph, hand_lm)
 
             if reading is not None:
@@ -438,13 +448,38 @@ class CameraAnalyser(threading.Thread):
                 if self._recorder is not None:
                     self._recorder.on_gesture(gesture, self.label)
 
+            # ── Pick the tracked person's keypoints for overlay + capture ─────
+            _dbg_kps = None
+            if _cached_kps is not None and _cached_kps.shape[0] > 0:
+                _idx = _select_person(_cached_kps, self._track_xy, pw, ph)
+                _dbg_kps = _cached_kps[_idx]
+
+            # ── Frame capture on noteworthy events ────────────────────────────
+            if self._frame_capture is not None:
+                _cap_event: Optional[str] = None
+                if gesture is not None:
+                    _cap_event = f"gesture_{gesture.name}"
+                elif reading is not None and reading.state != _prev_arm_state:
+                    _cap_event = f"state_{reading.state.name}"
+                elif _prev_arm_state != ArmState.DOWN and landmarks is None:
+                    _cap_event = "pose_lost"
+                if _cap_event is not None:
+                    try:
+                        _cap_frame = _draw_debug(proc_frame, _dbg_kps, hand_lm, reading, gesture)
+                        self._frame_capture.save(
+                            _cap_frame,
+                            _cap_event,
+                            camera=self.label,
+                            arm_state=reading.state.name if reading else _prev_arm_state.name,
+                            gesture=gesture.name if gesture else None,
+                            forearm_dy=reading.forearm_dy if reading else 0.0,
+                            upright=reading.upright if reading else None,
+                        )
+                    except Exception as e:
+                        log.debug("[%s] frame capture error: %s", self.label, e)
+
             if self.debug_frame_cb is not None:
                 try:
-                    # _cached_kps is already [N,17,3]; pick the tracked person
-                    _dbg_kps = None
-                    if _cached_kps is not None and _cached_kps.shape[0] > 0:
-                        _idx = _select_person(_cached_kps, self._track_xy, pw, ph)
-                        _dbg_kps = _cached_kps[_idx]
                     dbg = _draw_debug(proc_frame, _dbg_kps, hand_lm, reading, gesture)
                     self.debug_frame_cb(self.label, dbg)
                 except Exception as e:

@@ -77,6 +77,8 @@ class GestureSystem:
             debug_frame_cb=dbg_cb,
         )
         self.analyser_a._recorder = self._recorder
+        if self.analyser_a._frame_capture is not None:
+            debug_server.set_frame_capture(self.analyser_a._frame_capture)
 
         self.analyser_b = None if self._single else CameraAnalyser(
             camera=self.cam_b, settings=settings,

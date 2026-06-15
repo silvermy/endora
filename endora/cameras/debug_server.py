@@ -40,6 +40,7 @@ _last_gesture: Dict = {"label": "", "ts": 0.0}
 _single_camera: bool = False
 _settings = None
 _recorder = None
+_frame_capture = None
 _host_ip: str = "homeassistant.local"
 _debug_port: int = 8765
 
@@ -115,6 +116,11 @@ def set_settings(s) -> None:
 def set_recorder(r) -> None:
     global _recorder
     _recorder = r
+
+
+def set_frame_capture(fc) -> None:
+    global _frame_capture
+    _frame_capture = fc
 
 
 def set_host_info(ip: str, port: int) -> None:
@@ -454,7 +460,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 <div id="wrap">
   <div id="vbox">
     <img id="streamimg" alt="stream">
-    <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine</div>
+    <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine &nbsp;·&nbsp; <a href="captures" target="_blank" style="color:#555;text-decoration:none">&#128249; captures</a></div>
   </div>
   <div id="panel">
     <div class="togrow">
@@ -743,6 +749,117 @@ function doCapture() {
 </html>"""
 
 
+# ── Captures gallery ─────────────────────────────────────────────────────────
+
+def _captures_html() -> str:
+    return r"""<!DOCTYPE html>
+<html>
+<head>
+<title>Endora Captures</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0d;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+  color:#d0d0d0;padding:12px}
+h2{font-size:13px;letter-spacing:3px;color:#555;font-weight:500;text-transform:uppercase;
+  margin-bottom:12px}
+#toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+#toolbar select,#toolbar button{
+  background:#161616;border:1px solid #2a2a2a;color:#aaa;
+  padding:5px 10px;border-radius:5px;font-size:12px;cursor:pointer}
+#toolbar button:hover{background:#222}
+#count{font-size:12px;color:#444}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.card{background:#111;border:1px solid #1e1e1e;border-radius:7px;overflow:hidden}
+.card img{width:100%;display:block;min-height:120px;background:#0a0a0a;cursor:pointer}
+.card img:hover{opacity:.85}
+.meta{padding:8px 10px;font-size:11px;line-height:1.7}
+.ev{font-weight:700;font-size:12px;margin-bottom:2px}
+.ev-gesture{color:#5c5}
+.ev-state{color:#e8c040}
+.ev-pose_lost{color:#c55}
+.kv{color:#555}
+.kv b{color:#888}
+#lightbox{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);
+  z-index:999;align-items:center;justify-content:center;cursor:zoom-out
+}
+#lightbox img{max-width:96vw;max-height:92vh;object-fit:contain}
+#lightbox.open{display:flex}
+</style>
+</head>
+<body>
+<h2>Debug Captures</h2>
+<div id="toolbar">
+  <select id="filter">
+    <option value="">All events</option>
+    <option value="gesture">Gestures</option>
+    <option value="state">State changes</option>
+    <option value="pose_lost">Pose lost</option>
+  </select>
+  <button onclick="load()">&#8635; Refresh</button>
+  <span id="count"></span>
+</div>
+<div id="grid"></div>
+<div id="lightbox" onclick="this.classList.remove('open')">
+  <img id="lbimg" src="" alt="">
+</div>
+<script>
+var _all = [];
+function evClass(ev) {
+  if (ev.startsWith('gesture')) return 'ev-gesture';
+  if (ev.startsWith('state'))   return 'ev-state';
+  if (ev.startsWith('pose'))    return 'ev-pose_lost';
+  return '';
+}
+function fmt(ts) {
+  var d = new Date(ts * 1000);
+  return d.toLocaleTimeString() + ' ' + d.toLocaleDateString();
+}
+function render(items) {
+  var filt = document.getElementById('filter').value;
+  var shown = filt ? items.filter(function(i){ return i.event_type.startsWith(filt); }) : items;
+  document.getElementById('count').textContent = shown.length + ' / ' + items.length + ' frames';
+  var g = document.getElementById('grid');
+  g.innerHTML = '';
+  shown.forEach(function(m) {
+    var div = document.createElement('div');
+    div.className = 'card';
+    var ev = m.event_type || '';
+    var meta = [
+      ['time', fmt(m.timestamp || 0)],
+      ['cam',  m.camera || '?'],
+      ['arm',  m.arm_state || '?'],
+      m.gesture ? ['gesture', m.gesture] : null,
+      ['forearm_dy', (m.forearm_dy || 0).toFixed(3)],
+      m.upright !== undefined && m.upright !== null ? ['upright', String(m.upright)] : null,
+    ].filter(Boolean);
+    div.innerHTML =
+      '<img src="captures/' + encodeURIComponent(m.filename) + '" loading="lazy" ' +
+        'onclick="zoom(this.src)" alt="">' +
+      '<div class="meta"><div class="ev ' + evClass(ev) + '">' + ev + '</div>' +
+      meta.map(function(kv){ return '<div class="kv"><b>' + kv[0] + ':</b> ' + kv[1] + '</div>'; }).join('') +
+      '</div>';
+    g.appendChild(div);
+  });
+}
+function zoom(src) {
+  document.getElementById('lbimg').src = src;
+  document.getElementById('lightbox').classList.add('open');
+}
+function load() {
+  fetch('captures/list')
+    .then(function(r){ return r.json(); })
+    .then(function(data){ _all = data; render(_all); })
+    .catch(function(){ document.getElementById('count').textContent = 'error loading'; });
+}
+document.getElementById('filter').addEventListener('change', function(){ render(_all); });
+load();
+</script>
+</body>
+</html>"""
+
+
 # ── HTTP handler ──────────────────────────────────────────────────────────────
 
 class _Handler(BaseHTTPRequestHandler):
@@ -840,6 +957,37 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        elif parsed.path == "/captures":
+            body = _captures_html().encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path == "/captures/list":
+            items = _frame_capture.list_captures() if _frame_capture else []
+            body = json.dumps(items).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path.startswith("/captures/") and parsed.path.endswith(".jpg"):
+            filename = parsed.path[len("/captures/"):]
+            jpg = _frame_capture.get_jpeg(filename) if _frame_capture else None
+            if jpg:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(jpg)))
+                self.send_header("Cache-Control", "max-age=3600")
+                self.end_headers()
+                self.wfile.write(jpg)
+            else:
+                self.send_response(404)
+                self.end_headers()
 
         else:
             self.send_response(404)
