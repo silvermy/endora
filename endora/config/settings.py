@@ -146,6 +146,11 @@ class Settings:
     snap_roll_threshold: float = 0.65
 
     # ── Hysteresis timing ─────────────────────────────────────────────────
+    # Minimum time the arm must stay up before SNAP fires (seconds), measured
+    # from the first confirmed SINGLE_UP frame.  Filters out brief accidental
+    # raises; ArmTracker's state_confirm_s adds another 0.20s on top.
+    snap_sustain_s: float = 0.50
+
     # Seconds a new arm state must be seen before being accepted.
     # Lower = more responsive but may get single-frame false positives.
     state_confirm_s: float = 0.20
