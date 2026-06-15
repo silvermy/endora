@@ -56,11 +56,11 @@ class Settings:
     yolo_imgsz: int = 320
     # Motion gate: only run YOLO when the frame changes by more than this
     # fraction (0–1 mean absolute pixel difference over an 80×60 thumbnail).
-    # 0.015 ≈ any visible arm movement; 0.0 = always run YOLO (no gate).
-    motion_threshold: float = 0.015
+    # 0.008 catches slow arm raises (low per-frame velocity); 0.0 = always run.
+    motion_threshold: float = 0.008
     # Heartbeat: even with no motion, run YOLO at least every N frames so
-    # slow arm lifts are eventually detected. 12 ≈ re-confirm every ~5s at 2.5fps.
-    yolo_max_skip: int = 12
+    # slow arm lifts are eventually detected. 6 ≈ re-confirm every ~0.6s at 10fps.
+    yolo_max_skip: int = 6
     # Minimum keypoint confidence for YOLO to count a landmark as visible.
     pose_min_detection_confidence: float = 0.3
     # Deprecated — no longer used (was MediaPipe tracking threshold).
