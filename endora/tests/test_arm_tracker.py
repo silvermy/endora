@@ -102,10 +102,10 @@ def test_hands_on_chest_is_cross_arms():
     """Hands clasped on chest (realistic cross-arms pose) should fire."""
     from tests.fake_landmarks import _build, Point
     # Midline at ~0.50, shoulders at y=0.40, hips at y=0.65.
-    # Hands on chest: wrists at ~chest height, slightly past midline each way.
+    # Wrists cross 0.10 past midline each side (above min_crossing=0.08).
     lm = _build(
-        left_wrist=Point(0.54, 0.50),   # just past midline to the right
-        right_wrist=Point(0.46, 0.50),  # just past midline to the left
+        left_wrist=Point(0.60, 0.50),   # 0.10 past midline to the right
+        right_wrist=Point(0.40, 0.50),  # 0.10 past midline to the left
     )
     r = _tracker()._classify_raw(lm, 1280, 720)
     assert r.state == ArmState.CROSS_ARMS, f"got {r.state}"

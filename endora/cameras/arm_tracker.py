@@ -121,7 +121,9 @@ class ArmTrackerConfig:
     # Cross-arms:
     #   - Each wrist must cross the body midline by min_crossing.
     #   - Wrists must be close together (chest-clasp OR actual crossed position).
-    cross_arms_min_crossing: float = 0.03
+    # 0.03 was too sensitive — typing/working with hands in front fires it.
+    # 0.08 requires a more deliberate crossing (~8% of frame width past midline).
+    cross_arms_min_crossing: float = 0.08
     cross_arms_wrist_proximity: float = 0.22
 
     # ── Hysteresis ─────────────────────────────────────────────────────────
@@ -231,10 +233,20 @@ class ArmTracker:
         # When hips are hidden (blanket, crop) we cannot tell sitting from
         # lying, so upright is set to None — the arm threshold logic below
         # will use the stricter reclined margin as a precaution.
+        avg_sh_x = (ls.x + rs.x) / 2.0
         hip_vis = (lh.visibility + rh.visibility) / 2.0
         if hip_vis >= 0.20:
             avg_hp_y = (lh.y + rh.y) / 2.0
-            upright: bool | None = avg_hp_y >= avg_sh_y + self.c.body_upright_min
+            avg_hp_x = (lh.x + rh.x) / 2.0
+            torso_dy = avg_hp_y - avg_sh_y  # positive when hips below shoulders
+            torso_dx = avg_hp_x - avg_sh_x  # non-zero when body is horizontal
+            # Body is reclined when horizontal extent exceeds vertical extent —
+            # catches lying-on-couch even when hips appear "below" shoulders due
+            # to camera perspective (which would otherwise pass the y-only check).
+            body_horizontal = abs(torso_dx) > abs(torso_dy)
+            upright: bool | None = (
+                not body_horizontal and torso_dy >= self.c.body_upright_min
+            )
         else:
             avg_hp_y = avg_sh_y   # fallback for leg-raise guard below
             upright = None  # unknown — hips not visible
@@ -252,7 +264,7 @@ class ArmTracker:
         le, re = landmarks[LEFT_ELBOW],  landmarks[RIGHT_ELBOW]
         lw, rw = landmarks[LEFT_WRIST],  landmarks[RIGHT_WRIST]
 
-        mid_x = (ls.x + rs.x) / 2.0
+        mid_x = avg_sh_x
 
         # ── CROSS_ARMS check (before T_POSE / SINGLE_UP / BOTH_UP) ────────
         # True cross-arms (hands-on-chest or wrists-crossed-on-chest) requires:
