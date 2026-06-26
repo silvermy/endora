@@ -47,14 +47,15 @@ def _state(s: ArmState) -> ArmReading:
 # ── SNAP ──────────────────────────────────────────────────────────────────────
 
 def test_snap_fires_after_snap_sustain_frames():
-    m = _machine(snap_sustain_frames=2)
-    assert m.tick(_vertical_up(), now=0.0) is None     # frame 1
-    assert m.tick(_vertical_up(), now=0.1) == Gesture.SNAP   # frame 2
+    # snap_sustain_s=0.05: first tick at 0.0 is too early, second at 0.1 fires
+    m = _machine(snap_sustain_s=0.05)
+    assert m.tick(_vertical_up(), now=0.0) is None
+    assert m.tick(_vertical_up(), now=0.1) == Gesture.SNAP
 
 
 def test_snap_fires_immediately_with_default_config():
-    # Default snap_sustain_frames=1 relies on ArmTracker hysteresis upstream
-    m = _machine()
+    # snap_sustain_s=0.0: fires as soon as arm is vertical (ArmTracker hysteresis upstream)
+    m = _machine(snap_sustain_s=0.0)
     assert m.tick(_vertical_up(), now=0.0) == Gesture.SNAP
 
 
@@ -74,8 +75,8 @@ def test_snap_resets_on_arm_down():
 # ── HOLD ──────────────────────────────────────────────────────────────────────
 
 def test_hold_fires_after_snap_then_arm_stays_up():
-    m = _machine(snap_sustain_frames=2, hold_duration_s=1.0, cooldown_s=0.1)
-    # Fire snap at t=0.1
+    m = _machine(snap_sustain_s=0.05, hold_duration_s=1.0, cooldown_s=0.1)
+    # Fire snap at t=0.1 (sustain elapsed)
     m.tick(_vertical_up(), now=0.0)
     assert m.tick(_vertical_up(), now=0.1) == Gesture.SNAP
     # Arm stays up. Cooldown is 0.1s, HOLD requires 1.0s past snap.
@@ -86,7 +87,7 @@ def test_hold_fires_after_snap_then_arm_stays_up():
 
 
 def test_hold_does_not_fire_twice_per_raise():
-    m = _machine(snap_sustain_frames=2, hold_duration_s=1.0, cooldown_s=0.1)
+    m = _machine(snap_sustain_s=0.05, hold_duration_s=1.0, cooldown_s=0.1)
     m.tick(_vertical_up(), now=0.0)
     m.tick(_vertical_up(), now=0.1)  # SNAP
     m.tick(_vertical_up(), now=1.2)  # HOLD
@@ -98,7 +99,7 @@ def test_hold_does_not_fire_twice_per_raise():
 # ── DOUBLE_SNAP ───────────────────────────────────────────────────────────────
 
 def test_double_snap_fires_on_second_raise_within_window():
-    m = _machine(snap_sustain_frames=1, cooldown_s=0.1, double_snap_window_s=3.0)
+    m = _machine(snap_sustain_s=0.0, cooldown_s=0.1, double_snap_window_s=3.0)
     # First snap
     assert m.tick(_vertical_up(), now=0.0) == Gesture.SNAP
     # Lower arm
@@ -108,7 +109,7 @@ def test_double_snap_fires_on_second_raise_within_window():
 
 
 def test_double_snap_does_not_fire_outside_window():
-    m = _machine(snap_sustain_frames=1, cooldown_s=0.1, double_snap_window_s=2.0)
+    m = _machine(snap_sustain_s=0.0, cooldown_s=0.1, double_snap_window_s=2.0)
     assert m.tick(_vertical_up(), now=0.0) == Gesture.SNAP
     m.tick(_down(), now=0.5)
     # 3 seconds later > 2s window → just another SNAP
@@ -164,7 +165,7 @@ def test_cooldown_blocks_sustained_refire():
 
 def test_cooldown_does_not_block_double_snap():
     """SINGLE_UP must not be cooldown-blocked — otherwise DOUBLE_SNAP can't fire."""
-    m = _machine(snap_sustain_frames=1, cooldown_s=2.0, double_snap_window_s=3.0)
+    m = _machine(snap_sustain_s=0.0, cooldown_s=2.0, double_snap_window_s=3.0)
     assert m.tick(_vertical_up(), now=0.0) == Gesture.SNAP
     m.tick(_down(), now=0.5)
     # Only 1.0s after first snap — cooldown is 2s but SNAP bypasses it

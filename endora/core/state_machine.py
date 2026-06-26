@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional
+from typing import Callable, Optional
 
 from cameras.arm_tracker import ArmReading, ArmState
 
@@ -91,10 +91,13 @@ class _SustainState:
 # ── State Machine ────────────────────────────────────────────────────────────
 
 class GestureStateMachine:
-    def __init__(self, config: StateMachineConfig):
+    def __init__(self, config: StateMachineConfig,
+                 on_near_miss: Optional[Callable[[str, str, ArmReading], None]] = None):
         self.c = config
         self._raise = _RaiseState()
         self._sustain = _SustainState()
+        # Optional callback(gesture_name, reason, reading) for near-miss events.
+        self._on_near_miss = on_near_miss
 
         # Ring buffer of recent SNAP fire times for DOUBLE_SNAP detection.
         self._snap_times: list[float] = []
@@ -166,6 +169,17 @@ class GestureStateMachine:
         if (not r.snap_fired and snap_condition
                 and (now - r.entered_at) >= self.c.snap_sustain_s):
             return self._fire_snap(now)
+
+        # Near-miss: arm is up but snap condition not met — log for tuning.
+        if not r.snap_fired and self._on_near_miss and r.up_frames > 1:
+            if not snap_condition:
+                reason = (f"forearm_dy={reading.forearm_dy:.3f} < {self.c.snap_forearm_min}"
+                          f" (min), snap_roll={reading.snap_roll:.3f}")
+                self._on_near_miss("SNAP", reason, reading)
+            elif (now - r.entered_at) < self.c.snap_sustain_s:
+                held = now - r.entered_at
+                reason = f"sustain={held:.3f}s < {self.c.snap_sustain_s}s required"
+                self._on_near_miss("SNAP", reason, reading)
 
         return None
 

@@ -16,6 +16,7 @@ from cameras.analyser import CameraAnalyser
 from core.state_machine import Gesture
 from cameras import debug_server
 from cameras.recorder import TestRecorder
+from core.feedback_logger import FeedbackLogger
 from core.fusion import GestureFusion
 from output.backends import make_backend
 
@@ -27,6 +28,7 @@ class GestureSystem:
     def __init__(self, settings):
         self.s = settings
         self.backend = make_backend(settings)
+        self.feedback = FeedbackLogger()
 
         self.fusion = GestureFusion(settings, on_gesture=self._on_gesture)
 
@@ -75,6 +77,7 @@ class GestureSystem:
             camera=self.cam_a, settings=settings,
             on_candidate=self.fusion.receive, label="A",
             debug_frame_cb=dbg_cb,
+            feedback_logger=self.feedback,
         )
         self.analyser_a._recorder = self._recorder
         if self.analyser_a._frame_capture is not None:
@@ -84,11 +87,13 @@ class GestureSystem:
             camera=self.cam_b, settings=settings,
             on_candidate=self.fusion.receive, label="B",
             debug_frame_cb=dbg_cb,
+            feedback_logger=self.feedback,
         )
         if self.analyser_b:
             self.analyser_b._recorder = self._recorder
 
     def run(self):
+        self.feedback.start_keyboard_listener()
         self.cam_a.start()
         if self.cam_b:
             self.cam_b.start()
@@ -134,6 +139,8 @@ class GestureSystem:
         self.backend.send(gesture, confidence, sources)
         if self._debug_enabled:
             debug_server.notify_gesture(str(gesture))
+        # Log the fired gesture; reading comes from the most recent frame in the buffer.
+        self.feedback.on_gesture_fired(gesture.name, confidence, reading=None)
 
     _last_stats = 0.0
 
