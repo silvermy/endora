@@ -478,7 +478,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 <div id="wrap">
   <div id="vbox">
     <img id="streamimg" alt="stream">
-    <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine &nbsp;·&nbsp; <a href="captures" target="_blank" style="color:#555;text-decoration:none">&#128249; captures</a></div>
+    <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine &nbsp;·&nbsp; <a href="captures" target="_blank" style="color:#555;text-decoration:none">&#128249; captures</a> &nbsp;·&nbsp; <a href="feedback/download" style="color:#555;text-decoration:none">&#11015; feedback.jsonl</a></div>
     <div id="fbrow">
       <button id="fpbtn" onclick="doFeedback('fp')" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007; False positive</button>
       <button id="fnbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">&#63; Missed gesture</button>
@@ -984,6 +984,23 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path == "/feedback/download":
+            from pathlib import Path as _Path
+            _DATA_DIR = _Path("/data") if _Path("/data").exists() else _Path(".")
+            fp = _DATA_DIR / "feedback.jsonl"
+            if fp.exists():
+                body = fp.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/jsonl")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Content-Disposition", "attachment; filename=feedback.jsonl")
+            else:
+                body = b""
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
             self.end_headers()
             self.wfile.write(body)
 
