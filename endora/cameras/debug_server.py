@@ -347,7 +347,6 @@ h3{font-size:11px;letter-spacing:3px;color:#555;font-weight:500;text-transform:u
 #wrap{display:flex;gap:12px;width:100%;max-width:1300px;align-items:flex-start}
 #vbox{flex:1 1 auto;min-width:0}
 #vbox img{width:100%;display:block;border:1px solid #1e1e1e;min-height:240px;background:#111}
-#legend{font-size:11px;color:#444;text-align:center;padding:4px 0}
 #fbrow{display:flex;gap:8px;align-items:center;padding:8px 0 2px}
 #fpbtn,#fnbtn,#npbtn{
   flex:1;padding:11px 8px;border-radius:7px;cursor:pointer;
@@ -480,11 +479,10 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 </style>
 </head>
 <body>
-<h3>Endora Debug</h3>
+<h3>Endora Debug &nbsp;<span style="font-size:12px;font-weight:normal;color:#555">YOLO pose &nbsp;·&nbsp; grlib hands</span></h3>
 <div id="wrap">
   <div id="vbox">
     <img id="streamimg" alt="stream">
-    <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine</div>
     <div id="fbrow">
       <button id="fpbtn" onclick="doFeedback('fp')" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007; False positive</button>
       <button id="fnbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">&#63; Missed gesture</button>
