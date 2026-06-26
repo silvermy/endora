@@ -343,27 +343,30 @@ body{
   display:flex;flex-direction:column;align-items:center;
   padding:8px 10px;gap:8px
 }
-h3{font-size:11px;letter-spacing:3px;color:#555;font-weight:500;text-transform:uppercase}
+h3{font-size:11px;letter-spacing:2.5px;font-weight:600;text-transform:uppercase;
+   color:#ccc}
+h3 .sub{color:#555;font-weight:400;letter-spacing:2px}
 #wrap{display:flex;gap:12px;width:100%;max-width:1300px;align-items:flex-start}
 #vbox{flex:1 1 auto;min-width:0}
 #vbox img{width:100%;display:block;border:1px solid #1e1e1e;min-height:240px;background:#111}
-#fbrow{display:flex;gap:8px;align-items:center;padding:8px 0 2px}
-#fpbtn,#fnbtn,#npbtn{
-  flex:1;padding:11px 8px;border-radius:7px;cursor:pointer;
-  font-size:15px;font-weight:700;border:2px solid;letter-spacing:.3px
+#fbrow{display:flex;gap:8px;align-items:stretch;padding:8px 0 2px;flex-wrap:wrap}
+.fbtn{
+  flex:1 1 0;min-width:0;padding:12px 10px;border-radius:10px;cursor:pointer;
+  font-size:14px;font-weight:700;border:2px solid;letter-spacing:.2px;
+  text-align:center;text-decoration:none;display:flex;align-items:center;
+  justify-content:center;gap:5px;line-height:1.2;white-space:normal
 }
-#fpbtn{background:#3a0a0a;border-color:#cc3333;color:#ff6666}
-#fpbtn:hover{background:#551515}
-#fnbtn{background:#0a1a3a;border-color:#3366cc;color:#6699ff}
-#fnbtn:hover{background:#152550}
-#npbtn{background:#2a1a00;border-color:#cc8800;color:#ffaa33}
-#npbtn:hover{background:#3d2600}
-#feedbackmsg{font-size:12px;min-width:120px;text-align:center;color:#888}
-.icobtn{
-  text-decoration:none;background:#1a1a1a;border:1px solid #333;border-radius:6px;
-  padding:8px 10px;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0
-}
-.icobtn:hover{background:#2a2a2a}
+#fpbtn{background:#2a0808;border-color:#aa2222;color:#ff7777}
+#fpbtn:hover{background:#3d1010}
+#fnbtn{background:#08152e;border-color:#2255aa;color:#6699ff}
+#fnbtn:hover{background:#102040}
+#npbtn{background:#221500;border-color:#aa7700;color:#ffbb44}
+#npbtn:hover{background:#332200}
+#capbtn{background:#0e1a0e;border-color:#3a7a3a;color:#77cc77}
+#capbtn:hover{background:#162616}
+#dlbtn{background:#0d0d20;border-color:#3a3a8a;color:#8888ee}
+#dlbtn:hover{background:#151530}
+#feedbackmsg{font-size:12px;width:100%;text-align:center;color:#777;order:99}
 #panel{
   flex:0 0 272px;background:#111;border:1px solid #222;border-radius:8px;
   padding:12px;display:flex;flex-direction:column;gap:12px;
@@ -479,16 +482,16 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 </style>
 </head>
 <body>
-<h3>Endora Debug &nbsp;<span style="font-size:12px;font-weight:normal;color:#555">YOLO pose &nbsp;·&nbsp; grlib hands</span></h3>
+<h3>&bull;&nbsp;ENDORA DEBUG&nbsp;<span class="sub">&nbsp;&bull;&nbsp;YOLO POSE&nbsp;&bull;&nbsp;GRLIB HANDS</span></h3>
 <div id="wrap">
   <div id="vbox">
     <img id="streamimg" alt="stream">
     <div id="fbrow">
-      <button id="fpbtn" onclick="doFeedback('fp')" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007; False positive</button>
-      <button id="fnbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">&#63; Missed gesture</button>
-      <button id="npbtn" onclick="doFeedback('np')" title="I was visible but YOLO didn't detect me at all">&#128683; No pose</button>
-      <a href="captures" target="_blank" title="Captures" class="icobtn">&#128249; Captures</a>
-      <a href="feedback/download" title="Download feedback.jsonl" class="icobtn">&#11015; feedback.jsonl</a>
+      <button id="fpbtn" class="fbtn" onclick="doFeedback('fp')" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007; False positive</button>
+      <button id="fnbtn" class="fbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">? Missed gesture</button>
+      <button id="npbtn" class="fbtn" onclick="doFeedback('np')" title="I was visible but YOLO didn't detect me at all">&#128683; No pose</button>
+      <a id="capbtn" href="captures" target="_blank" title="Captures" class="fbtn">&#128249; Captures</a>
+      <a id="dlbtn" href="feedback/download" title="Download feedback.jsonl" class="fbtn">&#11015; feedback.jsonl</a>
       <span id="feedbackmsg"></span>
     </div>
   </div>
