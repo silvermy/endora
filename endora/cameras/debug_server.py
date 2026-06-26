@@ -351,11 +351,13 @@ h3 .sub{color:#555;font-weight:400;letter-spacing:2px}
 #vbox img{width:100%;display:block;border:1px solid #1e1e1e;min-height:240px;background:#111}
 #fbrow{display:flex;gap:8px;align-items:stretch;padding:8px 0 2px;flex-wrap:wrap}
 .fbtn{
-  flex:1 1 0;min-width:0;padding:12px 10px;border-radius:10px;cursor:pointer;
+  padding:12px 10px;border-radius:10px;cursor:pointer;
   font-size:14px;font-weight:700;border:2px solid;letter-spacing:.2px;
   text-align:center;text-decoration:none;display:flex;align-items:center;
   justify-content:center;gap:5px;line-height:1.2;white-space:normal
 }
+#fpbtn,#fnbtn,#npbtn{flex:1 1 0;min-width:0}
+#capbtn,#dlbtn{flex:1 1 calc(50% - 4px);min-width:0}
 #fpbtn{background:#2a0808;border-color:#aa2222;color:#ff7777}
 #fpbtn:hover{background:#3d1010}
 #fnbtn{background:#08152e;border-color:#2255aa;color:#6699ff}
