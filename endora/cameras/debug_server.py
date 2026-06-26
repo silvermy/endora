@@ -360,6 +360,11 @@ h3{font-size:11px;letter-spacing:3px;color:#555;font-weight:500;text-transform:u
 #npbtn{background:#2a1a00;border-color:#cc8800;color:#ffaa33}
 #npbtn:hover{background:#3d2600}
 #feedbackmsg{font-size:12px;min-width:120px;text-align:center;color:#888}
+.icobtn{
+  text-decoration:none;background:#1a1a1a;border:1px solid #333;border-radius:6px;
+  padding:8px 10px;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0
+}
+.icobtn:hover{background:#2a2a2a}
 #panel{
   flex:0 0 272px;background:#111;border:1px solid #222;border-radius:8px;
   padding:12px;display:flex;flex-direction:column;gap:12px;
@@ -479,11 +484,13 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 <div id="wrap">
   <div id="vbox">
     <img id="streamimg" alt="stream">
-    <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine &nbsp;·&nbsp; <a href="captures" target="_blank" title="Captures" style="text-decoration:none;background:#1a1a1a;border:1px solid #333;border-radius:5px;padding:2px 7px;font-size:14px">&#128249;</a> &nbsp;<a href="feedback/download" title="Download feedback.jsonl" style="text-decoration:none;background:#1a1a1a;border:1px solid #333;border-radius:5px;padding:2px 7px;font-size:14px">&#11015;</a></div>
+    <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine</div>
     <div id="fbrow">
       <button id="fpbtn" onclick="doFeedback('fp')" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007; False positive</button>
       <button id="fnbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">&#63; Missed gesture</button>
       <button id="npbtn" onclick="doFeedback('np')" title="I was visible but YOLO didn't detect me at all">&#128683; No pose</button>
+      <a href="captures" target="_blank" title="Captures" class="icobtn">&#128249;</a>
+      <a href="feedback/download" title="Download feedback.jsonl" class="icobtn">&#11015;</a>
       <span id="feedbackmsg"></span>
     </div>
   </div>
