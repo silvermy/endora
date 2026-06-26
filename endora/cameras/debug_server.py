@@ -479,7 +479,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 <div id="wrap">
   <div id="vbox">
     <img id="streamimg" alt="stream">
-    <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine &nbsp;·&nbsp; <a href="captures" target="_blank" style="color:#555;text-decoration:none">&#128249; captures</a> &nbsp;·&nbsp; <a href="feedback/download" style="color:#555;text-decoration:none">&#11015; feedback.jsonl</a></div>
+    <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine &nbsp;·&nbsp; <a href="captures" target="_blank" title="Captures" style="text-decoration:none;background:#1a1a1a;border:1px solid #333;border-radius:5px;padding:2px 7px;font-size:14px">&#128249;</a> &nbsp;<a href="feedback/download" title="Download feedback.jsonl" style="text-decoration:none;background:#1a1a1a;border:1px solid #333;border-radius:5px;padding:2px 7px;font-size:14px">&#11015;</a></div>
     <div id="fbrow">
       <button id="fpbtn" onclick="doFeedback('fp')" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007; False positive</button>
       <button id="fnbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">&#63; Missed gesture</button>
