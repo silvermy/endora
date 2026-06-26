@@ -182,6 +182,7 @@ class CameraAnalyser(threading.Thread):
         on_candidate: Callable[[Gesture, float, str], None],
         label: str = "cam",
         debug_frame_cb=None,
+        feedback_logger=None,
     ):
         super().__init__(daemon=True, name=f"Analyser-{label}")
         self.camera = camera
@@ -190,6 +191,7 @@ class CameraAnalyser(threading.Thread):
         self.label = label
         self.debug_frame_cb = debug_frame_cb
         self._stop_evt = threading.Event()
+        self._feedback = feedback_logger
 
         # CLAHE cache — object is expensive; recreate only when clip changes.
         self._clahe_obj = None
@@ -218,6 +220,7 @@ class CameraAnalyser(threading.Thread):
             state_confirm_s=float(getattr(settings, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(settings, 'state_release_s', 0.30)),
         ))
+        _near_miss_cb = feedback_logger.on_near_miss if feedback_logger else None
         self._state_machine = GestureStateMachine(StateMachineConfig(
             cooldown_s=float(getattr(settings, 'cooldown_s', 2.0)),
             snap_forearm_min=float(getattr(settings, 'snap_forearm_min', 0.10)),
@@ -226,7 +229,7 @@ class CameraAnalyser(threading.Thread):
             sustain_s=float(getattr(settings, 'sustain_s', 0.5)),
             snap_sustain_s=float(getattr(settings, 'snap_sustain_s', 0.50)),
             snap_roll_threshold=float(getattr(settings, 'snap_roll_threshold', 0.0)),
-        ))
+        ), on_near_miss=_near_miss_cb)
 
     def stop(self):
         self._stop_evt.set()
@@ -439,6 +442,8 @@ class CameraAnalyser(threading.Thread):
                 if reading.state.name == 'SINGLE_UP':
                     log.debug("[%s] SINGLE_UP forearm_dy=%.3f snap_roll=%.3f",
                               self.label, reading.forearm_dy, reading.snap_roll)
+                if self._feedback:
+                    self._feedback.push_reading(reading)
 
             gesture = self._state_machine.tick(reading, now)
 
