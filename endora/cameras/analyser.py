@@ -154,6 +154,9 @@ def _select_person(
     return best
 
 
+_MIN_VISIBLE_KPS = 6  # fewer than this → almost certainly not a real person
+
+
 def _kps_to_landmarks(
     kps: Optional[np.ndarray],
     frame_w: int,
@@ -169,6 +172,13 @@ def _kps_to_landmarks(
     """
     if kps is None or kps.shape[0] == 0:
         return None, None
+    # Filter out ghost detections (paintings, furniture) that have very few
+    # confident keypoints.  A real person in frame typically has 10+ visible.
+    good = [i for i in range(kps.shape[0]) if _person_visible_kp_count(kps[i]) >= _MIN_VISIBLE_KPS]
+    if not good:
+        return None, None
+    if len(good) < kps.shape[0]:
+        kps = kps[good]
     best = _select_person(kps, tracked_xy, frame_w, frame_h)
     return _YOLOLandmarks(kps[best], frame_w, frame_h), _person_centroid(kps[best])
 
