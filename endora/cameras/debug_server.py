@@ -79,7 +79,8 @@ class _LogHandler(logging.Handler):
 # Trimmed to the sliders you actually reach for during live tuning.
 _PARAMS = [
     ("arm_above_head_tolerance", "Arm raise margin",   0.0,  0.30, 0.01, "Gesture"),
-    ("palm_twist_threshold",     "Snap sensitivity",   0.10, 1.20, 0.05, "Gesture"),
+    ("snap_forearm_min",         "Snap sensitivity",   0.03, 0.20, 0.01, "Gesture"),
+    ("snap_sustain_s",           "Snap hold time (s)", 0.0,  1.0,  0.05, "Gesture"),
     ("cooldown_s",               "Cooldown (s)",       0,    10,   0.25, "Gesture"),
     ("yolo_conf",                "YOLO confidence",    0.10, 0.80, 0.01, "Body"),
     # View group — rendered as joystick (pan/tilt) + compact sliders
