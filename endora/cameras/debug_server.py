@@ -347,6 +347,16 @@ h3{font-size:11px;letter-spacing:3px;color:#555;font-weight:500;text-transform:u
 #vbox{flex:1 1 auto;min-width:0}
 #vbox img{width:100%;display:block;border:1px solid #1e1e1e;min-height:240px;background:#111}
 #legend{font-size:11px;color:#444;text-align:center;padding:4px 0}
+#fbrow{display:flex;gap:8px;align-items:center;padding:8px 0 2px}
+#fpbtn,#fnbtn{
+  flex:1;padding:11px 8px;border-radius:7px;cursor:pointer;
+  font-size:15px;font-weight:700;border:2px solid;letter-spacing:.3px
+}
+#fpbtn{background:#3a0a0a;border-color:#cc3333;color:#ff6666}
+#fpbtn:hover{background:#551515}
+#fnbtn{background:#0a1a3a;border-color:#3366cc;color:#6699ff}
+#fnbtn:hover{background:#152550}
+#feedbackmsg{font-size:12px;min-width:120px;text-align:center;color:#888}
 #panel{
   flex:0 0 272px;background:#111;border:1px solid #222;border-radius:8px;
   padding:12px;display:flex;flex-direction:column;gap:12px;
@@ -467,6 +477,11 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
   <div id="vbox">
     <img id="streamimg" alt="stream">
     <div id="legend">YOLO pose &nbsp;·&nbsp; grlib hands &nbsp;·&nbsp; state machine &nbsp;·&nbsp; <a href="captures" target="_blank" style="color:#555;text-decoration:none">&#128249; captures</a></div>
+    <div id="fbrow">
+      <button id="fpbtn" onclick="doFeedback('fp')" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007; False positive</button>
+      <button id="fnbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">&#63; Missed gesture</button>
+      <span id="feedbackmsg"></span>
+    </div>
   </div>
   <div id="panel">
     <div class="togrow">
@@ -485,12 +500,6 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     <div id="savemsg"></div>
     <button id="capturebtn" onclick="doCapture()" style="display:none">&#128249;&nbsp; Capture test case</button>
     <div id="capturemsg" style="font-size:12px;min-height:16px;text-align:center;padding-top:3px"></div>
-    <div class="grp" style="margin-top:4px">Feedback</div>
-    <div style="display:flex;gap:6px">
-      <button id="fpbtn" onclick="doFeedback('fp')" style="flex:1;padding:7px 4px;background:#2e0e0e;border:1px solid #6e2e2e;color:#c55;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007;&nbsp;False positive</button>
-      <button id="fnbtn" onclick="doFeedback('fn')" style="flex:1;padding:7px 4px;background:#0e1a2e;border:1px solid #2e4e7e;color:#59c;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" title="I just did a gesture that wasn't detected — capture recent frames as a miss">&#63;&nbsp;Missed gesture</button>
-    </div>
-    <div id="feedbackmsg" style="font-size:12px;min-height:16px;text-align:center;padding-top:3px"></div>
   </div>
 </div>
 <div id="logbox">
