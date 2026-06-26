@@ -348,7 +348,7 @@ h3{font-size:11px;letter-spacing:3px;color:#555;font-weight:500;text-transform:u
 #vbox img{width:100%;display:block;border:1px solid #1e1e1e;min-height:240px;background:#111}
 #legend{font-size:11px;color:#444;text-align:center;padding:4px 0}
 #fbrow{display:flex;gap:8px;align-items:center;padding:8px 0 2px}
-#fpbtn,#fnbtn{
+#fpbtn,#fnbtn,#npbtn{
   flex:1;padding:11px 8px;border-radius:7px;cursor:pointer;
   font-size:15px;font-weight:700;border:2px solid;letter-spacing:.3px
 }
@@ -356,6 +356,8 @@ h3{font-size:11px;letter-spacing:3px;color:#555;font-weight:500;text-transform:u
 #fpbtn:hover{background:#551515}
 #fnbtn{background:#0a1a3a;border-color:#3366cc;color:#6699ff}
 #fnbtn:hover{background:#152550}
+#npbtn{background:#2a1a00;border-color:#cc8800;color:#ffaa33}
+#npbtn:hover{background:#3d2600}
 #feedbackmsg{font-size:12px;min-width:120px;text-align:center;color:#888}
 #panel{
   flex:0 0 272px;background:#111;border:1px solid #222;border-radius:8px;
@@ -480,6 +482,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     <div id="fbrow">
       <button id="fpbtn" onclick="doFeedback('fp')" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007; False positive</button>
       <button id="fnbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">&#63; Missed gesture</button>
+      <button id="npbtn" onclick="doFeedback('np')" title="I was visible but YOLO didn't detect me at all">&#128683; No pose</button>
       <span id="feedbackmsg"></span>
     </div>
   </div>
@@ -708,7 +711,7 @@ function doFeedback(label) {
   var msg = document.getElementById('feedbackmsg');
   var hint = label === 'fn' ? (prompt('What gesture did you try? (e.g. SNAP)', 'SNAP') || 'unknown') : undefined;
   if (label === 'fn' && hint === null) return; // cancelled
-  var body = label === 'fn' ? JSON.stringify({label:'fn', hint:hint}) : JSON.stringify({label:'fp'});
+  var body = label === 'fn' ? JSON.stringify({label:'fn', hint:hint}) : JSON.stringify({label:label});
   msg.style.color = '#888'; msg.textContent = 'logging…';
   fetch('feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body:body})
     .then(function(r){return r.json();})
@@ -1080,6 +1083,10 @@ class _Handler(BaseHTTPRequestHandler):
                 hint = str(payload.get("hint", "unknown"))
                 _feedback_logger.mark_false_negative(gesture_hint=hint)
                 body = json.dumps({"ok": True, "msg": "recorded as missed gesture"}).encode()
+                self.send_response(200)
+            elif label == "np":
+                _feedback_logger.mark_no_pose()
+                body = json.dumps({"ok": True, "msg": "recorded as no pose detected"}).encode()
                 self.send_response(200)
             else:
                 body = json.dumps({"ok": False, "error": "label must be 'fp' or 'fn'"}).encode()

@@ -153,6 +153,17 @@ class FeedbackLogger:
             self._last_gesture = None  # consumed
         return True
 
+    def mark_no_pose(self) -> None:
+        """I was visible on camera but YOLO didn't detect me at all."""
+        entry = {
+            "ts": time.time(),
+            "label": "no_pose",
+        }
+        with self._lock:
+            self._write(entry)
+            self._counts["no_pose"] += 1
+        log.info("[feedback] Recorded NO POSE DETECTED")
+
     def mark_false_negative(self, gesture_hint: str = "unknown") -> None:
         """Snapshot the recent reading buffer as a missed gesture."""
         now = time.monotonic()
