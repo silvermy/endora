@@ -63,6 +63,7 @@ class GestureSystem:
             debug_server.configure(camera_count=1 if self._single else 2)
             debug_server.set_settings(settings)
             debug_server.set_host_info(_detect_host_ip(), settings.debug_port)
+            debug_server.set_feedback_logger(self.feedback)
             debug_server.start(settings.debug_port, ingress_port=8766)
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
