@@ -349,15 +349,13 @@ h3 .sub{color:#555;font-weight:400;letter-spacing:2px}
 #wrap{display:flex;gap:12px;width:100%;max-width:1300px;align-items:flex-start}
 #vbox{flex:1 1 auto;min-width:0}
 #vbox img{width:100%;display:block;border:1px solid #1e1e1e;min-height:240px;background:#111}
-#fbrow{display:flex;gap:8px;align-items:stretch;padding:8px 0 2px;flex-wrap:wrap}
+#fbrow{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;padding:8px 0 2px}
 .fbtn{
   padding:12px 10px;border-radius:10px;cursor:pointer;
   font-size:14px;font-weight:700;border:2px solid;letter-spacing:.2px;
   text-align:center;text-decoration:none;display:flex;align-items:center;
   justify-content:center;gap:5px;line-height:1.2;white-space:normal
 }
-#fpbtn,#fnbtn,#npbtn{flex:1 1 0;min-width:0}
-#capbtn,#dlbtn{flex:1 1 calc(50% - 4px);min-width:0}
 #fpbtn{background:#2a0808;border-color:#aa2222;color:#ff7777}
 #fpbtn:hover{background:#3d1010}
 #fnbtn{background:#08152e;border-color:#2255aa;color:#6699ff}
@@ -368,7 +366,7 @@ h3 .sub{color:#555;font-weight:400;letter-spacing:2px}
 #capbtn:hover{background:#162616}
 #dlbtn{background:#0d0d20;border-color:#3a3a8a;color:#8888ee}
 #dlbtn:hover{background:#151530}
-#feedbackmsg{font-size:12px;width:100%;text-align:center;color:#777;order:99}
+#feedbackmsg{font-size:12px;grid-column:1/-1;text-align:center;color:#777}
 #panel{
   flex:0 0 272px;background:#111;border:1px solid #222;border-radius:8px;
   padding:12px;display:flex;flex-direction:column;gap:12px;
