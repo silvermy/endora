@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import threading
 import time
 
 from cameras.capture import RtspCapture
@@ -137,11 +138,16 @@ class GestureSystem:
         self.backend.close()
 
     def _on_gesture(self, gesture: Gesture, confidence: float, sources: list):
-        self.backend.send(gesture, confidence, sources)
+        # Update UI immediately — don't wait for the HTTP round-trip to HA
         if self._debug_enabled:
             debug_server.notify_gesture(str(gesture))
-        # Log the fired gesture; reading comes from the most recent frame in the buffer.
         self.feedback.on_gesture_fired(gesture.name, confidence, reading=None)
+        # Fire HA event in a background thread so it never stalls the pipeline
+        threading.Thread(
+            target=self.backend.send,
+            args=(gesture, confidence, sources),
+            daemon=True,
+        ).start()
 
     _last_stats = 0.0
 
