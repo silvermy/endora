@@ -491,7 +491,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
       <button id="fnbtn" class="fbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">? Missed gesture</button>
       <button id="npbtn" class="fbtn" onclick="doFeedback('np')" title="I was visible but YOLO didn't detect me at all">&#128683; No pose</button>
       <a id="capbtn" href="captures" target="_blank" title="Captures" class="fbtn">&#128249; Captures</a>
-      <a id="dlbtn" href="feedback/download" title="Download feedback.jsonl" class="fbtn">&#11015; feedback.jsonl</a>
+      <a id="dlbtn" href="feedback/download" title="Download feedback.jsonl" class="fbtn">&#11015; feedback.<wbr>jsonl</a>
       <span id="feedbackmsg"></span>
     </div>
   </div>
