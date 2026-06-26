@@ -988,21 +988,25 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
         elif parsed.path == "/feedback/download":
-            from pathlib import Path as _Path
-            _DATA_DIR = _Path("/data") if _Path("/data").exists() else _Path(".")
-            fp = _DATA_DIR / "feedback.jsonl"
-            if fp.exists():
-                body = fp.read_bytes()
+            try:
+                from pathlib import Path as _Path
+                _fdir = _Path("/data") if _Path("/data").exists() else _Path(".")
+                fp = _fdir / "feedback.jsonl"
+                body = fp.read_bytes() if fp.exists() else b"# no feedback logged yet\n"
                 self.send_response(200)
-                self.send_header("Content-Type", "application/jsonl")
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Content-Disposition", "attachment; filename=feedback.jsonl")
-            else:
-                body = b""
-                self.send_response(404)
-                self.send_header("Content-Length", "0")
-            self.end_headers()
-            self.wfile.write(body)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                msg = f"error reading feedback log: {e}".encode()
+                self.send_response(500)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(msg)))
+                self.end_headers()
+                self.wfile.write(msg)
 
         elif parsed.path == "/log":
             since = float(qs.get("since", ["0"])[0])
