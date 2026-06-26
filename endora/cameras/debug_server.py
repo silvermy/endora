@@ -41,6 +41,7 @@ _single_camera: bool = False
 _settings = None
 _recorder = None
 _frame_capture = None
+_feedback_logger = None
 _host_ip: str = "homeassistant.local"
 _debug_port: int = 8765
 
@@ -121,6 +122,11 @@ def set_recorder(r) -> None:
 def set_frame_capture(fc) -> None:
     global _frame_capture
     _frame_capture = fc
+
+
+def set_feedback_logger(fl) -> None:
+    global _feedback_logger
+    _feedback_logger = fl
 
 
 def set_host_info(ip: str, port: int) -> None:
@@ -479,6 +485,12 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     <div id="savemsg"></div>
     <button id="capturebtn" onclick="doCapture()" style="display:none">&#128249;&nbsp; Capture test case</button>
     <div id="capturemsg" style="font-size:12px;min-height:16px;text-align:center;padding-top:3px"></div>
+    <div class="grp" style="margin-top:4px">Feedback</div>
+    <div style="display:flex;gap:6px">
+      <button id="fpbtn" onclick="doFeedback('fp')" style="flex:1;padding:7px 4px;background:#2e0e0e;border:1px solid #6e2e2e;color:#c55;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007;&nbsp;False positive</button>
+      <button id="fnbtn" onclick="doFeedback('fn')" style="flex:1;padding:7px 4px;background:#0e1a2e;border:1px solid #2e4e7e;color:#59c;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600" title="I just did a gesture that wasn't detected — capture recent frames as a miss">&#63;&nbsp;Missed gesture</button>
+    </div>
+    <div id="feedbackmsg" style="font-size:12px;min-height:16px;text-align:center;padding-top:3px"></div>
   </div>
 </div>
 <div id="logbox">
@@ -680,6 +692,23 @@ function doCapture() {
     })
     .catch(function(){ msg.style.color='#c55'; msg.textContent='✗ request failed'; })
     .finally(function(){ btn.disabled=false; });
+}
+
+// ── Feedback ────────────────────────────────────────────────────────────────
+function doFeedback(label) {
+  var msg = document.getElementById('feedbackmsg');
+  var hint = label === 'fn' ? (prompt('What gesture did you try? (e.g. SNAP)', 'SNAP') || 'unknown') : undefined;
+  if (label === 'fn' && hint === null) return; // cancelled
+  var body = label === 'fn' ? JSON.stringify({label:'fn', hint:hint}) : JSON.stringify({label:'fp'});
+  msg.style.color = '#888'; msg.textContent = 'logging…';
+  fetch('feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body:body})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      msg.style.color = d.ok ? (label==='fp'?'#c55':'#59c') : '#888';
+      msg.textContent = d.ok ? '✓ ' + d.msg : '✗ ' + (d.error || 'error');
+      setTimeout(function(){ msg.textContent=''; }, 4000);
+    })
+    .catch(function(){ msg.style.color='#888'; msg.textContent='✗ request failed'; });
 }
 
 // ── Live log ────────────────────────────────────────────────────────────────
@@ -1018,6 +1047,34 @@ class _Handler(BaseHTTPRequestHandler):
                 else:
                     body = json.dumps({"ok": False, "error": "buffer empty"}).encode()
                     self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/feedback":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b""
+            try:
+                payload = json.loads(raw) if raw else {}
+            except Exception:
+                payload = {}
+            label = payload.get("label", "")
+            if _feedback_logger is None:
+                body = json.dumps({"ok": False, "error": "feedback logger not active"}).encode()
+                self.send_response(503)
+            elif label == "fp":
+                ok = _feedback_logger.mark_false_positive()
+                body = json.dumps({"ok": ok, "msg": "marked as false positive" if ok else "no recent gesture to mark (5s window expired)"}).encode()
+                self.send_response(200)
+            elif label == "fn":
+                hint = str(payload.get("hint", "unknown"))
+                _feedback_logger.mark_false_negative(gesture_hint=hint)
+                body = json.dumps({"ok": True, "msg": "recorded as missed gesture"}).encode()
+                self.send_response(200)
+            else:
+                body = json.dumps({"ok": False, "error": "label must be 'fp' or 'fn'"}).encode()
+                self.send_response(400)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
