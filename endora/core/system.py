@@ -189,7 +189,14 @@ class GestureSystem:
 
 
 def _detect_host_ip() -> str:
-    """Return the host's LAN IP by probing an external address (no data sent)."""
+    """Return a hostname reachable by LAN devices for the chime URL.
+
+    In HA add-on mode (host_network=false) the container gets a private Docker
+    IP that LAN devices cannot reach. Use homeassistant.local instead, which
+    mDNS advertises on the LAN and maps to the exposed ports.
+    """
+    if os.environ.get("SUPERVISOR_TOKEN"):
+        return "homeassistant.local"
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
