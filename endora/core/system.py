@@ -74,12 +74,8 @@ class GestureSystem:
         chime_on = getattr(settings, "chime_enable",
                            getattr(settings, "sonos_enable", False))
         if chime_on:
-            if settings.debug_port > 0:
-                chime_url = f"http://{self._host_ip}:{settings.debug_port}/chime.wav"
-                self._sonos = make_chime_notifier(settings, chime_url)
-            else:
-                log.warning("Chime: debug_port must be set so the speaker can "
-                            "reach the chime WAV; chime disabled.")
+            chime_url = _install_chime_wav()
+            self._sonos = make_chime_notifier(settings, chime_url)
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
 
@@ -186,6 +182,29 @@ class GestureSystem:
                 self.cam_a.frames_captured, self.cam_a._fps_actual,
                 self.fusion.total_emitted,
             )
+
+
+def _install_chime_wav() -> str:
+    """Copy the bundled chime.wav to HA's /media folder and return a URL.
+
+    When running as an HA add-on, /media is mapped and HA proxies files from
+    it to speakers via media-source://media_source/local/ — no firewall issues.
+    Falls back to the debug HTTP server URL for standalone use.
+    """
+    import shutil
+    from pathlib import Path
+    src = Path(__file__).parent.parent / "cameras" / "static" / "chime.wav"
+    media_dir = Path("/media")
+    if media_dir.is_dir() and os.access(media_dir, os.W_OK):
+        dest = media_dir / "endora_chime.wav"
+        try:
+            shutil.copy2(src, dest)
+            log.info("Chime: installed to %s", dest)
+            return "media-source://media_source/local/endora_chime.wav"
+        except Exception as e:
+            log.warning("Chime: could not copy to /media (%s), falling back", e)
+    # Standalone / dev fallback — requires debug_port to be set
+    return ""
 
 
 def _detect_host_ip() -> str:

@@ -103,7 +103,9 @@ class HAChimeBackend(_ChimeBase):
 
         if not token:
             log.warning("Chime: no HA token found — chime calls will fail with 401")
-        if not self._entity_id:
+        if not self._chime_url:
+            log.warning("Chime: no chime URL resolved — chime disabled")
+        elif not self._entity_id:
             log.warning("Chime: chime_entity_id not set — chime disabled. "
                         "Set it to e.g. 'media_player.living_room' in config.")
         else:
@@ -111,7 +113,7 @@ class HAChimeBackend(_ChimeBase):
                      self._entity_id, self._chime_url)
 
     def _play(self):
-        if not self._entity_id:
+        if not self._entity_id or not self._chime_url:
             return
         payload = json.dumps({
             "entity_id":          self._entity_id,

@@ -1,6 +1,6 @@
 {
   "name": "Endora",
-  "version": "1.9.64",
+  "version": "1.9.65",
   "slug": "endora",
   "description": "Pose-based gesture detection — SNAP, HOLD, DOUBLE_SNAP, CROSS_ARMS, T_POSE, RAISE_BOTH.",
   "url": "https://github.com/silvermy/endora",
@@ -94,7 +94,7 @@
     "dewarp_out_width": "int",
     "dewarp_out_height": "int"
   },
-  "map": ["data"],
+  "map": ["data", "media"],
   "host_network": false,
   "homeassistant_api": true,
   "hassio_api": true,
