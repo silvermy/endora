@@ -1,5 +1,7 @@
 # Endora
 
+![Status: Beta](https://img.shields.io/badge/status-beta-yellow)
+
 Control Home Assistant with body gestures — lights, TV, scenes, anything.
 
 Watches an RTSP camera stream for pose-based gestures and fires HA events you can use in any automation. Runs as a **Home Assistant Add-on** (HA OS / Supervised) or as a **standalone Docker container**.
