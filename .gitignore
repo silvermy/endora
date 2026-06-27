@@ -7,10 +7,6 @@ __pycache__/
 .venv/
 *.egg-info/
 
-# Models (large binaries)
-*.pt
-*.onnx
-
 # Data
 endora/data/
 *.jsonl
