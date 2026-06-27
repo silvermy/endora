@@ -142,6 +142,35 @@ Click **Start** → check the **Log** tab for stream connection. Open the debug 
 
 ---
 
+## Chime — audio feedback on arm raise
+
+Endora can play a short sound on any HA-integrated speaker the moment it detects an arm moving up — before the gesture fires. This gives you instant confirmation that Endora saw you, even if the gesture takes another second to complete.
+
+Works with **any speaker HA knows about**: Sonos, Chromecast, Echo, HomePod, Spotify Connect, DLNA, etc. Uses HA's `media_player.play_media` with `announce: true`, so it overlays on whatever is currently playing (TV, music) and resumes automatically.
+
+### Setup
+
+1. Find your speaker's entity ID in HA → **Settings → Devices & Services → Entities**, filter by `media_player`.
+
+2. Add to add-on config:
+
+```yaml
+chime_enable: true
+chime_entity_id: "media_player.living_room"
+chime_volume: 40        # 0–100
+chime_debounce_s: 4.0   # minimum seconds between chimes
+```
+
+3. Restart the add-on. On startup you should see:
+   ```
+   Chime: installed chime.wav → /media/endora_chime.wav
+   Chime ready — entity=media_player.living_room
+   ```
+
+The chime sound is bundled with the add-on and automatically installed to HA's `/media` folder on startup.
+
+---
+
 ## Fisheye dewarping
 
 If using a fisheye camera (e.g. Reolink in Fisheye mode):
@@ -199,4 +228,8 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `flip_image` | `false` | Rotate frame 180° |
 | `mirror_camera` | `false` | Reserved for future use |
 | `low_light_enhance` | `false` | CLAHE contrast boost |
+| `chime_enable` | `false` | Play a sound on arm-up detection |
+| `chime_entity_id` | `""` | HA `media_player` entity to play chime on (e.g. `media_player.living_room`) |
+| `chime_volume` | `40` | Chime volume 0–100 (100 = speaker's current max) |
+| `chime_debounce_s` | `4.0` | Min seconds between chimes |
 | `dewarp_*` | — | Fisheye dewarping parameters |
