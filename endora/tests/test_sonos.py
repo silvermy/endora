@@ -1,18 +1,17 @@
 """Tests for output/chime.py — no network calls made."""
+import json
 import time
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
-from output.chime import HAChimeBackend, SonosDirectBackend, make_chime_notifier
+from output.chime import ChimeNotifier, make_chime_notifier
 
 
 def _settings(**kw):
     defaults = dict(
         chime_enable=True, chime_entity_id="media_player.living_room",
         chime_volume=40, chime_debounce_s=0.0,
-        sonos_ip="", sonos_player_id="",
-        sonos_enable=False, sonos_volume=40, sonos_debounce_s=4.0,
         ha_url="http://supervisor/core/api",
     )
     defaults.update(kw)
@@ -22,123 +21,106 @@ def _settings(**kw):
     return s
 
 
-# ── HAChimeBackend ────────────────────────────────────────────────────────────
-
-class TestHAChimeBackend(unittest.TestCase):
+class TestChimeNotifier(unittest.TestCase):
 
     def _make(self, **kw):
         with patch.dict("os.environ", {"SUPERVISOR_TOKEN": "test-token"}):
-            return HAChimeBackend(_settings(**kw), "http://host/chime.wav")
+            return ChimeNotifier(_settings(**kw), "http://host/chime.wav")
 
     def test_entity_id_stored(self):
-        b = self._make()
-        self.assertEqual(b._entity_id, "media_player.living_room")
+        n = self._make()
+        self.assertEqual(n._entity_id, "media_player.living_room")
 
-    def test_play_posts_correct_payload(self):
-        b = self._make()
+    def test_post_sends_correct_payload(self):
+        n = self._make()
         captured = []
+
         def fake_urlopen(req, timeout=None):
-            captured.append(json_body(req))
+            captured.append(req.data.decode())
             resp = MagicMock()
             resp.status = 200
             resp.__enter__ = lambda s: s
             resp.__exit__ = MagicMock(return_value=False)
             return resp
+
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            b._play()
+            n._post()
+
         self.assertEqual(len(captured), 1)
-        import json
         body = json.loads(captured[0])
         self.assertEqual(body["entity_id"], "media_player.living_room")
         self.assertEqual(body["media_content_id"], "http://host/chime.wav")
         self.assertTrue(body["announce"])
 
-    def test_missing_entity_id_skips_play(self):
-        b = self._make(chime_entity_id="")
+    def test_missing_entity_id_skips_post(self):
+        n = self._make(chime_entity_id="")
         calls = []
         with patch("urllib.request.urlopen", side_effect=lambda *a, **kw: calls.append(1)):
-            b._play()
+            n._post()
+        self.assertEqual(calls, [])
+
+    def test_missing_chime_url_skips_post(self):
+        with patch.dict("os.environ", {"SUPERVISOR_TOKEN": "test-token"}):
+            n = ChimeNotifier(_settings(), "")
+        calls = []
+        with patch("urllib.request.urlopen", side_effect=lambda *a, **kw: calls.append(1)):
+            n._post()
         self.assertEqual(calls, [])
 
     def test_debounce_suppresses_rapid_notify(self):
-        b = self._make(chime_debounce_s=10.0)
+        n = self._make(chime_debounce_s=10.0)
         fired = []
-        with patch.object(b, "_play", side_effect=lambda: fired.append(1)):
-            b.notify()
-            b.notify()
-            b.notify()
+        with patch.object(n, "_post", side_effect=lambda: fired.append(1)):
+            n.notify()
+            n.notify()
+            n.notify()
         time.sleep(0.05)
         self.assertEqual(len(fired), 1)
 
     def test_zero_debounce_allows_repeated_notify(self):
-        b = self._make(chime_debounce_s=0.0)
+        n = self._make(chime_debounce_s=0.0)
         fired = []
-        with patch.object(b, "_play", side_effect=lambda: fired.append(1)):
-            b.notify(); time.sleep(0.05)
-            b.notify(); time.sleep(0.05)
+        with patch.object(n, "_post", side_effect=lambda: fired.append(1)):
+            n.notify(); time.sleep(0.05)
+            n.notify(); time.sleep(0.05)
         self.assertEqual(len(fired), 2)
 
+    def test_volume_included_in_payload(self):
+        n = self._make(chime_volume=60)
+        captured = []
 
-def json_body(req):
-    import json
-    return req.data.decode()
+        def fake_urlopen(req, timeout=None):
+            captured.append(req.data.decode())
+            resp = MagicMock()
+            resp.status = 200
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = MagicMock(return_value=False)
+            return resp
 
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            n._post()
 
-# ── SonosDirectBackend ────────────────────────────────────────────────────────
+        body = json.loads(captured[0])
+        self.assertAlmostEqual(body["extra"]["volume"], 0.6)
 
-class TestSonosDirectBackend(unittest.TestCase):
-
-    def _make(self, **kw):
-        kw.setdefault("sonos_ip", "192.168.1.42")
-        kw.setdefault("sonos_player_id", "RINCON_TEST")
-        return SonosDirectBackend(_settings(**kw), "http://host/chime.wav")
-
-    def test_resolved_when_both_configured(self):
-        b = self._make()
-        self.assertTrue(b._resolved)
-
-    def test_unresolved_skips_play(self):
-        with patch("output.chime._ssdp_find_sonos", return_value=None):
-            b = SonosDirectBackend(_settings(sonos_ip="", sonos_player_id=""),
-                                   "http://host/chime.wav")
-        b._resolved = False; b._ip = None; b._player_id = None
-        calls = []
-        with patch("urllib.request.urlopen", side_effect=lambda *a, **kw: calls.append(1)):
-            b._play()
-        self.assertEqual(calls, [])
-
-
-# ── Factory ───────────────────────────────────────────────────────────────────
 
 class TestMakeChimeNotifier(unittest.TestCase):
 
     def test_disabled_returns_none(self):
-        s = _settings(chime_enable=False, sonos_enable=False)
+        s = _settings(chime_enable=False)
         self.assertIsNone(make_chime_notifier(s, "http://host/chime.wav"))
 
-    def test_entity_id_gives_ha_backend(self):
+    def test_enabled_returns_notifier(self):
         s = _settings(chime_enable=True, chime_entity_id="media_player.foo")
         with patch.dict("os.environ", {"SUPERVISOR_TOKEN": "tok"}):
             n = make_chime_notifier(s, "http://host/chime.wav")
-        self.assertIsInstance(n, HAChimeBackend)
+        self.assertIsInstance(n, ChimeNotifier)
 
-    def test_sonos_ip_gives_sonos_backend(self):
-        s = _settings(chime_enable=True, chime_entity_id="",
-                      sonos_ip="192.168.1.10", sonos_player_id="RINCON_X")
-        n = make_chime_notifier(s, "http://host/chime.wav")
-        self.assertIsInstance(n, SonosDirectBackend)
-
-    def test_neither_set_gives_ha_backend(self):
-        s = _settings(chime_enable=True, chime_entity_id="", sonos_ip="")
+    def test_enabled_no_entity_id_still_returns_notifier(self):
+        s = _settings(chime_enable=True, chime_entity_id="")
         with patch.dict("os.environ", {"SUPERVISOR_TOKEN": "tok"}):
             n = make_chime_notifier(s, "http://host/chime.wav")
-        self.assertIsInstance(n, HAChimeBackend)
-
-    def test_chime_enable_true_returns_notifier(self):
-        s = _settings(chime_enable=True, chime_entity_id="media_player.foo")
-        with patch.dict("os.environ", {"SUPERVISOR_TOKEN": "tok"}):
-            n = make_chime_notifier(s, "http://host/chime.wav")
-        self.assertIsNotNone(n)
+        self.assertIsInstance(n, ChimeNotifier)
 
 
 if __name__ == "__main__":

@@ -71,8 +71,7 @@ class GestureSystem:
 
         # Optional chime on arm-up transitions
         self._sonos = None
-        chime_on = getattr(settings, "chime_enable",
-                           getattr(settings, "sonos_enable", False))
+        chime_on = getattr(settings, "chime_enable", False)
         if chime_on:
             chime_url = _install_chime_wav()
             self._sonos = make_chime_notifier(settings, chime_url)

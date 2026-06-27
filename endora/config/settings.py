@@ -218,16 +218,6 @@ class Settings:
     # Minimum seconds between chimes — prevents rapid-fire if the arm
     # bobs up and down or two cameras both fire the transition.
     chime_debounce_s: float = 4.0
-    # ── Sonos direct (fallback — no HA needed) ────────────────────────────
-    # Set sonos_ip if you want to talk to a Sonos speaker directly without
-    # going through HA.  Ignored when chime_entity_id is set.
-    sonos_ip: str = ""
-    sonos_player_id: str = ""
-    # Deprecated aliases — kept so old configs still load without errors.
-    sonos_enable: bool = False
-    sonos_volume: int = 40
-    sonos_debounce_s: float = 4.0
-
     # ── Misc ──────────────────────────────────────────────────────────────
     log_level: str = "info"
     show_display: bool = False
