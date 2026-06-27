@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-venv \
     ffmpeg \
+    wget \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libstdc++6 \
@@ -46,14 +47,16 @@ ENV PATH="/opt/venv/bin:$PATH"
 #
 WORKDIR /app
 
-# Remove any stale .pt that a previous build may have downloaded into /app/
-# (it would trigger a runtime export attempt → SIGILL on aarch64).
-RUN rm -f yolo11n-pose.pt
+# ── Download ONNX models from GitHub Release assets ──────────────────────────
+# Models are hosted as Release assets (not in the repo) to avoid LFS bandwidth
+# limits. Update MODELS_TAG when uploading new model files to a new release.
+ARG MODELS_TAG=models-v1
+ARG MODELS_BASE=https://github.com/silvermy/endora/releases/download/${MODELS_TAG}
 
-COPY yolo11n-pose.onnx      .
-COPY yolo11n-pose-320.onnx  .
-COPY yolo11s-pose.onnx      .
-COPY yolo11s-pose-320.onnx  .
+RUN wget -q --show-progress "${MODELS_BASE}/yolo11n-pose.onnx"     -O yolo11n-pose.onnx \
+ && wget -q --show-progress "${MODELS_BASE}/yolo11n-pose-320.onnx" -O yolo11n-pose-320.onnx \
+ && wget -q --show-progress "${MODELS_BASE}/yolo11s-pose.onnx"     -O yolo11s-pose.onnx \
+ && wget -q --show-progress "${MODELS_BASE}/yolo11s-pose-320.onnx" -O yolo11s-pose-320.onnx
 
 # ── Application code (changes frequently — only invalidates these COPY layers)
 COPY cameras/           cameras/

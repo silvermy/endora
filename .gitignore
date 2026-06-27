@@ -7,6 +7,10 @@ __pycache__/
 .venv/
 *.egg-info/
 
+# Models — hosted as GitHub Release assets, downloaded at Docker build time
+*.onnx
+*.pt
+
 # Data
 endora/data/
 *.jsonl
