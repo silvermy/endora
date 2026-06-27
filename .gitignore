@@ -1,0 +1,16 @@
+# Local config — contains RTSP credentials, never commit
+endora/config/settings.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Models (large binaries)
+*.pt
+*.onnx
+
+# Data
+endora/data/
+*.jsonl
