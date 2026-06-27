@@ -203,6 +203,21 @@ class Settings:
     # 2.0 is a safe default; try 3.0–4.0 for very dark scenes.
     low_light_clip: float = 2.0
 
+    # ── Sonos chime ───────────────────────────────────────────────────────
+    # Set sonos_ip to your Sonos speaker's LAN IP (e.g. "192.168.1.42").
+    # Leave blank to let Endora auto-discover via SSDP on startup.
+    sonos_ip: str = ""
+    # Sonos player ID — auto-fetched from the device if blank.
+    sonos_player_id: str = ""
+    # Volume for the chime clip (0–100).  30 is audible but not jarring
+    # when the TV is playing at normal levels.
+    sonos_volume: int = 30
+    # Minimum seconds between chimes — prevents rapid-fire if the arm
+    # bobs up and down or two cameras both fire the transition.
+    sonos_debounce_s: float = 4.0
+    # Set False to disable the chime entirely without removing the config.
+    sonos_enable: bool = False
+
     # ── Misc ──────────────────────────────────────────────────────────────
     log_level: str = "info"
     show_display: bool = False
