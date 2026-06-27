@@ -20,7 +20,7 @@ from cameras.recorder import TestRecorder
 from core.feedback_logger import FeedbackLogger
 from core.fusion import GestureFusion
 from output.backends import make_backend
-from output.sonos import SonosNotifier
+from output.chime import make_chime_notifier
 
 log = logging.getLogger(__name__)
 
@@ -69,19 +69,16 @@ class GestureSystem:
             debug_server.set_feedback_logger(self.feedback)
             debug_server.start(settings.debug_port, ingress_port=8766)
 
-        # Optional Sonos chime on arm-up transitions
-        self._sonos: SonosNotifier | None = None
-        if getattr(settings, "sonos_enable", False):
-            chime_url = (
-                f"http://{self._host_ip}:{settings.debug_port}/chime.wav"
-                if settings.debug_port > 0
-                else ""
-            )
-            if chime_url:
-                self._sonos = SonosNotifier(settings, chime_url)
-                log.info("Sonos chime enabled — chime URL: %s", chime_url)
+        # Optional chime on arm-up transitions
+        self._sonos = None
+        chime_on = getattr(settings, "chime_enable",
+                           getattr(settings, "sonos_enable", False))
+        if chime_on:
+            if settings.debug_port > 0:
+                chime_url = f"http://{self._host_ip}:{settings.debug_port}/chime.wav"
+                self._sonos = make_chime_notifier(settings, chime_url)
             else:
-                log.warning("Sonos chime: debug_port must be set so Sonos can "
+                log.warning("Chime: debug_port must be set so the speaker can "
                             "reach the chime WAV; chime disabled.")
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
