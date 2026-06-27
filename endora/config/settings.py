@@ -203,6 +203,31 @@ class Settings:
     # 2.0 is a safe default; try 3.0–4.0 for very dark scenes.
     low_light_clip: float = 2.0
 
+    # ── Chime (arm-up audio feedback) ────────────────────────────────────
+    # Set True to play a short sound when an arm-up is detected.
+    chime_enable: bool = False
+    # HA entity ID of the speaker to play the chime on.
+    # Find it in HA → Settings → Devices & Services → Entities, filter by
+    # "media_player".  Works with any HA-integrated speaker (Sonos,
+    # Chromecast, Echo, HomePod, DLNA, Spotify Connect, etc.).
+    # Example: "media_player.living_room_sonos"
+    chime_entity_id: str = ""
+    # Volume for the chime clip (0–100).  40 is audible but not jarring
+    # when the TV is playing at normal levels.
+    chime_volume: int = 40
+    # Minimum seconds between chimes — prevents rapid-fire if the arm
+    # bobs up and down or two cameras both fire the transition.
+    chime_debounce_s: float = 4.0
+    # ── Sonos direct (fallback — no HA needed) ────────────────────────────
+    # Set sonos_ip if you want to talk to a Sonos speaker directly without
+    # going through HA.  Ignored when chime_entity_id is set.
+    sonos_ip: str = ""
+    sonos_player_id: str = ""
+    # Deprecated aliases — kept so old configs still load without errors.
+    sonos_enable: bool = False
+    sonos_volume: int = 40
+    sonos_debounce_s: float = 4.0
+
     # ── Misc ──────────────────────────────────────────────────────────────
     log_level: str = "info"
     show_display: bool = False

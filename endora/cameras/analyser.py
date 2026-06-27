@@ -193,6 +193,7 @@ class CameraAnalyser(threading.Thread):
         label: str = "cam",
         debug_frame_cb=None,
         feedback_logger=None,
+        sonos_notifier=None,
     ):
         super().__init__(daemon=True, name=f"Analyser-{label}")
         self.camera = camera
@@ -202,6 +203,7 @@ class CameraAnalyser(threading.Thread):
         self.debug_frame_cb = debug_frame_cb
         self._stop_evt = threading.Event()
         self._feedback = feedback_logger
+        self._sonos = sonos_notifier
 
         # CLAHE cache — object is expensive; recreate only when clip changes.
         self._clahe_obj = None
@@ -449,6 +451,11 @@ class CameraAnalyser(threading.Thread):
                 if reading.state != getattr(self, '_last_logged_state', None):
                     log.info("[%s] state → %s", self.label, reading.state.name)
                     self._last_logged_state = reading.state
+                    # Chime on rising edge to arm-up — earliest possible signal
+                    if (self._sonos is not None and
+                            reading.state.name in ('SINGLE_UP', 'BOTH_UP') and
+                            _prev_arm_state.name == 'DOWN'):
+                        self._sonos.notify()
                 if reading.state.name == 'SINGLE_UP':
                     log.debug("[%s] SINGLE_UP forearm_dy=%.3f snap_roll=%.3f",
                               self.label, reading.forearm_dy, reading.snap_roll)

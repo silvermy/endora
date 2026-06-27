@@ -20,6 +20,7 @@ from cameras.recorder import TestRecorder
 from core.feedback_logger import FeedbackLogger
 from core.fusion import GestureFusion
 from output.backends import make_backend
+from output.chime import make_chime_notifier
 
 log = logging.getLogger(__name__)
 
@@ -60,12 +61,25 @@ class GestureSystem:
 
         # Optional debug stream
         self._debug_enabled = settings.debug_port > 0
+        self._host_ip = _detect_host_ip()
         if self._debug_enabled:
             debug_server.configure(camera_count=1 if self._single else 2)
             debug_server.set_settings(settings)
-            debug_server.set_host_info(_detect_host_ip(), settings.debug_port)
+            debug_server.set_host_info(self._host_ip, settings.debug_port)
             debug_server.set_feedback_logger(self.feedback)
             debug_server.start(settings.debug_port, ingress_port=8766)
+
+        # Optional chime on arm-up transitions
+        self._sonos = None
+        chime_on = getattr(settings, "chime_enable",
+                           getattr(settings, "sonos_enable", False))
+        if chime_on:
+            if settings.debug_port > 0:
+                chime_url = f"http://{self._host_ip}:{settings.debug_port}/chime.wav"
+                self._sonos = make_chime_notifier(settings, chime_url)
+            else:
+                log.warning("Chime: debug_port must be set so the speaker can "
+                            "reach the chime WAV; chime disabled.")
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
 
@@ -80,6 +94,7 @@ class GestureSystem:
             on_candidate=self.fusion.receive, label="A",
             debug_frame_cb=dbg_cb,
             feedback_logger=self.feedback,
+            sonos_notifier=self._sonos,
         )
         self.analyser_a._recorder = self._recorder
         if self.analyser_a._frame_capture is not None:
@@ -90,6 +105,7 @@ class GestureSystem:
             on_candidate=self.fusion.receive, label="B",
             debug_frame_cb=dbg_cb,
             feedback_logger=self.feedback,
+            sonos_notifier=self._sonos,
         )
         if self.analyser_b:
             self.analyser_b._recorder = self._recorder

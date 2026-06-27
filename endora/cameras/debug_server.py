@@ -1017,6 +1017,20 @@ class _Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(msg)
 
+        elif parsed.path == "/chime.wav":
+            from pathlib import Path as _Path
+            _wav = _Path(__file__).parent / "static" / "chime.wav"
+            if _wav.exists():
+                body = _wav.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/wav")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(404); self.end_headers()
+
         elif parsed.path == "/log":
             since = float(qs.get("since", ["0"])[0])
             with _log_lock:
