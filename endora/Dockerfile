@@ -53,10 +53,10 @@ WORKDIR /app
 ARG MODELS_TAG=models-v1
 ARG MODELS_BASE=https://github.com/silvermy/endora/releases/download/${MODELS_TAG}
 
-RUN wget -q --show-progress "${MODELS_BASE}/yolo11n-pose.onnx"     -O yolo11n-pose.onnx \
- && wget -q --show-progress "${MODELS_BASE}/yolo11n-pose-320.onnx" -O yolo11n-pose-320.onnx \
- && wget -q --show-progress "${MODELS_BASE}/yolo11s-pose.onnx"     -O yolo11s-pose.onnx \
- && wget -q --show-progress "${MODELS_BASE}/yolo11s-pose-320.onnx" -O yolo11s-pose-320.onnx
+RUN wget -q -L "${MODELS_BASE}/yolo11n-pose.onnx"     -O yolo11n-pose.onnx \
+ && wget -q -L "${MODELS_BASE}/yolo11n-pose-320.onnx" -O yolo11n-pose-320.onnx \
+ && wget -q -L "${MODELS_BASE}/yolo11s-pose.onnx"     -O yolo11s-pose.onnx \
+ && wget -q -L "${MODELS_BASE}/yolo11s-pose-320.onnx" -O yolo11s-pose-320.onnx
 
 # ── Application code (changes frequently — only invalidates these COPY layers)
 COPY cameras/           cameras/
