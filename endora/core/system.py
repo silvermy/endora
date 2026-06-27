@@ -193,17 +193,25 @@ def _install_chime_wav() -> str:
     import shutil
     from pathlib import Path
     src = Path(__file__).parent.parent / "cameras" / "static" / "chime.wav"
+    if not src.exists():
+        log.error("Chime: bundled chime.wav not found at %s", src)
+        return ""
     media_dir = Path("/media")
-    if media_dir.is_dir() and os.access(media_dir, os.W_OK):
-        dest = media_dir / "endora_chime.wav"
-        try:
-            shutil.copy2(src, dest)
-            log.info("Chime: installed to %s", dest)
-            return "media-source://media_source/local/endora_chime.wav"
-        except Exception as e:
-            log.warning("Chime: could not copy to /media (%s), falling back", e)
-    # Standalone / dev fallback — requires debug_port to be set
-    return ""
+    if not media_dir.is_dir():
+        log.warning("Chime: /media not mounted — add 'media' to the add-on map in config.json")
+        return ""
+    if not os.access(media_dir, os.W_OK):
+        log.warning("Chime: /media exists but is not writable (permissions: %s)",
+                    oct(media_dir.stat().st_mode))
+        return ""
+    dest = media_dir / "endora_chime.wav"
+    try:
+        shutil.copy2(src, dest)
+        log.info("Chime: installed %s → %s", src.name, dest)
+        return "media-source://media_source/local/endora_chime.wav"
+    except Exception as e:
+        log.warning("Chime: copy to /media failed: %s", e)
+        return ""
 
 
 def _detect_host_ip() -> str:
