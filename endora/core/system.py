@@ -200,15 +200,18 @@ def _install_chime_wav() -> str:
     if not media_dir.is_dir():
         log.warning("Chime: /media not mounted — add 'media' to the add-on map in config.json")
         return ""
-    if not os.access(media_dir, os.W_OK):
-        log.warning("Chime: /media exists but is not writable (permissions: %s)",
-                    oct(media_dir.stat().st_mode))
-        return ""
     dest = media_dir / "endora_chime.wav"
     try:
         shutil.copy2(src, dest)
         log.info("Chime: installed %s → %s", src.name, dest)
         return "media-source://media_source/local/endora_chime.wav"
+    except PermissionError:
+        log.warning(
+            "Chime: cannot write to /media (uid=%d permissions=%s) — "
+            "try adding 'full_access: true' to the add-on config",
+            os.getuid(), oct(media_dir.stat().st_mode),
+        )
+        return ""
     except Exception as e:
         log.warning("Chime: copy to /media failed: %s", e)
         return ""
