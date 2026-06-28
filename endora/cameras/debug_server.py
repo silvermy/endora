@@ -498,7 +498,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     </div>
     <div id="dlrow">
       <a id="capbtn" href="captures" target="_blank" title="Captures" class="fbtn">&#128249; Captures</a>
-      <a id="dlbtn" href="feedback/download" title="Download feedback.jsonl" class="fbtn">&#11015; feedback.<wbr>jsonl</a>
+      <a id="dlbtn" href="feedback/download" download="feedback.jsonl" title="Download feedback.jsonl" class="fbtn">&#11015; feedback.<wbr>jsonl</a>
     </div>
   </div>
   <div id="panel">
@@ -1026,7 +1026,10 @@ class _Handler(BaseHTTPRequestHandler):
                 if not body:
                     body = b"# no feedback logged yet\n"
                 self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                # octet-stream (not text/plain) so webviews — notably the HA
+                # mobile app — always download the file instead of rendering it
+                # inline in the page.
+                self.send_header("Content-Type", "application/octet-stream")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Content-Disposition", "attachment; filename=feedback.jsonl")
                 self.send_header("Cache-Control", "no-store")
