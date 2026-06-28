@@ -47,6 +47,9 @@ class ArmReading:
     # Palm roll from grlib hand landmarks: (index_mcp.x - pinky_mcp.x) / hand_width.
     # Ranges roughly -1 to +1; only populated when hand_lm is provided to classify().
     snap_roll: float = 0.0
+    # True when a wrist is approaching shoulder level but not yet classified
+    # as SINGLE_UP — used to fire the chime early to compensate for speaker latency.
+    arm_rising: bool = False
 
 
 # ── Landmark protocol for type hints ──────────────────────────────────────────
@@ -98,6 +101,9 @@ def _hand_snap_roll(hand_lm: np.ndarray) -> float:
 class ArmTrackerConfig:
     """Thresholds for arm-state classification. All values are frame fractions."""
     arm_above_head_tolerance: float = 0.15
+    # Wrist within this distance BELOW shoulder level triggers arm_rising=True
+    # for early chime firing (compensates for speaker network latency).
+    arm_rising_threshold: float = 0.05
     # When body is NOT upright (reclined/lying down), OR when upright status
     # cannot be determined (hips hidden by blanket), the wrist must clear the
     # shoulder by this larger margin.  Requires a deliberate straight-up arm.
@@ -187,7 +193,7 @@ class ArmTracker:
                 self._pending_state = None
                 return raw
 
-            return ArmReading(state=ArmState.DOWN)
+            return ArmReading(state=ArmState.DOWN, arm_rising=raw.arm_rising if raw else False)
 
         stable_state = self._stable_reading.state
         if raw_state == stable_state:
@@ -261,7 +267,7 @@ class ArmTracker:
             if avg_knee_y < avg_sh_y - self.c.leg_raise_margin:
                 return ArmReading(state=ArmState.DOWN, upright=bool(upright))
 
-        le, re = landmarks[LEFT_ELBOW],  landmarks[RIGHT_ELBOW]
+        le, re = landmarks[LEFT_ELBOW], landmarks[RIGHT_ELBOW]
         lw, rw = landmarks[LEFT_WRIST],  landmarks[RIGHT_WRIST]
 
         mid_x = avg_sh_x
@@ -342,4 +348,10 @@ class ArmTracker:
                 upright=bool(upright),
             )
 
-        return ArmReading(state=ArmState.DOWN, upright=bool(upright))
+        # Detect wrist approaching shoulder — fires chime early to compensate
+        # for speaker network latency (e.g. Alexa ~2s delay).
+        rise_thresh = self.c.arm_rising_threshold
+        lw_rising = lw.y < (ls.y + rise_thresh)
+        rw_rising = rw.y < (rs.y + rise_thresh)
+        return ArmReading(state=ArmState.DOWN, upright=bool(upright),
+                          arm_rising=(lw_rising or rw_rising))

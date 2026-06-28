@@ -451,11 +451,19 @@ class CameraAnalyser(threading.Thread):
                 if reading.state != getattr(self, '_last_logged_state', None):
                     log.info("[%s] state → %s", self.label, reading.state.name)
                     self._last_logged_state = reading.state
-                    # Chime on rising edge to arm-up — earliest possible signal
+                    # Chime on rising edge — fire as early as possible so
+                    # speaker latency (e.g. Alexa ~2s) lands near gesture time.
                     if (self._sonos is not None and
                             reading.state.name in ('SINGLE_UP', 'BOTH_UP') and
                             _prev_arm_state.name == 'DOWN'):
                         self._sonos.notify()
+            # Early chime: arm approaching shoulder while still DOWN
+            elif (self._sonos is not None and
+                    reading is not None and
+                    reading.state == ArmState.DOWN and
+                    reading.arm_rising and
+                    _prev_arm_state == ArmState.DOWN):
+                self._sonos.notify()
                 if reading.state.name == 'SINGLE_UP':
                     log.debug("[%s] SINGLE_UP forearm_dy=%.3f snap_roll=%.3f",
                               self.label, reading.forearm_dy, reading.snap_roll)
