@@ -722,24 +722,28 @@ function doCapture() {
 }
 
 // ── Feedback ────────────────────────────────────────────────────────────────
+function _ask(q, def) {
+  // prompt() is unreliable in some webviews (e.g. the HA mobile app); never
+  // let it throw or block the feedback request — fall back to the default.
+  try { var v = prompt(q, def); return v === null ? def : (v || def); }
+  catch (e) { return def; }
+}
 function doFeedback(label) {
   var msg = document.getElementById('feedbackmsg');
-  var hint = label === 'fn' ? (prompt('What gesture did you try? (e.g. SNAP)', 'SNAP') || 'unknown') : undefined;
-  if (label === 'fn' && hint === null) return; // cancelled
-  var intended = label === 'wg' ? (prompt('What gesture did you intend? (e.g. SNAP)', 'SNAP') || 'unknown') : undefined;
-  if (label === 'wg' && intended === null) return; // cancelled
+  var hint = label === 'fn' ? _ask('What gesture did you try? (e.g. SNAP)', 'SNAP') : undefined;
+  var intended = label === 'wg' ? _ask('What gesture did you intend? (e.g. SNAP)', 'SNAP') : undefined;
   var body = label === 'fn' ? JSON.stringify({label:'fn', hint:hint})
            : label === 'wg' ? JSON.stringify({label:'wg', intended:intended})
            : JSON.stringify({label:label});
   msg.style.color = '#888'; msg.textContent = 'logging…';
   fetch('feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body:body})
-    .then(function(r){return r.json();})
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
     .then(function(d){
-      msg.style.color = d.ok ? (label==='fp'?'#c55':label==='wg'?'#c85':'#59c') : '#888';
-      msg.textContent = d.ok ? '✓ ' + d.msg : '✗ ' + (d.error || 'error');
-      setTimeout(function(){ msg.textContent=''; }, 4000);
+      msg.style.color = d.ok ? (label==='fp'?'#c55':label==='wg'?'#c85':'#59c') : '#c55';
+      msg.textContent = d.ok ? '✓ ' + d.msg : '✗ ' + (d.error || d.msg || 'error');
+      setTimeout(function(){ msg.textContent=''; }, 5000);
     })
-    .catch(function(){ msg.style.color='#888'; msg.textContent='✗ request failed'; });
+    .catch(function(e){ msg.style.color='#c55'; msg.textContent='✗ ' + (e.message || 'request failed'); });
 }
 
 // ── Live log ────────────────────────────────────────────────────────────────
@@ -1131,6 +1135,14 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 payload = {}
             label = payload.get("label", "")
+            # Diagnostic: log every feedback POST with the server port it hit.
+            # Ingress (HA app) = 8766, direct web page = 8765 — lets us confirm
+            # from the live log whether the app's button press reaches the server.
+            try:
+                _port = self.server.server_address[1]
+            except Exception:
+                _port = -1
+            log.info("[feedback] POST label=%r (port %d)", label, _port)
             if _feedback_logger is None:
                 body = json.dumps({"ok": False, "error": "feedback logger not active"}).encode()
                 self.send_response(503)
@@ -1140,12 +1152,12 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_response(200)
             elif label == "fn":
                 hint = str(payload.get("hint", "unknown"))
-                _feedback_logger.mark_false_negative(gesture_hint=hint)
-                body = json.dumps({"ok": True, "msg": "recorded as missed gesture"}).encode()
+                ok = _feedback_logger.mark_false_negative(gesture_hint=hint)
+                body = json.dumps({"ok": ok, "msg": "recorded as missed gesture" if ok else "save failed — see add-on log"}).encode()
                 self.send_response(200)
             elif label == "np":
-                _feedback_logger.mark_no_pose()
-                body = json.dumps({"ok": True, "msg": "recorded as no pose detected"}).encode()
+                ok = _feedback_logger.mark_no_pose()
+                body = json.dumps({"ok": ok, "msg": "recorded as no pose detected" if ok else "save failed — see add-on log"}).encode()
                 self.send_response(200)
             elif label == "wg":
                 intended = str(payload.get("intended", "unknown"))

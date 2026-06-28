@@ -177,19 +177,22 @@ class FeedbackLogger:
             self._last_gesture = None
         return True
 
-    def mark_no_pose(self) -> None:
-        """I was visible on camera but YOLO didn't detect me at all."""
+    def mark_no_pose(self) -> bool:
+        """I was visible on camera but YOLO didn't detect me at all.
+        Returns True if the entry was persisted to disk."""
         entry = {
             "ts": time.time(),
             "label": "no_pose",
         }
         with self._lock:
-            self._write(entry)
+            ok = self._write(entry)
             self._counts["no_pose"] += 1
-        log.info("[feedback] Recorded NO POSE DETECTED")
+        log.info("[feedback] Recorded NO POSE DETECTED (saved=%s)", ok)
+        return ok
 
-    def mark_false_negative(self, gesture_hint: str = "unknown") -> None:
-        """Snapshot the recent reading buffer as a missed gesture."""
+    def mark_false_negative(self, gesture_hint: str = "unknown") -> bool:
+        """Snapshot the recent reading buffer as a missed gesture.
+        Returns True if the entry was persisted to disk."""
         now = time.monotonic()
         with self._lock:
             recent = list(self._recent)
@@ -200,10 +203,11 @@ class FeedbackLogger:
             "recent_readings": [r for _, r in recent[-10:]],  # last 10 frames
         }
         with self._lock:
-            self._write(entry)
+            ok = self._write(entry)
             self._counts["false_negative"] += 1
-        log.info("[feedback] Recorded FALSE NEGATIVE (captured %d recent frames)",
-                 len(recent))
+        log.info("[feedback] Recorded FALSE NEGATIVE (captured %d recent frames, saved=%s)",
+                 len(recent), ok)
+        return ok
 
     def reset_counts(self) -> None:
         """Reset event counters after the log has been downloaded and cleared."""
@@ -262,6 +266,27 @@ class FeedbackLogger:
             log.warning("[feedback] Cannot open %s: %s — feedback disabled", _LOG_PATH, exc)
             return None
 
-    def _write(self, entry: dict) -> None:
-        if self._fh:
+    def _write(self, entry: dict) -> bool:
+        """Append one JSON line and force it to disk.
+
+        Returns True only if the line was written and flushed. Callers must
+        hold self._lock. Lazily reopens the handle if a previous open failed
+        or the file was rotated/cleared out from under us.
+        """
+        if self._fh is None:
+            self._fh = self._open_log()
+        if self._fh is None:
+            log.warning("[feedback] Dropped entry (no log file): %s", entry.get("label"))
+            return False
+        try:
             self._fh.write(json.dumps(entry) + "\n")
+            self._fh.flush()
+            try:
+                os.fsync(self._fh.fileno())
+            except (OSError, ValueError):
+                pass  # fsync unsupported on some mounts; flush already hit the OS
+            return True
+        except Exception as exc:
+            log.warning("[feedback] Write failed (%s) — entry dropped: %s",
+                        exc, entry.get("label"))
+            return False
