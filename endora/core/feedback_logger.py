@@ -205,6 +205,11 @@ class FeedbackLogger:
         log.info("[feedback] Recorded FALSE NEGATIVE (captured %d recent frames)",
                  len(recent))
 
+    def reset_counts(self) -> None:
+        """Reset event counters after the log has been downloaded and cleared."""
+        with self._lock:
+            self._counts.clear()
+
     def print_summary(self) -> None:
         with self._lock:
             counts = dict(self._counts)

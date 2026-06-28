@@ -350,6 +350,7 @@ h3 .sub{color:#555;font-weight:400;letter-spacing:2px}
 #vbox{flex:1 1 auto;min-width:0}
 #vbox img{width:100%;display:block;border:1px solid #1e1e1e;min-height:240px;background:#111}
 #fbrow{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;padding:8px 0 2px}
+#dlrow{display:flex;gap:8px;padding:4px 0 2px;border-top:1px solid #333;margin-top:4px}
 .fbtn{
   padding:12px 10px;border-radius:10px;cursor:pointer;
   font-size:14px;font-weight:700;border:2px solid;letter-spacing:.2px;
@@ -493,9 +494,11 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
       <button id="wgbtn" class="fbtn" onclick="doFeedback('wg')" title="The wrong gesture fired — mark it as incorrect (within 5s)">&#8646; Wrong gesture</button>
       <button id="fnbtn" class="fbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">? Missed gesture</button>
       <button id="npbtn" class="fbtn" onclick="doFeedback('np')" title="I was visible but YOLO didn't detect me at all">&#128683; No pose</button>
+      <span id="feedbackmsg"></span>
+    </div>
+    <div id="dlrow">
       <a id="capbtn" href="captures" target="_blank" title="Captures" class="fbtn">&#128249; Captures</a>
       <a id="dlbtn" href="feedback/download" title="Download feedback.jsonl" class="fbtn">&#11015; feedback.<wbr>jsonl</a>
-      <span id="feedbackmsg"></span>
     </div>
   </div>
   <div id="panel">
@@ -1016,6 +1019,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(body)
+                # Clear after successful delivery so old events don't accumulate.
+                if fp.exists():
+                    fp.write_bytes(b"")
+                    if _feedback_logger is not None:
+                        _feedback_logger.reset_counts()
             except Exception as e:
                 msg = f"error reading feedback log: {e}".encode()
                 self.send_response(500)
