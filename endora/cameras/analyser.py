@@ -186,6 +186,8 @@ class CameraAnalyser(threading.Thread):
             arm_above_head_tolerance_reclined=float(getattr(s, 'arm_above_head_tolerance_reclined', 0.30)),
             body_upright_min=float(getattr(s, 'body_upright_min', -0.15)),
             pose_visibility_min=float(getattr(s, 'pose_visibility_min', 0.45)),
+            keypoint_visibility_min=float(getattr(s, 'keypoint_visibility_min', 0.30)),
+            forearm_vertical_min=float(getattr(s, 'forearm_vertical_min', 0.10)),
             leg_raise_margin=float(getattr(s, 'leg_raise_margin', 0.05)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),

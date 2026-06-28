@@ -150,6 +150,70 @@ def test_t_pose_prefers_t_over_both():
     assert r.state == ArmState.T_POSE
 
 
+def test_one_shoulder_occluded_still_detects_raise():
+    # Side-on on the couch: left shoulder hidden by a cushion (low vis), right
+    # arm raised.  Old averaging gate rejected this; per-side logic should fire.
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        left_shoulder=Point(0.40, 0.40, visibility=0.1),
+        right_elbow=Point(0.65, 0.25), right_wrist=Point(0.65, 0.10),
+    )
+    r = _tracker()._classify_raw(lm, 1280, 720)
+    assert r.state == ArmState.SINGLE_UP
+    assert r.raised_side == Side.RIGHT
+
+
+def test_forearm_vertical_route_fires_when_wrist_near_shoulder():
+    # Camera angle: raised arm whose wrist barely clears the shoulder (0.02),
+    # well under arm_above_head_tolerance, but forearm is clearly vertical.
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        right_elbow=Point(0.60, 0.55),  # elbow low → forearm_dy = 0.17
+        right_wrist=Point(0.60, 0.38),  # wrist just above shoulder (y=0.40)
+    )
+    r = _tracker()._classify_raw(lm, 1280, 720)
+    assert r.state == ArmState.SINGLE_UP, f"got {r.state}"
+    assert r.raised_side == Side.RIGHT
+
+
+def test_low_visibility_wrist_does_not_create_false_raise():
+    # A garbage/occluded wrist keypoint placed high must not trigger a raise.
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        right_elbow=Point(0.65, 0.25),
+        right_wrist=Point(0.65, 0.10, visibility=0.1),  # high but not visible
+    )
+    r = _tracker()._classify_raw(lm, 1280, 720)
+    assert r.state == ArmState.DOWN
+
+
+def test_t_pose_needs_both_shoulders_visible():
+    # With one shoulder occluded we can't confirm a two-handed pose — must not
+    # misfire T_POSE (falls through to per-side SINGLE_UP, which also fails here).
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        left_shoulder=Point(0.40, 0.40, visibility=0.1),
+        left_elbow=Point(0.25, 0.40),   left_wrist=Point(0.10, 0.40),
+        right_elbow=Point(0.75, 0.40),  right_wrist=Point(0.90, 0.40),
+    )
+    r = _tracker()._classify_raw(lm, 1280, 720)
+    assert r.state != ArmState.T_POSE
+
+
+def test_hips_hidden_forearm_up_fires():
+    # Blanket to chest (hips not visible → upright unknown). Arm raised with a
+    # visible, vertical forearm should fire via the lenient+forearm-up route.
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        left_hip=Point(0.42, 0.65, visibility=0.1),
+        right_hip=Point(0.58, 0.65, visibility=0.1),
+        right_elbow=Point(0.65, 0.25), right_wrist=Point(0.65, 0.10),
+    )
+    r = _tracker()._classify_raw(lm, 1280, 720)
+    assert r.state == ArmState.SINGLE_UP
+    assert r.upright is False  # bool(None) → False; hips were unknown
+
+
 if __name__ == "__main__":
     # Minimal runner without pytest
     import traceback

@@ -92,11 +92,23 @@ class Settings:
     # Prevents feet-up-on-couch from triggering false snaps.
     # 0.05 = 5% of frame height clearance above hip.
     leg_raise_margin: float = 0.05
-    # Furniture filter: minimum average visibility of shoulders+hips.
-    # MediaPipe assigns high visibility to real body landmarks and near-zero
-    # to furniture false-detections. 0.35 rejects furniture without touching
-    # real people. Lower = more permissive; raise to 0.5 if still seeing table.
+    # Furniture filter: at least ONE shoulder must exceed this confidence
+    # (uses max, not average, so a person with one shoulder hidden by a blanket
+    # or turned side-on is not rejected). YOLO assigns high confidence to real
+    # body landmarks and near-zero to furniture false-detections. 0.35 rejects
+    # furniture without touching real people. Raise to 0.5 if still seeing table.
     pose_visibility_min: float = 0.35
+    # Per-keypoint confidence below which one landmark (shoulder/wrist/elbow) is
+    # treated as not-visible. Drives per-side arm-raise detection so an occluded
+    # or mis-placed keypoint can't block a real raise on the other, visible arm.
+    keypoint_visibility_min: float = 0.30
+    # Forearm-vertical secondary route to a raised-arm: if the forearm is at
+    # least this vertical (elbow_y − wrist_y, frame fraction) and the wrist is
+    # at/above shoulder height, the arm counts as raised even if the wrist
+    # doesn't clear the full arm_above_head_tolerance. Helps when the camera is
+    # mounted high/at an angle so a raised arm's wrist stays near shoulder level
+    # in the image. Raise toward 0.15 if resting a hand near your head misfires.
+    forearm_vertical_min: float = 0.10
 
     # ── Hands (gesture classification) ───────────────────────────────────
     # Advanced: override in settings.yaml if needed
