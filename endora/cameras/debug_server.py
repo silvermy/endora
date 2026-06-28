@@ -358,6 +358,8 @@ h3 .sub{color:#555;font-weight:400;letter-spacing:2px}
 }
 #fpbtn{background:#2a0808;border-color:#aa2222;color:#ff7777}
 #fpbtn:hover{background:#3d1010}
+#wgbtn{background:#1a0a2a;border-color:#8833cc;color:#cc88ff}
+#wgbtn:hover{background:#280f3d}
 #fnbtn{background:#08152e;border-color:#2255aa;color:#6699ff}
 #fnbtn:hover{background:#102040}
 #npbtn{background:#221500;border-color:#aa7700;color:#ffbb44}
