@@ -209,10 +209,41 @@ class FeedbackLogger:
                  len(recent), ok)
         return ok
 
-    def reset_counts(self) -> None:
-        """Reset event counters after the log has been downloaded and cleared."""
+    def rotate(self) -> bytes:
+        """Return the current log contents, back them up, and start fresh.
+
+        Saves the live log to ``<log>.prev`` (recoverable) and truncates the
+        live file, so each download yields a clean batch without losing the
+        previous one. Atomic with respect to concurrent writes (holds the
+        lock and reuses its own file handle). Returns the bytes that were in
+        the log at rotation time.
+        """
         with self._lock:
+            try:
+                data = _LOG_PATH.read_bytes() if _LOG_PATH.exists() else b""
+            except OSError as exc:
+                log.warning("[feedback] rotate: read failed: %s", exc)
+                data = b""
+            # Only overwrite the backup when there's something to back up, so
+            # downloading an already-empty log doesn't clobber a good .prev.
+            if data:
+                try:
+                    _LOG_PATH.with_name(_LOG_PATH.name + ".prev").write_bytes(data)
+                except OSError as exc:
+                    log.warning("[feedback] rotate: .prev write failed: %s", exc)
+            try:
+                if self._fh is not None:
+                    self._fh.close()
+            except OSError:
+                pass
+            self._fh = None
+            try:
+                _LOG_PATH.write_bytes(b"")          # truncate live log
+            except OSError as exc:
+                log.warning("[feedback] rotate: truncate failed: %s", exc)
+            self._fh = self._open_log()             # fresh append handle
             self._counts.clear()
+        return data
 
     def print_summary(self) -> None:
         with self._lock:

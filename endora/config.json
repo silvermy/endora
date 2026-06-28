@@ -1,6 +1,6 @@
 {
   "name": "Endora",
-  "version": "1.9.86",
+  "version": "1.9.87",
   "slug": "endora",
   "description": "Pose-based gesture detection — SNAP, HOLD, DOUBLE_SNAP, CROSS_ARMS, T_POSE, RAISE_BOTH.",
   "url": "https://github.com/silvermy/endora",
