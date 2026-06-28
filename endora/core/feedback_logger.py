@@ -154,6 +154,29 @@ class FeedbackLogger:
             self._last_gesture = None  # consumed
         return True
 
+    def mark_wrong_gesture(self, intended: str = "unknown") -> bool:
+        """Mark the most recent gesture as the wrong type. Returns True if within window."""
+        now = time.monotonic()
+        with self._lock:
+            if not self._last_gesture or (now - self._last_gesture_ts) > _FP_WINDOW_S:
+                log.info("[feedback] No recent gesture to mark as wrong gesture "
+                         "(window is %.0fs)", _FP_WINDOW_S)
+                return False
+            entry = {
+                "ts": time.time(),
+                "label": "wrong_gesture",
+                "gesture_fired": self._last_gesture,
+                "gesture_intended": intended,
+                "reading": self._last_gesture_reading,
+                "seconds_after_fire": round(now - self._last_gesture_ts, 2),
+            }
+            self._write(entry)
+            self._counts["wrong_gesture"] = self._counts.get("wrong_gesture", 0) + 1
+            log.info("[feedback] Marked %s as WRONG GESTURE (intended: %s)",
+                     self._last_gesture, intended)
+            self._last_gesture = None
+        return True
+
     def mark_no_pose(self) -> None:
         """I was visible on camera but YOLO didn't detect me at all."""
         entry = {

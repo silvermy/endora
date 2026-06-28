@@ -488,6 +488,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     <img id="streamimg" alt="stream">
     <div id="fbrow">
       <button id="fpbtn" class="fbtn" onclick="doFeedback('fp')" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007; False positive</button>
+      <button id="wgbtn" class="fbtn" onclick="doFeedback('wg')" title="The wrong gesture fired — mark it as incorrect (within 5s)">&#8646; Wrong gesture</button>
       <button id="fnbtn" class="fbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">? Missed gesture</button>
       <button id="npbtn" class="fbtn" onclick="doFeedback('np')" title="I was visible but YOLO didn't detect me at all">&#128683; No pose</button>
       <a id="capbtn" href="captures" target="_blank" title="Captures" class="fbtn">&#128249; Captures</a>
@@ -720,12 +721,16 @@ function doFeedback(label) {
   var msg = document.getElementById('feedbackmsg');
   var hint = label === 'fn' ? (prompt('What gesture did you try? (e.g. SNAP)', 'SNAP') || 'unknown') : undefined;
   if (label === 'fn' && hint === null) return; // cancelled
-  var body = label === 'fn' ? JSON.stringify({label:'fn', hint:hint}) : JSON.stringify({label:label});
+  var intended = label === 'wg' ? (prompt('What gesture did you intend? (e.g. SNAP)', 'SNAP') || 'unknown') : undefined;
+  if (label === 'wg' && intended === null) return; // cancelled
+  var body = label === 'fn' ? JSON.stringify({label:'fn', hint:hint})
+           : label === 'wg' ? JSON.stringify({label:'wg', intended:intended})
+           : JSON.stringify({label:label});
   msg.style.color = '#888'; msg.textContent = 'logging…';
   fetch('feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body:body})
     .then(function(r){return r.json();})
     .then(function(d){
-      msg.style.color = d.ok ? (label==='fp'?'#c55':'#59c') : '#888';
+      msg.style.color = d.ok ? (label==='fp'?'#c55':label==='wg'?'#c85':'#59c') : '#888';
       msg.textContent = d.ok ? '✓ ' + d.msg : '✗ ' + (d.error || 'error');
       setTimeout(function(){ msg.textContent=''; }, 4000);
     })
@@ -1132,8 +1137,13 @@ class _Handler(BaseHTTPRequestHandler):
                 _feedback_logger.mark_no_pose()
                 body = json.dumps({"ok": True, "msg": "recorded as no pose detected"}).encode()
                 self.send_response(200)
+            elif label == "wg":
+                intended = str(payload.get("intended", "unknown"))
+                ok = _feedback_logger.mark_wrong_gesture(intended=intended)
+                body = json.dumps({"ok": ok, "msg": "marked as wrong gesture" if ok else "no recent gesture to mark (5s window expired)"}).encode()
+                self.send_response(200)
             else:
-                body = json.dumps({"ok": False, "error": "label must be 'fp' or 'fn'"}).encode()
+                body = json.dumps({"ok": False, "error": "unknown label"}).encode()
                 self.send_response(400)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
