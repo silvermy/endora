@@ -3,11 +3,15 @@ cameras/analyser.py
 
 Thin orchestration layer. Per frame:
   1. Preprocess (dewarp / crop / CLAHE)
-  2. Run YOLO Pose → body keypoints
+  2. Run YOLO Pose → body keypoints for all persons in frame
   3. Run grlib Pipeline → hand landmarks (optional; NoHandDetectedException → None)
-  4. ArmTracker.classify() → ArmReading
-  5. GestureStateMachine.tick() → Gesture or None
+  4. Per-person: ArmTracker.classify() → ArmReading
+  5. Per-person: GestureStateMachine.tick() → Gesture or None
   6. Debug overlay render
+
+Multiple people are tracked simultaneously: each detected person gets their own
+ArmTracker and GestureStateMachine, matched across frames by centroid proximity.
+Any person can trigger a gesture.
 """
 from __future__ import annotations
 
@@ -91,97 +95,41 @@ def _person_visible_kp_count(kps_row: np.ndarray) -> int:
     return int((kps_row[:, 2] > 0.3).sum())
 
 
-def _select_person(
-    kps: np.ndarray,
-    tracked_xy: Optional[tuple],
-    frame_w: int,
-    frame_h: int,
-) -> int:
-    """Pick which detected person to track.
-
-    Strategy
-    --------
-    * If we have a previous centroid (*tracked_xy*), pick the nearest person to
-      it — temporal continuity.  We only abandon the lock if every candidate is
-      more than 30 % of the frame diagonal away, meaning the person genuinely
-      left the frame.
-    * With no history (first frame or after loss), pick the person whose
-      centroid is closest to the frame centre.  Works well for a fixed camera
-      pointed at an activity zone and is immune to fisheye area distortion.
-
-    Both strategies ignore keypoint confidence entirely, so low-contrast
-    clothing or poor lighting does not affect selection stability.
-    """
-    if kps.shape[0] == 1:
-        return 0
-
-    centroids = [_person_centroid(kps[i]) for i in range(kps.shape[0])]
-
-    if tracked_xy is not None:
-        tx, ty = tracked_xy
-        max_dist = 0.30 * (frame_w ** 2 + frame_h ** 2) ** 0.5
-        best, best_dist = 0, float("inf")
-        for i, c in enumerate(centroids):
-            if c is None:
-                continue
-            d = ((c[0] - tx) ** 2 + (c[1] - ty) ** 2) ** 0.5
-            if d < best_dist:
-                best_dist = d
-                best = i
-        if best_dist <= max_dist:
-            return best
-        # Tracking lost — fall through to centre heuristic
-
-    # No history or re-acquisition: score by center-distance penalised by
-    # visible-keypoint count.  A real person has many confident keypoints;
-    # a painting or furniture ghost has very few.  Combined score:
-    #   score = (dist / diag) - 0.4 * (visible_kps / 17)
-    # Lower score wins.  The kp bonus can offset up to 0.4 of normalised
-    # distance, so a person 40% of the diagonal away beats a painting 10%
-    # away with only 2 visible keypoints.
-    cx, cy = frame_w * 0.5, frame_h * 0.5
-    diag = (frame_w ** 2 + frame_h ** 2) ** 0.5
-    best, best_score = 0, float("inf")
-    for i, c in enumerate(centroids):
-        if c is None:
-            continue
-        dist = ((c[0] - cx) ** 2 + (c[1] - cy) ** 2) ** 0.5
-        kp_bonus = 0.4 * (_person_visible_kp_count(kps[i]) / 17)
-        score = dist / diag - kp_bonus
-        if score < best_score:
-            best_score = score
-            best = i
-    return best
-
-
 _MIN_VISIBLE_KPS = 6  # fewer than this → almost certainly not a real person
 
+# Person-pool constants
+_PERSON_MATCH_DIST = 0.30  # max centroid displacement (fraction of frame diagonal)
+                             # to link a detection to an existing tracked person
+_PERSON_PRUNE_S    = 2.0   # seconds without a YOLO detection before dropping entry
 
-def _kps_to_landmarks(
+
+def _all_valid_landmarks(
     kps: Optional[np.ndarray],
     frame_w: int,
     frame_h: int,
-    tracked_xy: Optional[tuple] = None,
-) -> tuple:
-    """Return *(landmarks, new_centroid)* for the selected person.
-
-    *kps* is the [N, 17, 3] array returned by PoseModel (or None).
-    *new_centroid* is the pixel (x, y) centre of the selected person —
-    store it as the next frame's *tracked_xy*.  Both values are None when
-    no person is detected.
-    """
+) -> list[tuple]:
+    """Return list of (_YOLOLandmarks, centroid_px) for every real person detected."""
     if kps is None or kps.shape[0] == 0:
-        return None, None
-    # Filter out ghost detections (paintings, furniture) that have very few
-    # confident keypoints.  A real person in frame typically has 10+ visible.
-    good = [i for i in range(kps.shape[0]) if _person_visible_kp_count(kps[i]) >= _MIN_VISIBLE_KPS]
-    if not good:
-        return None, None
-    if len(good) < kps.shape[0]:
-        kps = kps[good]
-    best = _select_person(kps, tracked_xy, frame_w, frame_h)
-    return _YOLOLandmarks(kps[best], frame_w, frame_h), _person_centroid(kps[best])
+        return []
+    result = []
+    for i in range(kps.shape[0]):
+        if _person_visible_kp_count(kps[i]) >= _MIN_VISIBLE_KPS:
+            c = _person_centroid(kps[i])
+            if c is not None:
+                result.append((_YOLOLandmarks(kps[i], frame_w, frame_h), c))
+    return result
 
+
+@dataclass
+class _PersonEntry:
+    """Per-person tracking state: own ArmTracker + GestureStateMachine."""
+    arm_tracker:       ArmTracker
+    state_machine:     GestureStateMachine
+    centroid:          tuple         # last seen pixel centroid (x, y)
+    last_seen:         float         # monotonic time of last YOLO detection
+    last_lm:           object        # cached _YOLOLandmarks from last YOLO frame
+    last_arm_state:    ArmState      = ArmState.DOWN
+    last_logged_state: object        = None
 
 
 class CameraAnalyser(threading.Thread):
@@ -204,6 +152,7 @@ class CameraAnalyser(threading.Thread):
         self._stop_evt = threading.Event()
         self._feedback = feedback_logger
         self._sonos = sonos_notifier
+        self._near_miss_cb = feedback_logger.on_near_miss if feedback_logger else None
 
         # CLAHE cache — object is expensive; recreate only when clip changes.
         self._clahe_obj = None
@@ -219,32 +168,86 @@ class CameraAnalyser(threading.Thread):
             log.warning("[%s] FrameCapture unavailable: %s", label, e)
             self._frame_capture = None
 
-        # Person tracking — centroid of the last selected person (pixels).
-        # None until the first YOLO detection.
-        self._track_xy: Optional[tuple] = None
-
-        self._arm_tracker = ArmTracker(ArmTrackerConfig(
-            arm_above_head_tolerance=float(getattr(settings, 'arm_above_head_tolerance', 0.15)),
-            arm_above_head_tolerance_reclined=float(getattr(settings, 'arm_above_head_tolerance_reclined', 0.30)),
-            body_upright_min=float(getattr(settings, 'body_upright_min', -0.15)),
-            pose_visibility_min=float(getattr(settings, 'pose_visibility_min', 0.45)),
-            leg_raise_margin=float(getattr(settings, 'leg_raise_margin', 0.05)),
-            state_confirm_s=float(getattr(settings, 'state_confirm_s', 0.20)),
-            state_release_s=float(getattr(settings, 'state_release_s', 0.30)),
-        ))
-        _near_miss_cb = feedback_logger.on_near_miss if feedback_logger else None
-        self._state_machine = GestureStateMachine(StateMachineConfig(
-            cooldown_s=float(getattr(settings, 'cooldown_s', 2.0)),
-            snap_forearm_min=float(getattr(settings, 'snap_forearm_min', 0.10)),
-            hold_duration_s=float(getattr(settings, 'hold_duration_s', 1.5)),
-            double_snap_window_s=float(getattr(settings, 'double_snap_window_s', 3.0)),
-            sustain_s=float(getattr(settings, 'sustain_s', 0.5)),
-            snap_sustain_s=float(getattr(settings, 'snap_sustain_s', 0.50)),
-            snap_roll_threshold=float(getattr(settings, 'snap_roll_threshold', 0.0)),
-        ), on_near_miss=_near_miss_cb)
+        # Per-person tracking: each detected person gets their own ArmTracker +
+        # GestureStateMachine, keyed by an auto-incrementing integer ID assigned
+        # by nearest-centroid matching across YOLO frames.
+        self._persons: dict[int, _PersonEntry] = {}
+        self._next_pid: int = 0
 
     def stop(self):
         self._stop_evt.set()
+
+    # ── Person pool management ─────────────────────────────────────────────
+
+    def _make_person_entry(self, lm, centroid: tuple, now: float) -> _PersonEntry:
+        s = self.s
+        arm_tracker = ArmTracker(ArmTrackerConfig(
+            arm_above_head_tolerance=float(getattr(s, 'arm_above_head_tolerance', 0.15)),
+            arm_above_head_tolerance_reclined=float(getattr(s, 'arm_above_head_tolerance_reclined', 0.30)),
+            body_upright_min=float(getattr(s, 'body_upright_min', -0.15)),
+            pose_visibility_min=float(getattr(s, 'pose_visibility_min', 0.45)),
+            leg_raise_margin=float(getattr(s, 'leg_raise_margin', 0.05)),
+            state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
+            state_release_s=float(getattr(s, 'state_release_s', 0.30)),
+        ))
+        state_machine = GestureStateMachine(StateMachineConfig(
+            cooldown_s=float(getattr(s, 'cooldown_s', 2.0)),
+            snap_forearm_min=float(getattr(s, 'snap_forearm_min', 0.10)),
+            hold_duration_s=float(getattr(s, 'hold_duration_s', 1.5)),
+            double_snap_window_s=float(getattr(s, 'double_snap_window_s', 3.0)),
+            sustain_s=float(getattr(s, 'sustain_s', 0.5)),
+            snap_sustain_s=float(getattr(s, 'snap_sustain_s', 0.50)),
+            snap_roll_threshold=float(getattr(s, 'snap_roll_threshold', 0.0)),
+        ), on_near_miss=self._near_miss_cb)
+        return _PersonEntry(
+            arm_tracker=arm_tracker,
+            state_machine=state_machine,
+            centroid=centroid,
+            last_seen=now,
+            last_lm=lm,
+        )
+
+    def _match_persons(
+        self, detected: list, frame_w: int, frame_h: int, now: float
+    ) -> None:
+        """Match detected (landmarks, centroid) pairs to existing person entries.
+        Updates existing entries in-place; creates new ones for novel persons.
+        Uses greedy nearest-centroid matching — sufficient for small N (< 10).
+        """
+        diag = (frame_w ** 2 + frame_h ** 2) ** 0.5
+        max_dist = _PERSON_MATCH_DIST * diag
+        available = list(self._persons.keys())
+
+        for lm, centroid in detected:
+            best_pid, best_dist = None, float('inf')
+            for pid in available:
+                e = self._persons[pid]
+                d = (
+                    (centroid[0] - e.centroid[0]) ** 2 +
+                    (centroid[1] - e.centroid[1]) ** 2
+                ) ** 0.5
+                if d < best_dist:
+                    best_dist, best_pid = d, pid
+
+            if best_pid is not None and best_dist <= max_dist:
+                e = self._persons[best_pid]
+                e.centroid  = centroid
+                e.last_lm   = lm
+                e.last_seen = now
+                available.remove(best_pid)
+            else:
+                pid = self._next_pid
+                self._next_pid += 1
+                self._persons[pid] = self._make_person_entry(lm, centroid, now)
+                log.info("[%s] New person pid=%d at (%.0f, %.0f)",
+                         self.label, pid, *centroid)
+
+    def _prune_persons(self, now: float) -> None:
+        stale = [pid for pid, e in self._persons.items()
+                 if now - e.last_seen > _PERSON_PRUNE_S]
+        for pid in stale:
+            log.info("[%s] Lost person pid=%d", self.label, pid)
+            del self._persons[pid]
 
     # ── Frame preprocessing ───────────────────────────────────────────────
 
@@ -329,8 +332,7 @@ class CameraAnalyser(threading.Thread):
         )
 
         # grlib/MediaPipe Hands is initialized lazily on the first SINGLE_UP
-        # frame to avoid loading two ML runtimes simultaneously at startup
-        # (causes silent segfault/OOM on embedded hardware).
+        # frame to avoid loading two ML runtimes simultaneously at startup.
         _hand_pipeline = None
         _NoHandDetected = None
         _grlib_ok = True
@@ -338,14 +340,10 @@ class CameraAnalyser(threading.Thread):
         log.info("[%s] Analyser running (v%s — YOLO pose + grlib hands)",
                  self.label, __version__)
 
-        _last_arm_state: ArmState = ArmState.DOWN
-        _prev_arm_state: ArmState = ArmState.DOWN
         _cached_kps: Optional[np.ndarray] = None   # [N, 17, 3] from PoseModel
-        _cached_lm: object = None
-        _cached_pw: int = 1
-        _cached_ph: int = 1
         _prev_small: Optional[np.ndarray] = None   # for motion gate
         _frames_since_yolo: int = 999              # force run on first frame
+        _prev_primary_state: ArmState = ArmState.DOWN
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -360,11 +358,10 @@ class CameraAnalyser(threading.Thread):
             # Skip YOLO when the scene is static — reuse cached landmarks.
             # Always run YOLO when:
             #   • significant motion detected  (something is moving)
-            #   • arm already raised           (responsive snap detection)
+            #   • any arm already raised       (responsive snap detection)
             #   • heartbeat interval reached   (catch slow arm lifts)
             mot_thresh = float(getattr(self.s, 'motion_threshold', 0.015))
             max_skip   = int(getattr(self.s,   'yolo_max_skip',    12))
-            yolo_conf  = float(getattr(self.s, 'yolo_conf',        0.45))
 
             gray  = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2GRAY)
             small = cv2.resize(gray, (80, 60), interpolation=cv2.INTER_AREA)
@@ -377,47 +374,45 @@ class CameraAnalyser(threading.Thread):
             _prev_small = small
             _frames_since_yolo += 1
 
-            arm_is_up = (_last_arm_state != ArmState.DOWN)
-            run_yolo  = motion or arm_is_up or (_frames_since_yolo >= max_skip)
+            any_arm_up = any(e.last_arm_state != ArmState.DOWN
+                             for e in self._persons.values())
+            run_yolo = motion or any_arm_up or (_frames_since_yolo >= max_skip)
 
             now = time.monotonic()
 
             if run_yolo:
                 # Confidence hysteresis:
-                #   acquire  (no lock): base_conf * 1.3 — strict, rejects paintings/furniture
-                #   maintain (locked):  base_conf * 0.65 — lenient, bridges arm-raise dropouts
-                # Both multipliers are internal — not user-facing. Tune yolo_conf only.
+                #   acquire  (no one tracked): base_conf * 1.3 — strict, rejects ghosts
+                #   maintain (someone tracked): base_conf * 0.65 — bridges arm-raise dropouts
                 base_conf = float(getattr(self.s, 'yolo_conf', 0.45))
-                model.conf = base_conf * 0.65 if self._track_xy is not None else base_conf * 1.3
+                model.conf = base_conf * 0.65 if self._persons else base_conf * 1.3
 
                 _cached_kps = model(proc_frame)    # Optional[ndarray [N,17,3]]
-                _cached_lm, new_centroid = _kps_to_landmarks(
-                    _cached_kps, pw, ph, self._track_xy
-                )
-                if new_centroid is not None:
-                    self._track_xy = new_centroid
-                # Keep _track_xy when nobody detected — quick re-acquisition
-                _cached_pw, _cached_ph = pw, ph
                 _frames_since_yolo = 0
-                log.debug("[%s] YOLO ran (motion=%s arm_up=%s)",
-                          self.label, motion, arm_is_up)
+                log.debug("[%s] YOLO ran (motion=%s any_arm_up=%s persons=%d)",
+                          self.label, motion, any_arm_up, len(self._persons))
+
+                detected = _all_valid_landmarks(_cached_kps, pw, ph)
+                self._match_persons(detected, pw, ph, now)
+                self._prune_persons(now)
+
                 # Feed recorder if active (keypoints for regression tests)
                 if self._recorder is not None:
                     if _cached_kps is not None and _cached_kps.shape[0] > 0:
-                        best = _select_person(_cached_kps, self._track_xy, pw, ph)
-                        self._recorder.on_frame(_cached_kps[best], pw, ph, now)
+                        valid = [i for i in range(_cached_kps.shape[0])
+                                 if _person_visible_kp_count(_cached_kps[i]) >= _MIN_VISIBLE_KPS]
+                        kps_rec = _cached_kps[valid[0]] if valid else np.zeros((17, 3), dtype=np.float32)
                     else:
-                        self._recorder.on_frame(
-                            np.zeros((17, 3), dtype=np.float32), pw, ph, now
-                        )
-
-            landmarks = _cached_lm
+                        kps_rec = np.zeros((17, 3), dtype=np.float32)
+                    self._recorder.on_frame(kps_rec, pw, ph, now)
 
             # ── Hand landmarks (grlib / MediaPipe Hands) ──────────────────
-            # Only run when arm is already raised — avoids running both ML
-            # models every frame on resource-constrained hardware.
+            # Only run when at least one person has an arm raised — avoids
+            # running both ML models every frame on resource-constrained hardware.
+            any_single_up = any(e.last_arm_state == ArmState.SINGLE_UP
+                                for e in self._persons.values())
             hand_lm: Optional[np.ndarray] = None
-            if _last_arm_state == ArmState.SINGLE_UP and _grlib_ok:
+            if any_single_up and _grlib_ok:
                 if _hand_pipeline is None:
                     try:
                         sys.modules.setdefault('cv2.cv2', cv2)
@@ -440,78 +435,93 @@ class CameraAnalyser(threading.Thread):
                         if _NoHandDetected is None or not isinstance(e, _NoHandDetected):
                             log.debug("[%s] grlib hand error: %s", self.label, e)
 
-            n_persons = 0 if _cached_kps is None else _cached_kps.shape[0]
-            log.debug("[%s] YOLO: %d person(s) detected", self.label, n_persons)
+            log.debug("[%s] %d person(s) tracked", self.label, len(self._persons))
 
-            _prev_arm_state = _last_arm_state
-            reading = self._arm_tracker.classify(landmarks, pw, ph, hand_lm)
+            # ── Per-person gesture processing ──────────────────────────────
+            _primary_reading: Optional[object] = None
+            _primary_gesture: Optional[Gesture] = None
 
-            if reading is not None:
-                _last_arm_state = reading.state
-                if reading.state != getattr(self, '_last_logged_state', None):
-                    log.info("[%s] state → %s", self.label, reading.state.name)
-                    self._last_logged_state = reading.state
-                    # Chime on rising edge — fire as early as possible so
-                    # speaker latency (e.g. Alexa ~2s) lands near gesture time.
-                    if (self._sonos is not None and
-                            reading.state.name in ('SINGLE_UP', 'BOTH_UP') and
-                            _prev_arm_state.name == 'DOWN'):
-                        self._sonos.notify()
-            # Early chime: arm approaching shoulder while still DOWN
-            elif (self._sonos is not None and
-                    reading is not None and
-                    reading.state == ArmState.DOWN and
-                    reading.arm_rising and
-                    _prev_arm_state == ArmState.DOWN):
-                self._sonos.notify()
-                if reading.state.name == 'SINGLE_UP':
-                    log.debug("[%s] SINGLE_UP forearm_dy=%.3f snap_roll=%.3f",
-                              self.label, reading.forearm_dy, reading.snap_roll)
-                if self._feedback:
-                    self._feedback.push_reading(reading)
+            for pid, entry in list(self._persons.items()):
+                prev_state = entry.last_arm_state
+                # Only pass hand_lm to the person whose arm is already up —
+                # grlib detects one hand in the frame and we can't tell whose.
+                lm_for_hand = hand_lm if entry.last_arm_state == ArmState.SINGLE_UP else None
+                reading = entry.arm_tracker.classify(
+                    entry.last_lm, pw, ph, lm_for_hand, now
+                )
 
-            gesture = self._state_machine.tick(reading, now)
+                if reading is not None:
+                    entry.last_arm_state = reading.state
+                    if reading.state != entry.last_logged_state:
+                        log.info("[%s] pid=%d state → %s",
+                                 self.label, pid, reading.state.name)
+                        entry.last_logged_state = reading.state
+                        # Chime on rising edge — fire as early as possible so
+                        # speaker latency (e.g. Alexa ~2s) lands near gesture time.
+                        if (self._sonos is not None and
+                                reading.state.name in ('SINGLE_UP', 'BOTH_UP') and
+                                prev_state == ArmState.DOWN):
+                            self._sonos.notify()
+                    if reading.state.name == 'SINGLE_UP':
+                        log.debug("[%s] pid=%d SINGLE_UP forearm_dy=%.3f snap_roll=%.3f",
+                                  self.label, pid, reading.forearm_dy, reading.snap_roll)
+                    if self._feedback:
+                        self._feedback.push_reading(reading)
 
-            if gesture is not None:
-                log.debug("[%s] gesture candidate: %s", self.label, gesture)
-                self.on_candidate(gesture, 1.0, self.label)
-                # Feed the test recorder if active
-                if self._recorder is not None:
-                    self._recorder.on_gesture(gesture, self.label)
+                gesture = entry.state_machine.tick(reading, now)
+                if gesture is not None:
+                    log.debug("[%s] pid=%d gesture: %s", self.label, pid, gesture)
+                    self.on_candidate(gesture, 1.0, self.label)
+                    if self._recorder is not None:
+                        self._recorder.on_gesture(gesture, self.label)
+                    _primary_gesture = gesture
 
-            # ── Pick the tracked person's keypoints for overlay + capture ─────
-            _dbg_kps = None
-            if _cached_kps is not None and _cached_kps.shape[0] > 0:
-                _idx = _select_person(_cached_kps, self._track_xy, pw, ph)
-                _dbg_kps = _cached_kps[_idx]
+                # Prefer the arm-up person's reading for the debug overlay
+                if reading is not None and (
+                    _primary_reading is None or reading.state != ArmState.DOWN
+                ):
+                    _primary_reading = reading
+
+            # ── Collect all valid persons' kps for the debug overlay ───────
+            _all_dbg_kps: list[np.ndarray] = []
+            if _cached_kps is not None:
+                for i in range(_cached_kps.shape[0]):
+                    if _person_visible_kp_count(_cached_kps[i]) >= _MIN_VISIBLE_KPS:
+                        _all_dbg_kps.append(_cached_kps[i])
 
             # ── Frame capture on noteworthy events ────────────────────────────
+            current_primary_state = (
+                _primary_reading.state if _primary_reading else ArmState.DOWN
+            )
             if self._frame_capture is not None:
                 _cap_event: Optional[str] = None
-                if gesture is not None:
-                    _cap_event = f"gesture_{gesture.name}"
-                elif reading is not None and reading.state != _prev_arm_state:
-                    _cap_event = f"state_{reading.state.name}"
-                elif _prev_arm_state != ArmState.DOWN and landmarks is None:
-                    _cap_event = "pose_lost"
+                if _primary_gesture is not None:
+                    _cap_event = f"gesture_{_primary_gesture.name}"
+                elif current_primary_state != _prev_primary_state:
+                    _cap_event = f"state_{current_primary_state.name}"
                 if _cap_event is not None:
+                    r = _primary_reading
                     try:
-                        _cap_frame = _draw_debug(proc_frame, _dbg_kps, hand_lm, reading, gesture)
+                        _cap_frame = _draw_debug(
+                            proc_frame, _all_dbg_kps, hand_lm, r, _primary_gesture
+                        )
                         self._frame_capture.save(
-                            _cap_frame,
-                            _cap_event,
+                            _cap_frame, _cap_event,
                             camera=self.label,
-                            arm_state=reading.state.name if reading else _prev_arm_state.name,
-                            gesture=gesture.name if gesture else None,
-                            forearm_dy=reading.forearm_dy if reading else 0.0,
-                            upright=reading.upright if reading else None,
+                            arm_state=r.state.name if r else _prev_primary_state.name,
+                            gesture=_primary_gesture.name if _primary_gesture else None,
+                            forearm_dy=r.forearm_dy if r else 0.0,
+                            upright=r.upright if r else None,
                         )
                     except Exception as e:
                         log.debug("[%s] frame capture error: %s", self.label, e)
+            _prev_primary_state = current_primary_state
 
             if self.debug_frame_cb is not None:
                 try:
-                    dbg = _draw_debug(proc_frame, _dbg_kps, hand_lm, reading, gesture)
+                    dbg = _draw_debug(
+                        proc_frame, _all_dbg_kps, hand_lm, _primary_reading, _primary_gesture
+                    )
                     self.debug_frame_cb(self.label, dbg)
                 except Exception as e:
                     log.debug("[%s] debug render error: %s", self.label, e)
@@ -519,36 +529,29 @@ class CameraAnalyser(threading.Thread):
         log.info("[%s] Analyser stopped", self.label)
 
 
-
-
 # ── Debug overlay ─────────────────────────────────────────────────────────────
 
-def _draw_debug(frame, person_kps, hand_lm, reading, fired_gesture):
-    """Draw YOLO skeleton + grlib hand indicator + gesture state overlay.
+def _draw_debug(frame, all_person_kps, hand_lm, reading, fired_gesture):
+    """Draw YOLO skeleton for all detected persons + gesture state overlay.
 
-    *person_kps* is a [17, 3] numpy array for the already-selected person,
-    or None if no pose was detected this frame.
+    *all_person_kps* is a list of [17, 3] numpy arrays, one per valid person.
     """
     img = frame.copy()
     h, w = img.shape[:2]
 
-    detected = person_kps is not None
-    if detected:
-        person = person_kps   # [17, 3] — already the right person
-
+    for person_kps in all_person_kps:
         for a, b in _COCO_UPPER_BODY:
-            x1, y1, c1 = person[a]
-            x2, y2, c2 = person[b]
+            x1, y1, c1 = person_kps[a]
+            x2, y2, c2 = person_kps[b]
             if c1 > 0.5 and c2 > 0.5:
                 cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)),
                          (0, 200, 0), 2)
-
         for i in range(5, 13):
-            x, y, c = person[i]
+            x, y, c = person_kps[i]
             if c > 0.5:
                 cv2.circle(img, (int(x), int(y)), 4, (0, 255, 0), -1)
 
-    if not detected:
+    if not all_person_kps:
         msg = "NO POSE DETECTED"
         fs = max(0.6, w / 800)
         (tw, th), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, fs, 2)

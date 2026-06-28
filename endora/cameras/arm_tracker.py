@@ -313,19 +313,37 @@ class ArmTracker:
         # ── BOTH_UP / SINGLE_UP ───────────────────────────────────────────
         m = self.c.arm_above_head_tolerance
         both_m = max(m, self.c.both_arms_margin)
-        lw_high = lw.y < (ls.y - both_m)
-        rw_high = rw.y < (rs.y - both_m)
+
+        # When hips are hidden (upright is None) we can't tell sitting from
+        # lying, so require the forearm to point upward (wrist above elbow in
+        # frame Y) as an orientation-independent confirmation that the arm is
+        # genuinely raised toward the ceiling rather than just shifted laterally.
+        if upright is None:
+            lw_high = lw.y < (ls.y - both_m) and (le.y - lw.y) > 0
+            rw_high = rw.y < (rs.y - both_m) and (re.y - rw.y) > 0
+        else:
+            lw_high = lw.y < (ls.y - both_m)
+            rw_high = rw.y < (rs.y - both_m)
 
         if lw_high and rw_high:
             return ArmReading(state=ArmState.BOTH_UP, upright=bool(upright))
 
-        # Use the stricter reclined margin whenever the body is NOT positively
-        # confirmed as upright: covers both clearly reclined (upright=False) and
-        # unknown (upright=None, hips hidden by blanket).
-        m_single = m if upright is True else self.c.arm_above_head_tolerance_reclined
-
-        lw_raised = lw.y < (ls.y - m_single)
-        rw_raised = rw.y < (rs.y - m_single)
+        # upright True  → lenient threshold (confirmed seated/standing)
+        # upright False → strict threshold (confirmed reclined — deliberate raise)
+        # upright None  → hips hidden (blanket/crop); lenient threshold but require
+        #                 forearm pointing up — works for any body orientation
+        if upright is True:
+            m_single = m
+            lw_raised = lw.y < (ls.y - m_single)
+            rw_raised = rw.y < (rs.y - m_single)
+        elif upright is False:
+            m_single = self.c.arm_above_head_tolerance_reclined
+            lw_raised = lw.y < (ls.y - m_single)
+            rw_raised = rw.y < (rs.y - m_single)
+        else:
+            m_single = m
+            lw_raised = lw.y < (ls.y - m_single) and (le.y - lw.y) > 0
+            rw_raised = rw.y < (rs.y - m_single) and (re.y - rw.y) > 0
 
         if rw_raised:
             forearm_dy = re.y - rw.y
