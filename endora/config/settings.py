@@ -60,7 +60,7 @@ class Settings:
     motion_threshold: float = 0.008
     # Heartbeat: even with no motion, run YOLO at least every N frames so
     # slow arm lifts are eventually detected. 6 ≈ re-confirm every ~0.6s at 10fps.
-    yolo_max_skip: int = 6
+    yolo_max_skip: int = 4
     # Minimum keypoint confidence for YOLO to count a landmark as visible.
     pose_min_detection_confidence: float = 0.3
     # Deprecated — no longer used (was MediaPipe tracking threshold).
@@ -119,7 +119,7 @@ class Settings:
     #   snap should read 0.10+, wave should read 0.00 or negative.
     # Lower toward 0.03 if snaps misfire as wave.
     # Raise toward 0.10 if waves misfire as snap.
-    snap_forearm_min: float = 0.10
+    snap_forearm_min: float = 0.08
     # Deprecated name — kept so old settings.yaml files don't cause errors.
     snap_elbow_min: float = 0.08
     # wave_lateral_fraction: wrist offset from body midline as a fraction of

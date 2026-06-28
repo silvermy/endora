@@ -99,11 +99,12 @@ class FeedbackLogger:
         """Call when a gesture fires. Uses most recent buffered reading if none given."""
         now = time.monotonic()
         with self._lock:
-            if reading is None and self._recent:
-                _, last_r = self._recent[-1]
-                reading_dict = last_r
-            else:
+            if reading is not None:
                 reading_dict = _snap(reading)
+            elif self._recent:
+                _, reading_dict = self._recent[-1]
+            else:
+                reading_dict = {}
             entry = {
                 "ts": time.time(),
                 "label": "fired",
