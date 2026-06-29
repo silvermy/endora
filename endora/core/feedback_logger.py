@@ -5,7 +5,7 @@ Gesture feedback collection for threshold tuning.
 
 Records:
   - Every gesture that fires (label="fired") with the ArmReading that triggered it.
-  - User-marked false positives: press 'n' within 5s of a gesture to mark it wrong.
+  - User-marked false positives: press 'n' after a gesture fires to mark it wrong.
   - User-marked false negatives: press 'f' at any time to capture the last few
     readings as a missed gesture (ring buffer of recent frames).
   - Near-misses: frames where snap condition almost triggered (logged from
@@ -37,8 +37,6 @@ log = logging.getLogger(__name__)
 _DATA_DIR = Path("/data") if Path("/data").exists() else Path(".")
 _LOG_PATH = _DATA_DIR / "feedback.jsonl"
 
-# How long after a gesture fires to accept 'n' (false-positive mark).
-_FP_WINDOW_S = 5.0
 # How many recent ArmReadings to snapshot for false-negative reports.
 _FN_BUFFER_SIZE = 30
 
@@ -132,12 +130,17 @@ class FeedbackLogger:
             self._counts["near_miss"] += 1
 
     def mark_false_positive(self) -> bool:
-        """Mark the most recent gesture as a false positive. Returns True if within window."""
+        """Mark the most recent (unmarked) gesture as a false positive.
+
+        No time limit — the last gesture that fired stays markable until it is
+        marked or a newer gesture supersedes it. seconds_after_fire records how
+        long after the fire the mark was made, so a stale mark is still visible
+        (and filterable) in analysis. Returns True if there was a gesture to mark.
+        """
         now = time.monotonic()
         with self._lock:
-            if not self._last_gesture or (now - self._last_gesture_ts) > _FP_WINDOW_S:
-                log.info("[feedback] No recent gesture to mark as false positive "
-                         "(window is %.0fs)", _FP_WINDOW_S)
+            if not self._last_gesture:
+                log.info("[feedback] No gesture has fired yet to mark as false positive")
                 return False
             entry = {
                 "ts": time.time(),
@@ -155,12 +158,15 @@ class FeedbackLogger:
         return True
 
     def mark_wrong_gesture(self, intended: str = "unknown") -> bool:
-        """Mark the most recent gesture as the wrong type. Returns True if within window."""
+        """Mark the most recent (unmarked) gesture as the wrong type.
+
+        No time limit, same as mark_false_positive — markable until consumed or
+        superseded by a newer fire. Returns True if there was a gesture to mark.
+        """
         now = time.monotonic()
         with self._lock:
-            if not self._last_gesture or (now - self._last_gesture_ts) > _FP_WINDOW_S:
-                log.info("[feedback] No recent gesture to mark as wrong gesture "
-                         "(window is %.0fs)", _FP_WINDOW_S)
+            if not self._last_gesture:
+                log.info("[feedback] No gesture has fired yet to mark as wrong gesture")
                 return False
             entry = {
                 "ts": time.time(),

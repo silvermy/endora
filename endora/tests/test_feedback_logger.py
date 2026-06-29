@@ -39,6 +39,27 @@ def test_rotate_backs_up_and_clears(tmp_path, monkeypatch):
     assert (tmp_path / "feedback.jsonl").read_bytes().count(b"\n") == 1
 
 
+def test_false_positive_has_no_time_window(tmp_path, monkeypatch):
+    logger = _logger(tmp_path, monkeypatch)
+    assert logger.mark_false_positive() is False           # nothing fired yet
+    logger.on_gesture_fired("SNAP", 1.0)
+    logger._last_gesture_ts -= 3600                         # pretend it fired an hour ago
+    assert logger.mark_false_positive() is True            # still markable
+    assert logger.mark_false_positive() is False           # consumed — only once
+    log = (tmp_path / "feedback.jsonl").read_bytes()
+    assert b"false_positive" in log
+    assert b"seconds_after_fire" in log
+
+
+def test_wrong_gesture_markable_after_new_fire(tmp_path, monkeypatch):
+    logger = _logger(tmp_path, monkeypatch)
+    logger.on_gesture_fired("SNAP", 1.0)
+    assert logger.mark_wrong_gesture(intended="HOLD") is True
+    assert logger.mark_wrong_gesture(intended="HOLD") is False  # consumed
+    logger.on_gesture_fired("RAISE_BOTH", 1.0)                  # newer fire revives it
+    assert logger.mark_wrong_gesture(intended="SNAP") is True
+
+
 def test_rotate_empty_does_not_clobber_backup(tmp_path, monkeypatch):
     logger = _logger(tmp_path, monkeypatch)
     logger.mark_no_pose()

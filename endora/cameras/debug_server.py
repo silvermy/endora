@@ -1186,7 +1186,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_response(503)
             elif label == "fp":
                 ok = _feedback_logger.mark_false_positive()
-                body = json.dumps({"ok": ok, "msg": "marked as false positive" if ok else "no recent gesture to mark (5s window expired)"}).encode()
+                body = json.dumps({"ok": ok, "msg": "marked as false positive" if ok else "no gesture has fired yet to mark"}).encode()
                 self.send_response(200)
             elif label == "fn":
                 hint = str(payload.get("hint", "unknown"))
@@ -1200,7 +1200,7 @@ class _Handler(BaseHTTPRequestHandler):
             elif label == "wg":
                 intended = str(payload.get("intended", "unknown"))
                 ok = _feedback_logger.mark_wrong_gesture(intended=intended)
-                body = json.dumps({"ok": ok, "msg": "marked as wrong gesture" if ok else "no recent gesture to mark (5s window expired)"}).encode()
+                body = json.dumps({"ok": ok, "msg": "marked as wrong gesture" if ok else "no gesture has fired yet to mark"}).encode()
                 self.send_response(200)
             else:
                 body = json.dumps({"ok": False, "error": "unknown label"}).encode()
