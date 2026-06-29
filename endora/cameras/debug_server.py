@@ -498,7 +498,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     </div>
     <div id="dlrow">
       <a id="capbtn" href="captures" target="_blank" title="Captures" class="fbtn">&#128249; Captures</a>
-      <a id="dlbtn" href="feedback/download" download="feedback.jsonl" title="Download feedback.jsonl" class="fbtn">&#11015; feedback.<wbr>jsonl</a>
+      <a id="dlbtn" href="feedback/download" download="feedback.jsonl" onclick="downloadFeedback(event)" title="Download feedback.jsonl" class="fbtn">&#11015; feedback.<wbr>jsonl</a>
     </div>
   </div>
   <div id="panel">
@@ -742,6 +742,37 @@ function doFeedback(label) {
       msg.style.color = d.ok ? (label==='fp'?'#c55':label==='wg'?'#c85':'#59c') : '#c55';
       msg.textContent = d.ok ? '✓ ' + d.msg : '✗ ' + (d.error || d.msg || 'error');
       setTimeout(function(){ msg.textContent=''; }, 5000);
+    })
+    .catch(function(e){ msg.style.color='#c55'; msg.textContent='✗ ' + (e.message || 'request failed'); });
+}
+
+// ── Download feedback ─────────────────────────────────────────────────────────
+// Driven from JS so it works inside webviews (e.g. the HA mobile app) that
+// ignore the <a download> attribute and Content-Disposition. We fetch the text,
+// attempt a real file download via Blob (desktop + capable browsers), and also
+// copy it to the clipboard as a fallback that works in the app — without ever
+// rendering it inline in the page.
+function downloadFeedback(ev) {
+  if (ev) ev.preventDefault();
+  var msg = document.getElementById('feedbackmsg');
+  msg.style.color = '#888'; msg.textContent = 'fetching…';
+  fetch('feedback/download')
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+    .then(function(text){
+      try {  // real file download (desktop + browsers that allow it)
+        var url = URL.createObjectURL(new Blob([text], {type:'application/octet-stream'}));
+        var a = document.createElement('a');
+        a.href = url; a.download = 'feedback.jsonl';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+      } catch (e) {}
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text)
+          .then(function(){ msg.style.color='#5c5'; msg.textContent='✓ downloaded + copied to clipboard'; })
+          .catch(function(){ msg.style.color='#5c5'; msg.textContent='✓ download started'; });
+      } else {
+        msg.style.color='#5c5'; msg.textContent='✓ download started';
+      }
     })
     .catch(function(e){ msg.style.color='#c55'; msg.textContent='✗ ' + (e.message || 'request failed'); });
 }
