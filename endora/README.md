@@ -194,6 +194,10 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 
 ## Tuning reference
 
+> For the full feedback-driven tuning workflow (how to gather labeled feedback,
+> read `feedback.jsonl`, decide which threshold to change, and lock in fixes with
+> regression captures), see **[docs/TRAINING.md](docs/TRAINING.md)**.
+
 | Problem | Fix |
 |---|---|
 | No skeleton / tracking furniture | Raise `pose_visibility_min` toward `0.5`; centre yourself with `dewarp_pan` |
