@@ -84,12 +84,20 @@ class GestureSystem:
             self._recorder = TestRecorder()
             debug_server.set_recorder(self._recorder)
 
+        # Each analyser runs its own ONNX Runtime pose-model session. Left at
+        # 0 (= os.cpu_count()) per session, two simultaneous analysers would
+        # each try to claim every core, oversubscribing the CPU and pinning
+        # it at 100%. Split the machine's cores evenly across analysers.
+        num_analysers = 1 if self._single else 2
+        model_threads = max(1, (os.cpu_count() or 4) // num_analysers)
+
         self.analyser_a = CameraAnalyser(
             camera=self.cam_a, settings=settings,
             on_candidate=self.fusion.receive, label="A",
             debug_frame_cb=dbg_cb,
             feedback_logger=self.feedback,
             sonos_notifier=self._sonos,
+            num_threads=model_threads,
         )
         self.analyser_a._recorder = self._recorder
         if self.analyser_a._frame_capture is not None:
@@ -101,6 +109,7 @@ class GestureSystem:
             debug_frame_cb=dbg_cb,
             feedback_logger=self.feedback,
             sonos_notifier=self._sonos,
+            num_threads=model_threads,
         )
         if self.analyser_b:
             self.analyser_b._recorder = self._recorder

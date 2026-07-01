@@ -142,6 +142,7 @@ class CameraAnalyser(threading.Thread):
         debug_frame_cb=None,
         feedback_logger=None,
         sonos_notifier=None,
+        num_threads: int = 0,
     ):
         super().__init__(daemon=True, name=f"Analyser-{label}")
         self.camera = camera
@@ -149,6 +150,7 @@ class CameraAnalyser(threading.Thread):
         self.on_candidate = on_candidate
         self.label = label
         self.debug_frame_cb = debug_frame_cb
+        self._num_threads = num_threads
         self._stop_evt = threading.Event()
         self._feedback = feedback_logger
         self._sonos = sonos_notifier
@@ -330,7 +332,7 @@ class CameraAnalyser(threading.Thread):
             model_path=model_name,
             imgsz=yolo_imgsz,
             conf=yolo_conf,
-            num_threads=0,          # 0 = all CPU cores
+            num_threads=self._num_threads,
         )
 
         # grlib/MediaPipe Hands is initialized lazily on the first SINGLE_UP
