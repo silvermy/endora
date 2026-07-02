@@ -51,9 +51,15 @@ class Settings:
     # from furniture/shadows, especially in low light. Default 0.25 is too
     # permissive; 0.45 filters most ghost detections without missing real people.
     yolo_conf: float = 0.30
-    # Inference resolution (square, must be multiple of 32).
-    # 320 uses one-quarter the FLOPs of 640 — default and recommended on Pi.
-    # Increase to 640 only if you need to detect very distant or small people.
+    # Inference resolution (square, must be multiple of 32). Only sizes with
+    # a matching bundled/cached .onnx actually take effect — today that's
+    # 320, 480, and 640 (see Dockerfile). Any other value silently falls
+    # back to 640 on aarch64 (Pi 4/5), since ONNX export at runtime is
+    # unconditionally disabled there (PyTorch causes SIGILL). A missing
+    # size can still be added by hand: generate it on an x86/macOS machine
+    # and drop <model>-<imgsz>.onnx into the add-on's /data/ folder.
+    # 320 uses one-quarter the FLOPs of 640 — fastest, but may miss distant
+    # or small people. 480 is a middle ground. 640 gives the most detail.
     yolo_imgsz: int = 320
     # Motion gate: only run YOLO when the frame changes by more than this
     # fraction (0–1 mean absolute pixel difference over an 80×60 thumbnail).

@@ -36,14 +36,24 @@ ENV PATH="/opt/venv/bin:$PATH"
 # ── Models — kept before application code so this layer is only invalidated ───
 # when the model file itself changes, not on every code commit.
 #
-# 320×320 fast model: PyTorch/ultralytics causes SIGILL on aarch64 (Pi 4/5),
-# so we cannot export at build time. Generate it once on an x86/macOS machine:
+# yolo_imgsz only ever works at a size that has a matching bundled/cached
+# .onnx file (cameras/pose_model.py's resolve_model_path) — PyTorch/
+# ultralytics causes SIGILL on aarch64 (Pi 4/5), so runtime export is
+# unconditionally disabled there. Bundled sizes today: 320, 480, 640 (for
+# both yolo11n-pose and yolo11s-pose). Any other requested size silently
+# falls back to 640 (with a warning) on a Pi.
+#
+# To add a new bundled size, generate it once on an x86/macOS machine
+# (never on a Pi — it will crash):
 #
 #   python3 -c "from ultralytics import YOLO; \
-#               YOLO('yolo11n-pose.pt').export(format='onnx', imgsz=320, simplify=True)"
+#               YOLO('yolo11n-pose.pt').export(format='onnx', imgsz=480, simplify=True)"
 #
-# Then commit the resulting yolo11n-pose-320.onnx alongside yolo11n-pose.onnx.
-# Uncomment the COPY below once the file exists in the repo.
+# Then upload the resulting yolo11n-pose-480.onnx as a Release asset under
+# the MODELS_TAG below (alongside the existing ones), and add a wget line
+# for it here. A user who needs a size that is not bundled can still drop
+# a matching <model>-<imgsz>.onnx into the add-on's /data/ folder by hand —
+# resolve_model_path checks there before falling back.
 #
 WORKDIR /app
 
@@ -55,8 +65,10 @@ ARG MODELS_BASE=https://github.com/silvermy/endora/releases/download/${MODELS_TA
 
 RUN wget -q -L "${MODELS_BASE}/yolo11n-pose.onnx"     -O yolo11n-pose.onnx \
  && wget -q -L "${MODELS_BASE}/yolo11n-pose-320.onnx" -O yolo11n-pose-320.onnx \
+ && wget -q -L "${MODELS_BASE}/yolo11n-pose-480.onnx" -O yolo11n-pose-480.onnx \
  && wget -q -L "${MODELS_BASE}/yolo11s-pose.onnx"     -O yolo11s-pose.onnx \
- && wget -q -L "${MODELS_BASE}/yolo11s-pose-320.onnx" -O yolo11s-pose-320.onnx
+ && wget -q -L "${MODELS_BASE}/yolo11s-pose-320.onnx" -O yolo11s-pose-320.onnx \
+ && wget -q -L "${MODELS_BASE}/yolo11s-pose-480.onnx" -O yolo11s-pose-480.onnx
 
 # ── Application code (changes frequently — only invalidates these COPY layers)
 COPY cameras/           cameras/
@@ -70,8 +82,10 @@ COPY config.json        .
 # ── Validate ONNX models ─────────────────────────────────────────────────────
 RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose.onnx',     providers=['CPUExecutionProvider']); print('ONNX nano-640 OK:', s.get_inputs()[0].shape)"
 RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose-320.onnx', providers=['CPUExecutionProvider']); print('ONNX nano-320 OK:', s.get_inputs()[0].shape)"
+RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose-480.onnx', providers=['CPUExecutionProvider']); print('ONNX nano-480 OK:', s.get_inputs()[0].shape)"
 RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11s-pose.onnx',     providers=['CPUExecutionProvider']); print('ONNX small-640 OK:', s.get_inputs()[0].shape)"
 RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11s-pose-320.onnx', providers=['CPUExecutionProvider']); print('ONNX small-320 OK:', s.get_inputs()[0].shape)"
+RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11s-pose-480.onnx', providers=['CPUExecutionProvider']); print('ONNX small-480 OK:', s.get_inputs()[0].shape)"
 
 # ── S6 service definition ─────────────────────────────────────────────────────
 # S6 looks for services in /etc/services.d/<name>/run
