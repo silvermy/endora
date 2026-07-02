@@ -304,7 +304,11 @@ class CameraAnalyser(threading.Thread):
     # ── Frame preprocessing ───────────────────────────────────────────────
 
     def _preprocess(self, frame):
-        """Apply dewarp, flip, crop, CLAHE. Returns (proc_frame, w, h)."""
+        """Apply dewarp, flip, crop. Returns (proc_frame, w, h).
+
+        CLAHE is intentionally NOT applied here — see _apply_low_light_enhance,
+        called separately after the background subtractor samples the frame.
+        """
         h, w = frame.shape[:2]
 
         if getattr(self.s, 'dewarp_enable', False):
@@ -344,18 +348,28 @@ class CameraAnalyser(threading.Thread):
         if y0 > 0 or y1 < h or x0 > 0 or x1 < w:
             frame = frame[y0:y1, x0:x1]
 
-        if getattr(self.s, 'low_light_enhance', False):
-            clip = float(getattr(self.s, 'low_light_clip', 2.0))
-            if clip != self._clahe_clip:
-                self._clahe_obj = cv2.createCLAHE(clipLimit=clip, tileGridSize=(8, 8))
-                self._clahe_clip = clip
-            lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
-            l_ch, a_ch, b_ch = cv2.split(lab)
-            l_ch = self._clahe_obj.apply(l_ch)
-            frame = cv2.cvtColor(cv2.merge([l_ch, a_ch, b_ch]), cv2.COLOR_LAB2BGR)
-
         ph, pw = frame.shape[:2]
         return frame, pw, ph
+
+    def _apply_low_light_enhance(self, frame):
+        """CLAHE local-contrast boost, kept separate from _preprocess so it can
+        run AFTER the background subtractor samples the frame. CLAHE amplifies
+        contrast most aggressively in dim regions — exactly where it can also
+        amplify ordinary sensor noise into something that reads as motion,
+        which previously let static objects (e.g. a framed picture in a
+        shadowed corner) intermittently clear the background-subtraction
+        liveness check with no real movement involved.
+        """
+        if not getattr(self.s, 'low_light_enhance', False):
+            return frame
+        clip = float(getattr(self.s, 'low_light_clip', 2.0))
+        if clip != self._clahe_clip:
+            self._clahe_obj = cv2.createCLAHE(clipLimit=clip, tileGridSize=(8, 8))
+            self._clahe_clip = clip
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        l_ch, a_ch, b_ch = cv2.split(lab)
+        l_ch = self._clahe_obj.apply(l_ch)
+        return cv2.cvtColor(cv2.merge([l_ch, a_ch, b_ch]), cv2.COLOR_LAB2BGR)
 
     # ── Main loop ─────────────────────────────────────────────────────────
 
@@ -418,10 +432,15 @@ class CameraAnalyser(threading.Thread):
 
             # Fed every frame (not just motion-gated ones) so the model keeps
             # tracking gradual lighting drift even when nothing is moving.
+            # Sampled BEFORE CLAHE (below) — CLAHE's local-contrast boost can
+            # amplify sensor noise in dim areas into something that looks like
+            # motion, which would undermine the liveness check it feeds.
             fg_mask = (
                 bg_subtractor.apply(proc_frame)
                 if getattr(self.s, 'bg_subtract_enable', True) else None
             )
+
+            proc_frame = self._apply_low_light_enhance(proc_frame)
 
             # ── Motion gate ───────────────────────────────────────────────
             # Resize to 80×60 (~0.1 ms) and diff against previous frame.
