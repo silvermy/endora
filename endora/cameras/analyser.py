@@ -439,6 +439,7 @@ class CameraAnalyser(threading.Thread):
                 bg_subtractor.apply(proc_frame)
                 if getattr(self.s, 'bg_subtract_enable', True) else None
             )
+            min_fg_frac = float(getattr(self.s, 'bg_subtract_min_foreground', 0.12))
 
             proc_frame = self._apply_low_light_enhance(proc_frame)
 
@@ -481,7 +482,6 @@ class CameraAnalyser(threading.Thread):
                 log.debug("[%s] YOLO ran (motion=%s any_arm_up=%s persons=%d)",
                           self.label, motion, any_arm_up, len(self._persons))
 
-                min_fg_frac = float(getattr(self.s, 'bg_subtract_min_foreground', 0.12))
                 detected = _all_valid_landmarks(
                     _cached_kps, pw, ph, fg_mask=fg_mask, min_foreground_frac=min_fg_frac,
                 )
@@ -575,10 +575,16 @@ class CameraAnalyser(threading.Thread):
                     _primary_reading = reading
 
             # ── Collect all valid persons' kps for the debug overlay ───────
+            # Same two checks _all_valid_landmarks applies to gesture candidates
+            # (keypoint count + wrist-liveness), so the overlay never shows a
+            # skeleton (e.g. on a framed picture) that could not actually have
+            # fired a gesture — otherwise the debug page looks like ghosts are
+            # still getting through when they are already correctly rejected.
             _all_dbg_kps: list[np.ndarray] = []
             if _cached_kps is not None:
                 for i in range(_cached_kps.shape[0]):
-                    if _person_visible_kp_count(_cached_kps[i]) >= _MIN_VISIBLE_KPS:
+                    if (_person_visible_kp_count(_cached_kps[i]) >= _MIN_VISIBLE_KPS
+                            and _wrist_shows_motion(_cached_kps[i], fg_mask, pw, ph, min_fg_frac)):
                         _all_dbg_kps.append(_cached_kps[i])
 
             # ── Frame capture on noteworthy events ────────────────────────────
