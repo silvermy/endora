@@ -203,7 +203,7 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | No skeleton / tracking furniture | Raise `pose_visibility_min` toward `0.5`; centre yourself with `dewarp_pan` |
 | Arm raise not detected | Lower `arm_above_head_tolerance` toward `0.10` |
 | Arm raise triggers too easily | Raise `arm_above_head_tolerance` toward `0.20` |
-| SNAP not firing | Lower `snap_forearm_min` toward `0.07`; watch `forearm_dy` in debug |
+| SNAP not firing | Lower `snap_forearm_min` toward `0.05`; watch `forearm_dy` in debug |
 | HOLD fires too soon / too late | Adjust `hold_duration_s` |
 | T-pose fires when raising both arms | Raise `sustain_s` toward `1.0` |
 | Cross-arms not detecting | Wrists need to be quite close to opposite shoulders; pose must be clean |
@@ -225,7 +225,7 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `arm_above_head_tolerance` | `0.15` | Wrist must be this far above shoulder (frame fraction) |
 | `body_upright_min` | `-0.15` | Hip-shoulder gap to confirm upright (negative OK for fisheye) |
 | `pose_visibility_min` | `0.45` | Min landmark visibility to accept a pose (filters furniture) |
-| `snap_forearm_min` | `0.10` | Minimum forearm verticality for SNAP/HOLD |
+| `snap_forearm_min` | `0.06` | Minimum forearm verticality for SNAP/HOLD |
 | `hold_duration_s` | `1.5` | Seconds after SNAP that arm must stay up to fire HOLD |
 | `double_snap_window_s` | `3.0` | Seconds within which two snaps count as DOUBLE_SNAP |
 | `sustain_s` | `0.5` | Seconds held for CROSS_ARMS / T_POSE / RAISE_BOTH |

@@ -131,9 +131,9 @@ class Settings:
     #   snap should read 0.10+, wave should read 0.00 or negative.
     # Lower toward 0.03 if snaps misfire as wave.
     # Raise toward 0.10 if waves misfire as snap.
-    snap_forearm_min: float = 0.08
+    snap_forearm_min: float = 0.06
     # Deprecated name — kept so old settings.yaml files don't cause errors.
-    snap_elbow_min: float = 0.08
+    snap_elbow_min: float = 0.06
     # wave_lateral_fraction: wrist offset from body midline as a fraction of
     # frame width required to classify as wave (vs snap).
     # Deprecated — no longer used for classification; snap_elbow_min is used.
@@ -161,7 +161,7 @@ class Settings:
     # Minimum time the arm must stay up before SNAP fires (seconds), measured
     # from the first confirmed SINGLE_UP frame.  Filters out brief accidental
     # raises; ArmTracker's state_confirm_s adds another 0.20s on top.
-    snap_sustain_s: float = 0.50
+    snap_sustain_s: float = 0.10
 
     # Seconds a new arm state must be seen before being accepted.
     # Lower = more responsive but may get single-frame false positives.
