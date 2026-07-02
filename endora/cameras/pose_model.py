@@ -154,13 +154,16 @@ def resolve_model_path(model_path: str, imgsz: int) -> tuple[str, int]:
             break   # export failed; don't try the other candidate
 
     # Nothing worked — use original model at its native size
+    name = Path(model_path).name
     log.warning(
-        "Model %s has static %dx%d input; no .pt found for re-export. "
-        "Running at %dx%d (still ~3x faster than ultralytics via multi-threading). "
-        "To enable %dx%d: copy yolo11n-pose.pt into the add-on /data/ folder "
-        "and restart once.",
-        Path(model_path).name, static_sz, static_sz, static_sz, static_sz,
-        imgsz,
+        f"Model {name} has static {static_sz}x{static_sz} input; requested "
+        f"{imgsz}x{imgsz} is not available (no bundled/cached "
+        f"{imgsz}x{imgsz} model, and .onnx export is never attempted on "
+        f"aarch64 — see resolve_model_path docstring). Running at "
+        f"{static_sz}x{static_sz} instead (still ~3x faster than "
+        f"ultralytics via multi-threading). To enable {imgsz}x{imgsz}: "
+        f"generate {stem}-{imgsz}.onnx on an x86/macOS machine and copy it "
+        f"to /data/{stem}-{imgsz}.onnx, then restart once."
     )
     return model_path, static_sz
 
