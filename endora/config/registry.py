@@ -79,10 +79,12 @@ REGISTRY: list[SettingField] = [
     SettingField("yolo_conf", float, 0.30,
                   "Minimum YOLO detection confidence (0-1)", group="Pose", user_facing=True,
                   ui=UIMeta("YOLO confidence", "slider", 0.10, 0.80, 0.01, "Body", order=5)),
-    SettingField("yolo_imgsz", int, 320,
-                  "Inference resolution — 320, 480, or 640 are bundled; other "
-                  "sizes silently fall back to 640 on aarch64 (no runtime export)",
-                  group="Pose", user_facing=True),
+    SettingField("yolo_imgsz", str, "320",
+                  "Inference resolution — only bundled sizes actually take "
+                  "effect (others silently fall back to 640 on aarch64, "
+                  "since there is no runtime export there)",
+                  group="Pose", user_facing=True,
+                  enum=("320", "480", "640")),
     SettingField("motion_threshold", float, 0.015,
                   "Motion gate: only run YOLO when the frame changes by more than this fraction",
                   group="Pose", user_facing=True),
