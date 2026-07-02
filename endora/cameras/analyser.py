@@ -388,10 +388,11 @@ class CameraAnalyser(threading.Thread):
         # re-learns the static scene so it tolerates gradual lighting drift, but
         # anything that hasn't settled into the background yet reads as
         # foreground. detectShadows=False keeps the mask a clean 0/255.
-        bg_subtractor = (
-            cv2.createBackgroundSubtractorMOG2(detectShadows=False)
-            if getattr(self.s, 'bg_subtract_enable', True) else None
-        )
+        # Object creation is cheap and unconditional; bg_subtract_enable is
+        # re-read every frame below (like every other live-tunable setting)
+        # so toggling it on the debug page takes effect immediately, with no
+        # add-on restart required.
+        bg_subtractor = cv2.createBackgroundSubtractorMOG2(detectShadows=False)
 
         # grlib/MediaPipe Hands is initialized lazily on the first SINGLE_UP
         # frame to avoid loading two ML runtimes simultaneously at startup.
@@ -417,7 +418,10 @@ class CameraAnalyser(threading.Thread):
 
             # Fed every frame (not just motion-gated ones) so the model keeps
             # tracking gradual lighting drift even when nothing is moving.
-            fg_mask = bg_subtractor.apply(proc_frame) if bg_subtractor is not None else None
+            fg_mask = (
+                bg_subtractor.apply(proc_frame)
+                if getattr(self.s, 'bg_subtract_enable', True) else None
+            )
 
             # ── Motion gate ───────────────────────────────────────────────
             # Resize to 80×60 (~0.1 ms) and diff against previous frame.
