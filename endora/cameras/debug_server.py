@@ -39,6 +39,10 @@ _lock = threading.Lock()
 _last_gesture: Dict = {"label": "", "ts": 0.0}
 _single_camera: bool = False
 _settings = None
+# Keys actually changed via a debug-page slider/toggle this run — see
+# _save_to_yaml(), which only persists these (plus whatever's already on
+# disk) instead of snapshotting every param.
+_touched: set = set()
 _recorder = None
 _frame_capture = None
 _feedback_logger = None
@@ -232,6 +236,7 @@ def _apply_setting(key: str, raw: str) -> bool:
             return False
         _settings.log_level = raw.lower()
         _apply_log_level(raw.lower())
+        _touched.add(key)
         return True
     if current is None:
         return False
@@ -245,6 +250,7 @@ def _apply_setting(key: str, raw: str) -> bool:
         else:
             v = raw
         setattr(_settings, key, v)
+        _touched.add(key)
         return True
     except (ValueError, TypeError):
         return False
@@ -263,7 +269,12 @@ def _apply_log_level(level_str: str) -> None:
 
 def _save_to_yaml() -> tuple[bool, str]:
     """
-    Persist current live settings so they survive an add-on restart.
+    Persist settings the user actually changed on this page so they survive
+    an add-on restart — NOT a full snapshot of every slider/toggle. A full
+    snapshot would silently pin untouched params (e.g. low_light_enhance) as
+    permanent overrides the moment you saved any other slider, locking the
+    HA Configuration tab out of them even though you never meant to touch
+    them here.
 
     Writes to two places:
       /data/runtime_overrides.yaml  — loaded by settings.py AFTER options.json,
@@ -271,19 +282,32 @@ def _save_to_yaml() -> tuple[bool, str]:
                                       The HA Supervisor never touches this file.
       /data/settings.yaml           — patched in-place (Docker / standalone path)
     """
-    vals = _current_values()
+    all_vals = _current_values()
     errors: list[str] = []
 
     # ── 1. runtime_overrides.yaml (survives HA Supervisor regeneration) ──
     # The Supervisor regenerates options.json from its stored config on every
     # restart, so patching options.json directly is not persistent.  This
     # file is loaded last in settings.py and takes the highest priority.
+    # Persist only keys touched this session plus whatever's already saved
+    # (so re-saving after tweaking one slider doesn't drop earlier overrides,
+    # but also doesn't newly pin params you never touched).
     overrides_path = Path("/data/runtime_overrides.yaml")
+    keys_to_write = set(_touched)
+    try:
+        if overrides_path.exists():
+            import yaml
+            existing = yaml.safe_load(overrides_path.read_text()) or {}
+            keys_to_write |= existing.keys()
+    except Exception:
+        pass
+    vals = {k: v for k, v in all_vals.items() if k in keys_to_write}
     try:
         lines = [
             "# Endora runtime overrides — written by debug page Save button.\n",
             "# Loaded after options.json; takes priority over HA UI values.\n",
-            "# Delete this file to revert to the HA Configuration tab values.\n",
+            "# Delete a line (or this whole file) to revert that setting to\n",
+            "# the HA Configuration tab value.\n",
             "\n",
         ]
         for key, value in vals.items():
