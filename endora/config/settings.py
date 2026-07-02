@@ -61,6 +61,19 @@ class Settings:
     # Heartbeat: even with no motion, run YOLO at least every N frames so
     # slow arm lifts are eventually detected. 6 ≈ re-confirm every ~0.6s at 10fps.
     yolo_max_skip: int = 4
+    # Background-subtraction liveness filter: rejects a YOLO detection whose
+    # wrist(s) sit entirely over pixels the adaptive background model considers
+    # static. Catches things like a framed picture on the wall that YOLO
+    # mis-reads as a person with a permanently raised arm — a real arm-raise
+    # always shows up as freshly-changed (foreground) pixels at the wrist, no
+    # matter how long the rest of the room has looked the same. Continuously
+    # re-learns the scene, so gradual lighting drift (day/night, lamps) doesn't
+    # trip it. Disable if it ever suppresses a real gesture.
+    bg_subtract_enable: bool = True
+    # Minimum fraction of a wrist's small check-patch that must read as
+    # foreground for that wrist to count as "moving". Lower = more permissive
+    # (catches subtler motion, e.g. under a blanket) but slower to flag ghosts.
+    bg_subtract_min_foreground: float = 0.12
     # Minimum keypoint confidence for YOLO to count a landmark as visible.
     pose_min_detection_confidence: float = 0.3
     # Deprecated — no longer used (was MediaPipe tracking threshold).

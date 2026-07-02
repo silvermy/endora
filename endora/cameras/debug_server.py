@@ -86,6 +86,7 @@ _PARAMS = [
     ("snap_forearm_min",         "Snap sensitivity",   0.03, 0.20, 0.01, "Gesture"),
     ("snap_sustain_s",           "Snap hold time (s)", 0.0,  1.0,  0.05, "Gesture"),
     ("cooldown_s",               "Cooldown (s)",       0,    10,   0.25, "Gesture"),
+    ("bg_subtract_min_foreground", "Ghost rejection",  0.0,  0.50, 0.01, "Gesture"),
     ("yolo_conf",                "YOLO confidence",    0.10, 0.80, 0.01, "Body"),
     # View group — rendered as joystick (pan/tilt) + compact sliders
     ("dewarp_vfov",              "Vertical FOV (°)",   20,   100,  1,    "View"),
@@ -104,6 +105,7 @@ _JOY_PARAMS = [
 # (key, label, description)
 _TOGGLES = [
     ("low_light_enhance", "CLAHE enhance", "Boost local contrast before pose inference — helps dark clothing on dark backgrounds"),
+    ("bg_subtract_enable", "Ghost rejection", "Reject detections whose wrist never moves against the learned background — filters framed pictures, mirrors, TV content mis-read as a raised arm"),
 ]
 
 

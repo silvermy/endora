@@ -102,21 +102,69 @@ _PERSON_MATCH_DIST = 0.30  # max centroid displacement (fraction of frame diagon
                              # to link a detection to an existing tracked person
 _PERSON_PRUNE_S    = 2.0   # seconds without a YOLO detection before dropping entry
 
+# Raw COCO keypoint indices (before the MediaPipe remap below) for the wrists —
+# used by the background-subtraction liveness check.
+_COCO_LEFT_WRIST  = 9
+_COCO_RIGHT_WRIST = 10
+_WRIST_PATCH_FRAC = 0.04  # half-width of the wrist foreground-check patch,
+                           # as a fraction of the frame diagonal
+
+
+def _wrist_shows_motion(
+    kps_row: np.ndarray,
+    fg_mask: Optional[np.ndarray],
+    frame_w: int,
+    frame_h: int,
+    min_foreground_frac: float,
+) -> bool:
+    """True if at least one visible wrist sits over recently-changed (foreground)
+    pixels — used to reject static objects (e.g. a framed picture containing a
+    person) that YOLO mis-detects as a permanently "raised arm" but which never
+    actually moves. Returns True (don't reject) when there's nothing to check
+    against — no background model yet, or no confidently-visible wrist.
+    """
+    if fg_mask is None:
+        return True
+    mh, mw = fg_mask.shape[:2]
+    diag = (frame_w ** 2 + frame_h ** 2) ** 0.5
+    half = max(2, int(_WRIST_PATCH_FRAC * diag))
+    seen_wrist = False
+    for idx in (_COCO_LEFT_WRIST, _COCO_RIGHT_WRIST):
+        if kps_row[idx, 2] <= 0.3:
+            continue
+        seen_wrist = True
+        x, y = kps_row[idx, 0], kps_row[idx, 1]
+        x0, x1 = max(0, int(x - half)), min(mw, int(x + half))
+        y0, y1 = max(0, int(y - half)), min(mh, int(y + half))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        patch = fg_mask[y0:y1, x0:x1]
+        if patch.size == 0:
+            continue
+        if float((patch > 0).mean()) >= min_foreground_frac:
+            return True
+    return not seen_wrist  # no visible wrist → can't judge, don't reject
+
 
 def _all_valid_landmarks(
     kps: Optional[np.ndarray],
     frame_w: int,
     frame_h: int,
+    fg_mask: Optional[np.ndarray] = None,
+    min_foreground_frac: float = 0.12,
 ) -> list[tuple]:
     """Return list of (_YOLOLandmarks, centroid_px) for every real person detected."""
     if kps is None or kps.shape[0] == 0:
         return []
     result = []
     for i in range(kps.shape[0]):
-        if _person_visible_kp_count(kps[i]) >= _MIN_VISIBLE_KPS:
-            c = _person_centroid(kps[i])
-            if c is not None:
-                result.append((_YOLOLandmarks(kps[i], frame_w, frame_h), c))
+        if _person_visible_kp_count(kps[i]) < _MIN_VISIBLE_KPS:
+            continue
+        if not _wrist_shows_motion(kps[i], fg_mask, frame_w, frame_h, min_foreground_frac):
+            continue
+        c = _person_centroid(kps[i])
+        if c is not None:
+            result.append((_YOLOLandmarks(kps[i], frame_w, frame_h), c))
     return result
 
 
@@ -335,6 +383,16 @@ class CameraAnalyser(threading.Thread):
             num_threads=self._num_threads,
         )
 
+        # Adaptive background model — flags framed pictures, mirrors, TV content
+        # etc. that YOLO mis-detects as a permanently "raised arm". Continuously
+        # re-learns the static scene so it tolerates gradual lighting drift, but
+        # anything that hasn't settled into the background yet reads as
+        # foreground. detectShadows=False keeps the mask a clean 0/255.
+        bg_subtractor = (
+            cv2.createBackgroundSubtractorMOG2(detectShadows=False)
+            if getattr(self.s, 'bg_subtract_enable', True) else None
+        )
+
         # grlib/MediaPipe Hands is initialized lazily on the first SINGLE_UP
         # frame to avoid loading two ML runtimes simultaneously at startup.
         _hand_pipeline = None
@@ -356,6 +414,10 @@ class CameraAnalyser(threading.Thread):
                 continue
 
             proc_frame, pw, ph = self._preprocess(frame)
+
+            # Fed every frame (not just motion-gated ones) so the model keeps
+            # tracking gradual lighting drift even when nothing is moving.
+            fg_mask = bg_subtractor.apply(proc_frame) if bg_subtractor is not None else None
 
             # ── Motion gate ───────────────────────────────────────────────
             # Resize to 80×60 (~0.1 ms) and diff against previous frame.
@@ -396,7 +458,10 @@ class CameraAnalyser(threading.Thread):
                 log.debug("[%s] YOLO ran (motion=%s any_arm_up=%s persons=%d)",
                           self.label, motion, any_arm_up, len(self._persons))
 
-                detected = _all_valid_landmarks(_cached_kps, pw, ph)
+                min_fg_frac = float(getattr(self.s, 'bg_subtract_min_foreground', 0.12))
+                detected = _all_valid_landmarks(
+                    _cached_kps, pw, ph, fg_mask=fg_mask, min_foreground_frac=min_fg_frac,
+                )
                 self._match_persons(detected, pw, ph, now)
                 self._prune_persons(now)
 

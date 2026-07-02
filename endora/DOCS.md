@@ -193,6 +193,8 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | Cross-arms not detecting | Wrists need to be quite close to opposite shoulders; pose must be clean |
 | High CPU | Switch to `yolo_pose_model: yolo11n-pose.onnx` (nano, ~25 ms/frame) |
 | Pose drops on unusual poses | Switch to `yolo_pose_model: yolo11s-pose.onnx` (small, ~50 ms/frame, more accurate) |
+| SNAP fires with nobody in frame (framed pictures, mirrors, TV) | Raise `bg_subtract_min_foreground` toward `0.20`; check `/captures` on the debug page to confirm the ghost source |
+| Real gesture rejected as a "ghost" | Lower `bg_subtract_min_foreground` toward `0.05`, or disable `bg_subtract_enable` |
 
 ---
 
@@ -215,6 +217,8 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `double_snap_window_s` | `3.0` | Seconds within which two snaps count as DOUBLE_SNAP |
 | `sustain_s` | `0.5` | Seconds held for CROSS_ARMS / T_POSE / RAISE_BOTH |
 | `cooldown_s` | `2.0` | Minimum seconds between any two gestures |
+| `bg_subtract_enable` | `true` | Reject detections whose wrist never moves against the learned background (filters framed pictures/mirrors/TV mis-read as a raised arm) |
+| `bg_subtract_min_foreground` | `0.12` | Min fraction of a wrist's check-patch that must be "moving" pixels to count as live |
 | `frame_crop_bottom` | `0` | % of frame to crop from bottom |
 | `flip_image` | `false` | Rotate frame 180° |
 | `mirror_camera` | `false` | Reserved for future use |
