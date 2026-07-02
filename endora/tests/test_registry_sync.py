@@ -12,9 +12,14 @@ registry, but only this test catches someone editing the registry and
 forgetting to re-run it.
 """
 import dataclasses
+import json
+from pathlib import Path
 
 from config.registry import REGISTRY
 from config.settings import Settings
+from scripts.gen_config_json import build_options_and_schema
+
+CONFIG_JSON_PATH = Path(__file__).parent.parent / "config.json"
 
 
 def test_every_registry_field_is_a_settings_field():
@@ -48,3 +53,37 @@ def test_settings_field_types_match_registry():
         if field.type != r.type.__name__:
             mismatches.append((r.key, field.type, r.type.__name__))
     assert not mismatches, f"Settings field type != registry type: {mismatches}"
+
+
+def test_config_json_matches_registry():
+    """Fails if config.json is stale — run scripts/gen_config_json.py to fix."""
+    expected_options, expected_schema = build_options_and_schema()
+    data = json.loads(CONFIG_JSON_PATH.read_text())
+    assert data["options"] == expected_options, (
+        "config.json 'options' is out of sync with the registry — "
+        "run scripts/gen_config_json.py"
+    )
+    assert data["schema"] == expected_schema, (
+        "config.json 'schema' is out of sync with the registry — "
+        "run scripts/gen_config_json.py"
+    )
+
+
+def test_debug_page_lists_derived_from_registry_match_known_layout():
+    """Locks in the exact slider/joystick/toggle order the debug page has
+    always rendered — a UIMeta.order collision or a missing order= on a new
+    field would silently scramble this without failing any other test.
+    """
+    from cameras.debug_server import _PARAMS, _JOY_PARAMS, _TOGGLES
+
+    assert [p[0] for p in _PARAMS] == [
+        "arm_above_head_tolerance", "snap_forearm_min", "snap_sustain_s",
+        "cooldown_s", "bg_subtract_min_foreground", "yolo_conf",
+        "dewarp_vfov", "frame_crop_bottom", "pose_visibility_min",
+    ]
+    assert [p[5] for p in _PARAMS] == [
+        "Gesture", "Gesture", "Gesture", "Gesture", "Gesture",
+        "Body", "View", "View", "View",
+    ]
+    assert [p[0] for p in _JOY_PARAMS] == ["dewarp_pan", "dewarp_tilt"]
+    assert [p[0] for p in _TOGGLES] == ["low_light_enhance", "bg_subtract_enable"]

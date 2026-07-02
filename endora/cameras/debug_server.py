@@ -18,6 +18,8 @@ from urllib.parse import urlparse, parse_qs
 import cv2
 import numpy as np
 
+from config.registry import REGISTRY
+
 log = logging.getLogger(__name__)
 
 
@@ -79,33 +81,34 @@ class _LogHandler(logging.Handler):
 
 
 # ── Tunable parameter definitions ────────────────────────────────────────────
+# Derived from config/registry.py (the single source of truth for every
+# setting) rather than hand-maintained here — see tests/test_registry_sync.py.
+# Each field's UIMeta.order fixes its position; the debug page's renderer
+# assumes same-group slider entries are contiguous, so order must group them
+# correctly (registry declaration order is grouped by setting *category*,
+# not by UI group, so it can't be used directly).
+_UI_FIELDS = sorted(
+    (f for f in REGISTRY if f.ui is not None), key=lambda f: f.ui.order
+)
+
 # (key, label, min, max, step, group)
-# Trimmed to the sliders you actually reach for during live tuning.
 _PARAMS = [
-    ("arm_above_head_tolerance", "Arm raise margin",   0.0,  0.30, 0.01, "Gesture"),
-    ("snap_forearm_min",         "Snap sensitivity",   0.03, 0.20, 0.01, "Gesture"),
-    ("snap_sustain_s",           "Snap hold time (s)", 0.0,  1.0,  0.05, "Gesture"),
-    ("cooldown_s",               "Cooldown (s)",       0,    10,   0.25, "Gesture"),
-    ("bg_subtract_min_foreground", "Ghost rejection",  0.0,  0.50, 0.01, "Gesture"),
-    ("yolo_conf",                "YOLO confidence",    0.10, 0.80, 0.01, "Body"),
-    # View group — rendered as joystick (pan/tilt) + compact sliders
-    ("dewarp_vfov",              "Vertical FOV (°)",   20,   100,  1,    "View"),
-    ("frame_crop_bottom",        "Crop bottom (%)",    0,    60,   1,    "View"),
-    ("pose_visibility_min",      "Min visibility",     0.05, 0.8,  0.01, "View"),
+    (f.key, f.ui.label, f.ui.min, f.ui.max, f.ui.step, f.ui.ui_group)
+    for f in _UI_FIELDS if f.ui.kind == "slider"
 ]
 
 # Pan/tilt are the joystick axes — not sliders.
 # (key, label, min, max, step)
 _JOY_PARAMS = [
-    ("dewarp_pan",  "Pan",  -30, 30, 1),   # X axis: ← left / right →
-    ("dewarp_tilt", "Tilt", -10, 80, 1),   # Y axis: ↑ up  / down ↓
+    (f.key, f.ui.label, f.ui.min, f.ui.max, f.ui.step)
+    for f in _UI_FIELDS if f.ui.kind in ("joystick_x", "joystick_y")
 ]
 
 # Boolean toggles shown as switches above the sliders
 # (key, label, description)
 _TOGGLES = [
-    ("low_light_enhance", "CLAHE enhance", "Boost local contrast before pose inference — helps dark clothing on dark backgrounds"),
-    ("bg_subtract_enable", "Ghost rejection", "Reject detections whose wrist never moves against the learned background — filters framed pictures, mirrors, TV content mis-read as a raised arm"),
+    (f.key, f.ui.label, f.ui.description)
+    for f in _UI_FIELDS if f.ui.kind == "toggle"
 ]
 
 
