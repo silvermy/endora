@@ -10,8 +10,9 @@ import dataclasses
 import json
 import logging
 import os
-import typing
 from pathlib import Path
+
+from config.registry import REGISTRY_BY_KEY
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ HA_OPTIONS_PATH = Path("/data/options.json")
 class Settings:
     # ── RTSP ──────────────────────────────────────────────────────────────
     rtsp_url_a: str = "rtsp://user:pass@192.168.1.100:554/stream1"
-    rtsp_url_b: str = "rtsp://user:pass@192.168.1.101:554/stream1"
+    rtsp_url_b: str = "rtsp://user:pass@192.168.1.100:554/stream1"
     # Advanced: override in settings.yaml if needed
     rtsp_transport: str = "tcp"
     rtsp_reconnect_delay_s: float = 5.0
@@ -45,7 +46,7 @@ class Settings:
     #                        unusual poses (lounging, arm raised, blanket-covered).
     #                        Recommended if Pi 5 CPU headroom allows it.
     # Both models are bundled in the Docker image.
-    yolo_pose_model: str = "yolo11s-pose.onnx"
+    yolo_pose_model: str = "yolo11n-pose.onnx"
     # Minimum YOLO detection confidence (0–1). Raise to reduce false detections
     # from furniture/shadows, especially in low light. Default 0.25 is too
     # permissive; 0.45 filters most ghost detections without missing real people.
@@ -57,7 +58,7 @@ class Settings:
     # Motion gate: only run YOLO when the frame changes by more than this
     # fraction (0–1 mean absolute pixel difference over an 80×60 thumbnail).
     # 0.008 catches slow arm raises (low per-frame velocity); 0.0 = always run.
-    motion_threshold: float = 0.008
+    motion_threshold: float = 0.015
     # Heartbeat: even with no motion, run YOLO at least every N frames so
     # slow arm lifts are eventually detected. 6 ≈ re-confirm every ~0.6s at 10fps.
     yolo_max_skip: int = 4
@@ -86,7 +87,7 @@ class Settings:
     # or lounging postures where the wrist doesn't travel as high in the frame.
     # Lower toward 0.05 if still missing raises; raise toward 0.20 if you get
     # false triggers from resting your hand on top of your head.
-    arm_above_head_tolerance: float = 0.10
+    arm_above_head_tolerance: float = 0.15
     # Stricter threshold used when the body is reclined OR when upright status
     # cannot be confirmed (hips hidden by blanket).  Requires a deliberate
     # straight-up arm.  0.40 = wrist must clear shoulder by ~40% of frame
@@ -110,7 +111,7 @@ class Settings:
     # or turned side-on is not rejected). YOLO assigns high confidence to real
     # body landmarks and near-zero to furniture false-detections. 0.35 rejects
     # furniture without touching real people. Raise to 0.5 if still seeing table.
-    pose_visibility_min: float = 0.35
+    pose_visibility_min: float = 0.45
     # Per-keypoint confidence below which one landmark (shoulder/wrist/elbow) is
     # treated as not-visible. Drives per-side arm-raise detection so an occluded
     # or mis-placed keypoint can't block a real raise on the other, visible arm.
@@ -183,7 +184,13 @@ class Settings:
     # Higher = more stable mid-gesture but slower to release after arm down.
     # 0.60 bridges YOLO pose-detection dropouts that occur when the arm is
     # raised and temporarily changes the body silhouette.
-    state_release_s: float = 0.60
+    state_release_s: float = 0.30
+    # Seconds after SNAP that the arm must stay up to also fire HOLD.
+    hold_duration_s: float = 1.5
+    # Seconds within which two SNAPs count as DOUBLE_SNAP instead of two SNAPs.
+    double_snap_window_s: float = 3.0
+    # Seconds held for CROSS_ARMS / T_POSE / RAISE_BOTH before firing.
+    sustain_s: float = 0.5
 
     # ── Fusion ────────────────────────────────────────────────────────────
     # Advanced: override in settings.yaml if needed
@@ -206,14 +213,14 @@ class Settings:
     # Virtual camera pan (+= right, -= left) and tilt (+= down toward floor).
     # Tune these to point the virtual viewport toward where you stand/sit.
     dewarp_pan: float = 0.0
-    dewarp_tilt: float = 20.0
+    dewarp_tilt: float = 30.0
     # Roll to level a tilted horizon. + = clockwise, - = counter-clockwise.
     # If the scene leans to the right use a negative value (e.g. -20).
     dewarp_roll: float = 0.0
     # Virtual camera vertical FOV — wider sees more room, more distortion.
     dewarp_vfov: float = 75.0
     # Output frame size of the dewarped image.
-    dewarp_out_width: int = 640
+    dewarp_out_width: int = 1280
     dewarp_out_height: int = 480
     # Fisheye circle centre in the input image (-1 = use frame geometric centre).
     dewarp_cx: float = -1.0
@@ -290,11 +297,12 @@ class Settings:
             except Exception as e:
                 log.warning("Could not parse %s: %s", runtime_path, e)
 
-        try:
-            hints = typing.get_type_hints(cls)
-        except Exception:
-            hints = {f.name: type(getattr(cls, f.name, None))
-                     for f in dataclasses.fields(cls)}
+        # Types come from the registry (config/registry.py), not
+        # typing.get_type_hints(cls) — this is the single source of truth
+        # every field's type is checked against (see test_registry_sync.py),
+        # so a field declared in the registry but missing from this
+        # dataclass can no longer be silently dropped during coercion.
+        hints = {k: f.type for k, f in REGISTRY_BY_KEY.items()}
 
         coerced: dict = {}
         for k, v in data.items():
