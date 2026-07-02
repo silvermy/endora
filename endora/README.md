@@ -226,6 +226,7 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `body_upright_min` | `-0.15` | Hip-shoulder gap to confirm upright (negative OK for fisheye) |
 | `pose_visibility_min` | `0.45` | Min landmark visibility to accept a pose (filters furniture) |
 | `snap_forearm_min` | `0.06` | Minimum forearm verticality for SNAP/HOLD |
+| `snap_sustain_s` | `0.10` | Seconds the arm must stay up before SNAP fires |
 | `hold_duration_s` | `1.5` | Seconds after SNAP that arm must stay up to fire HOLD |
 | `double_snap_window_s` | `3.0` | Seconds within which two snaps count as DOUBLE_SNAP |
 | `sustain_s` | `0.5` | Seconds held for CROSS_ARMS / T_POSE / RAISE_BOTH |
