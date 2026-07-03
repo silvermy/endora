@@ -37,6 +37,19 @@ def _coco_row(right_wrist_xy=(500, 100), left_wrist_xy=None) -> np.ndarray:
     return row
 
 
+def _shifted_coco_row(dx: float, dy: float) -> np.ndarray:
+    """A whole second person-shaped row (all keypoints, not just the wrist),
+    offset by (dx, dy) from _coco_row()'s default position — for controlling
+    centroid distance between two candidates in the same frame, e.g. a ghost
+    in a different part of the room from a real tracked person.
+    """
+    row = _coco_row()
+    for idx in (5, 6, 7, 8, 9, 10, 11, 12):
+        row[idx, 0] += dx
+        row[idx, 1] += dy
+    return row
+
+
 def _fg_mask_with_blob(cx, cy, radius=40) -> np.ndarray:
     """A foreground mask that's all background (0) except a bright circle."""
     mask = np.zeros((FRAME_H, FRAME_W), dtype=np.uint8)
@@ -100,8 +113,8 @@ def test_all_valid_landmarks_unaffected_when_bg_subtract_disabled():
 # the liveness check exists to filter. See _passes_liveness_gate.
 
 def _match_dist_for(frame_w, frame_h):
-    from cameras.analyser import _PERSON_MATCH_DIST
-    return _PERSON_MATCH_DIST * ((frame_w ** 2 + frame_h ** 2) ** 0.5)
+    from cameras.analyser import _LIVENESS_EXEMPT_DIST
+    return _LIVENESS_EXEMPT_DIST * ((frame_w ** 2 + frame_h ** 2) ** 0.5)
 
 
 def test_still_person_near_known_centroid_is_exempt_from_liveness_check():
@@ -122,6 +135,34 @@ def test_unknown_static_object_is_still_rejected_despite_known_centroids_list():
     assert not _passes_liveness_gate(
         row, centroid, fg, FRAME_W, FRAME_H, min_foreground_frac=0.12,
         known_centroids=[far_away_known], match_dist=_match_dist_for(FRAME_W, FRAME_H),
+    )
+
+
+def test_ghost_elsewhere_in_room_not_exempted_by_a_real_tracked_person():
+    """Regression for a real bug: a ghost (e.g. a framed picture) in one
+    corner of the room sitting within _PERSON_MATCH_DIST (30% of the frame
+    diagonal — tuned for tracking a person walking across the room between
+    frames) of a real tracked person elsewhere was wrongly inheriting that
+    person's liveness exemption. The exemption radius must be tight enough
+    that only the *same* detection, not merely "somewhere in the same
+    room," qualifies.
+    """
+    real_person = _coco_row(right_wrist_xy=(500, 100))
+    real_centroid = _person_centroid(real_person)
+
+    # A separate, permanently static "ghost" whose own centroid is 150px
+    # from the real person — inside the old 30%-of-diagonal (240px) radius,
+    # outside the correct tight exemption radius (48px for this frame size).
+    ghost = _shifted_coco_row(dx=150, dy=0)
+    ghost_centroid = _person_centroid(ghost)
+    dist = ((ghost_centroid[0] - real_centroid[0]) ** 2
+            + (ghost_centroid[1] - real_centroid[1]) ** 2) ** 0.5
+    assert 48 < dist < 240, f"test setup assumption violated: dist={dist}"
+
+    fg = np.zeros((FRAME_H, FRAME_W), dtype=np.uint8)  # ghost's wrist never moves
+    assert not _passes_liveness_gate(
+        ghost, ghost_centroid, fg, FRAME_W, FRAME_H, min_foreground_frac=0.12,
+        known_centroids=[real_centroid], match_dist=_match_dist_for(FRAME_W, FRAME_H),
     )
 
 

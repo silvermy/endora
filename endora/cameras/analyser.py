@@ -100,7 +100,22 @@ _MIN_VISIBLE_KPS = 6  # fewer than this → almost certainly not a real person
 # Person-pool constants
 _PERSON_MATCH_DIST = 0.30  # max centroid displacement (fraction of frame diagonal)
                              # to link a detection to an existing tracked person
+                             # ACROSS FRAMES — generous on purpose, so a person
+                             # walking across the room between motion-gated
+                             # frames is still the same tracked pid. Too wide
+                             # to also use for the liveness-check exemption
+                             # below (see _LIVENESS_EXEMPT_DIST) — a ghost in
+                             # one corner of the room can sit well within 30%
+                             # of the frame diagonal from a real person on the
+                             # couch, which would wrongly exempt it too.
 _PERSON_PRUNE_S    = 2.0   # seconds without a YOLO detection before dropping entry
+
+# How close a detection must be to an already-tracked person's last position
+# to be trusted as "probably that same real person, just briefly still" and
+# skip the wrist-liveness check. Deliberately much tighter than
+# _PERSON_MATCH_DIST — this is "is this the same detection," not "could this
+# plausibly be the same person after they moved."
+_LIVENESS_EXEMPT_DIST = 0.06
 
 # Raw COCO keypoint indices (before the MediaPipe remap below) for the wrists —
 # used by the background-subtraction liveness check.
@@ -483,7 +498,7 @@ class CameraAnalyser(threading.Thread):
             # liveness check below (see _passes_liveness_gate) — computed
             # from state as of the end of the previous iteration.
             known_centroids = [e.centroid for e in self._persons.values()]
-            match_dist = _PERSON_MATCH_DIST * ((pw ** 2 + ph ** 2) ** 0.5)
+            match_dist = _LIVENESS_EXEMPT_DIST * ((pw ** 2 + ph ** 2) ** 0.5)
 
             proc_frame = self._apply_low_light_enhance(proc_frame)
 
