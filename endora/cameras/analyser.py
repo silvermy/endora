@@ -128,7 +128,30 @@ _LIVENESS_EXEMPT_DIST = 0.06
 # (e.g. once, ever) would exempt itself forever afterward just by matching
 # its own unchanging position on every subsequent frame — the bug this
 # constant exists to close.
+#
+# On its own this window still was not enough: real-world lighting noise
+# (a light flickering, auto-exposure adjusting, a shadow shifting) does not
+# produce independent single-frame flukes — it produces a BURST of several
+# consecutive frames that all read as changed together, at whatever cadence
+# the underlying light/shadow event lasts. Two such correlated flukes
+# landing within any 60s window turned out to be far likelier than two
+# independent ones would be, and a real ghost got fully confirmed this way.
+# See _CENTROID_MOVED_MIN_FRAC for the fix: a genuine confirming pass now
+# also requires the tracked keypoints to have actually moved, which no
+# amount of lighting-driven foreground-mask noise can fake, since it comes
+# from the pose model's own coordinate output, not the background model.
 _LIVENESS_CONFIRM_WINDOW_S = 60.0
+
+# Minimum centroid displacement (fraction of frame diagonal) between this
+# detection and this pid's previous one to count as "actually moved" for
+# confirmation purposes (see _LIVENESS_CONFIRM_WINDOW_S). A static object's
+# keypoints come out at virtually the same pixel coordinates on every
+# detection — small residual jitter is sensor/inference noise, not motion.
+# Real human movement (a raise, shifting position, walking) displaces the
+# centroid by far more than this. Deliberately smaller than
+# _LIVENESS_EXEMPT_DIST — that constant asks "is this the same detection,"
+# this one asks "did that same detection actually move."
+_CENTROID_MOVED_MIN_FRAC = 0.02
 
 # Raw COCO keypoint indices (before the MediaPipe remap below) for the wrists —
 # used by the background-subtraction liveness check.
@@ -348,19 +371,27 @@ class CameraAnalyser(threading.Thread):
             last_genuine_live_at=now,
         )
 
-    def _note_liveness(self, e: "_PersonEntry", raw_live: bool, now: float) -> None:
-        """Update a pid's confirmed-human status from this frame's raw_live.
+    def _note_liveness(
+        self, e: "_PersonEntry", raw_live: bool, moved: bool, now: float
+    ) -> None:
+        """Update a pid's confirmed-human status from this frame's checks.
 
-        Two genuine passes within _LIVENESS_CONFIRM_WINDOW_S of each other
-        permanently confirm the pid as human (sticky — never revoked short
-        of the pid itself being pruned). See _LIVENESS_CONFIRM_WINDOW_S.
+        Two genuine AND MOVED passes within _LIVENESS_CONFIRM_WINDOW_S of
+        each other permanently confirm the pid as human (sticky — never
+        revoked short of the pid itself being pruned). Requiring actual
+        keypoint displacement (not just the foreground-mask check passing)
+        is what closes the gap the window alone left open: correlated
+        lighting noise (a flicker, an exposure adjustment) can make the
+        background-subtraction mask fire "genuine" on several frames in a
+        row for a completely static object, but it can never make that
+        object's own reported keypoint positions actually shift.
         """
-        if not raw_live or e.confirmed_human:
+        if not raw_live or not moved or e.confirmed_human:
             return
         if (e.last_genuine_live_at is not None
                 and now - e.last_genuine_live_at <= _LIVENESS_CONFIRM_WINDOW_S):
             e.confirmed_human = True
-            log.info("[%s] pid confirmed human (2 genuine motion passes within %.0fs)",
+            log.info("[%s] pid confirmed human (2 genuine, moved passes within %.0fs)",
                       self.label, _LIVENESS_CONFIRM_WINDOW_S)
         e.last_genuine_live_at = now
 
@@ -374,6 +405,7 @@ class CameraAnalyser(threading.Thread):
         """
         diag = (frame_w ** 2 + frame_h ** 2) ** 0.5
         max_dist = _PERSON_MATCH_DIST * diag
+        moved_min_dist = _CENTROID_MOVED_MIN_FRAC * diag
         available = list(self._persons.keys())
 
         for lm, centroid, raw_live in detected:
@@ -389,11 +421,12 @@ class CameraAnalyser(threading.Thread):
 
             if best_pid is not None and best_dist <= max_dist:
                 e = self._persons[best_pid]
+                moved = best_dist >= moved_min_dist
                 e.centroid  = centroid
                 e.last_lm   = lm
                 e.last_seen = now
                 available.remove(best_pid)
-                self._note_liveness(e, raw_live, now)
+                self._note_liveness(e, raw_live, moved, now)
             else:
                 pid = self._next_pid
                 self._next_pid += 1
