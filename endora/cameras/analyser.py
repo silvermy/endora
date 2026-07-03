@@ -117,6 +117,19 @@ _PERSON_PRUNE_S    = 2.0   # seconds without a YOLO detection before dropping en
 # plausibly be the same person after they moved."
 _LIVENESS_EXEMPT_DIST = 0.06
 
+# A tracked pid only becomes exempt from the wrist-liveness check (i.e. only
+# becomes a "known centroid" other candidates can match against) after TWO
+# genuine, non-exempted passes land within this many seconds of each other.
+# Real motion (walking in, sitting down, gesturing) naturally produces
+# clustered genuine passes; a static ghost's rare noise-driven fluke passes
+# are isolated and unlikely to land twice within this window. Confirmation
+# is sticky once earned — a confirmed person can then rest indefinitely
+# without losing it. Without this, a ghost that earned a single lucky pass
+# (e.g. once, ever) would exempt itself forever afterward just by matching
+# its own unchanging position on every subsequent frame — the bug this
+# constant exists to close.
+_LIVENESS_CONFIRM_WINDOW_S = 60.0
+
 # Raw COCO keypoint indices (before the MediaPipe remap below) for the wrists —
 # used by the background-subtraction liveness check.
 _COCO_LEFT_WRIST  = 9
@@ -173,17 +186,19 @@ def _passes_liveness_gate(
 ) -> bool:
     """True if this candidate may be treated as a real person this frame.
 
-    known_centroids (each an (x, y) pixel tuple) are already-tracked persons'
-    last positions. A candidate near one of them is exempt from the wrist-
-    liveness check — the same acquire-strict/maintain-lenient asymmetry
-    already used for YOLO confidence in _run(). Without this, a real,
-    already-confirmed person who holds still for a while (e.g. typing) gets
-    silently dropped — both from tracking and from the debug overlay — the
-    moment their resting wrist gets absorbed into the background model,
-    which is a worse outcome than the ghost detections this check exists to
-    filter: a static object never gets a first chance to prove it belongs
-    to a real, currently-tracked person, but a real person shouldn't lose
-    that status just for sitting still.
+    known_centroids (each an (x, y) pixel tuple) must be CONFIRMED-human
+    persons' last positions only (_PersonEntry.confirmed_human — see
+    _LIVENESS_CONFIRM_WINDOW_S), not every currently-tracked pid. A
+    candidate near one is exempt from the wrist-liveness check — the same
+    acquire-strict/maintain-lenient asymmetry already used for YOLO
+    confidence in _run(). Without this, a real, already-confirmed person
+    who holds still for a while (e.g. typing) gets silently dropped — both
+    from tracking and from the debug overlay — the moment their resting
+    wrist gets absorbed into the background model, which is a worse
+    outcome than the ghost detections this check exists to filter.
+    Passing every tracked pid's centroid here (not just confirmed ones) is
+    a bug, not a stricter variant: an unconfirmed ghost would then trivially
+    exempt itself by matching its own unchanging position every frame.
     """
     near_known = known_centroids is not None and any(
         (centroid[0] - kc[0]) ** 2 + (centroid[1] - kc[1]) ** 2 <= match_dist ** 2
@@ -203,7 +218,14 @@ def _all_valid_landmarks(
     known_centroids: Optional[list] = None,
     match_dist: float = 0.0,
 ) -> list[tuple]:
-    """Return list of (_YOLOLandmarks, centroid_px) for every real person detected."""
+    """Return list of (_YOLOLandmarks, centroid_px, raw_live) for every real
+    person detected. known_centroids must be CONFIRMED-human centroids only
+    (see _passes_liveness_gate). raw_live is this candidate's own wrist-
+    liveness result, independent of any known-centroid exemption — the
+    caller (_match_persons) uses it to decide whether a tracked pid has
+    earned confirmed-human status, which is what known_centroids should be
+    built from on the next frame.
+    """
     if kps is None or kps.shape[0] == 0:
         return []
     result = []
@@ -213,12 +235,15 @@ def _all_valid_landmarks(
         c = _person_centroid(kps[i])
         if c is None:
             continue
-        if not _passes_liveness_gate(
-            kps[i], c, fg_mask, frame_w, frame_h, min_foreground_frac,
-            known_centroids, match_dist,
-        ):
-            continue
-        result.append((_YOLOLandmarks(kps[i], frame_w, frame_h), c))
+        raw_live = _wrist_shows_motion(kps[i], fg_mask, frame_w, frame_h, min_foreground_frac)
+        if not raw_live:
+            near_known = known_centroids is not None and any(
+                (c[0] - kc[0]) ** 2 + (c[1] - kc[1]) ** 2 <= match_dist ** 2
+                for kc in known_centroids
+            )
+            if not near_known:
+                continue
+        result.append((_YOLOLandmarks(kps[i], frame_w, frame_h), c, raw_live))
     return result
 
 
@@ -232,6 +257,11 @@ class _PersonEntry:
     last_lm:           object        # cached _YOLOLandmarks from last YOLO frame
     last_arm_state:    ArmState      = ArmState.DOWN
     last_logged_state: object        = None
+    # Liveness confirmation — see _LIVENESS_CONFIRM_WINDOW_S. Sticky once
+    # True; only confirmed_human pids contribute to known_centroids, which
+    # is what exempts a matching candidate from the wrist-liveness check.
+    last_genuine_live_at: Optional[float] = None
+    confirmed_human:       bool          = False
 
 
 class CameraAnalyser(threading.Thread):
@@ -305,26 +335,48 @@ class CameraAnalyser(threading.Thread):
             snap_sustain_s=float(getattr(s, 'snap_sustain_s', 0.50)),
             snap_roll_threshold=float(getattr(s, 'snap_roll_threshold', 0.0)),
         ), on_near_miss=self._near_miss_cb)
+        # A brand-new pid can only be created from a candidate that passed
+        # _all_valid_landmarks with no confirmed-human candidate nearby (see
+        # its docstring), which means this first sighting was necessarily a
+        # genuine (non-exempted) wrist-liveness pass — count it as such.
         return _PersonEntry(
             arm_tracker=arm_tracker,
             state_machine=state_machine,
             centroid=centroid,
             last_seen=now,
             last_lm=lm,
+            last_genuine_live_at=now,
         )
+
+    def _note_liveness(self, e: "_PersonEntry", raw_live: bool, now: float) -> None:
+        """Update a pid's confirmed-human status from this frame's raw_live.
+
+        Two genuine passes within _LIVENESS_CONFIRM_WINDOW_S of each other
+        permanently confirm the pid as human (sticky — never revoked short
+        of the pid itself being pruned). See _LIVENESS_CONFIRM_WINDOW_S.
+        """
+        if not raw_live or e.confirmed_human:
+            return
+        if (e.last_genuine_live_at is not None
+                and now - e.last_genuine_live_at <= _LIVENESS_CONFIRM_WINDOW_S):
+            e.confirmed_human = True
+            log.info("[%s] pid confirmed human (2 genuine motion passes within %.0fs)",
+                      self.label, _LIVENESS_CONFIRM_WINDOW_S)
+        e.last_genuine_live_at = now
 
     def _match_persons(
         self, detected: list, frame_w: int, frame_h: int, now: float
     ) -> None:
-        """Match detected (landmarks, centroid) pairs to existing person entries.
-        Updates existing entries in-place; creates new ones for novel persons.
-        Uses greedy nearest-centroid matching — sufficient for small N (< 10).
+        """Match detected (landmarks, centroid, raw_live) triples to existing
+        person entries. Updates existing entries in-place; creates new ones
+        for novel persons. Uses greedy nearest-centroid matching — sufficient
+        for small N (< 10).
         """
         diag = (frame_w ** 2 + frame_h ** 2) ** 0.5
         max_dist = _PERSON_MATCH_DIST * diag
         available = list(self._persons.keys())
 
-        for lm, centroid in detected:
+        for lm, centroid, raw_live in detected:
             best_pid, best_dist = None, float('inf')
             for pid in available:
                 e = self._persons[pid]
@@ -341,6 +393,7 @@ class CameraAnalyser(threading.Thread):
                 e.last_lm   = lm
                 e.last_seen = now
                 available.remove(best_pid)
+                self._note_liveness(e, raw_live, now)
             else:
                 pid = self._next_pid
                 self._next_pid += 1
@@ -494,10 +547,13 @@ class CameraAnalyser(threading.Thread):
                 if getattr(self.s, 'bg_subtract_enable', True) else None
             )
             min_fg_frac = float(getattr(self.s, 'bg_subtract_min_foreground', 0.12))
-            # Already-tracked persons' positions, exempt from the wrist-
-            # liveness check below (see _passes_liveness_gate) — computed
-            # from state as of the end of the previous iteration.
-            known_centroids = [e.centroid for e in self._persons.values()]
+            # CONFIRMED-human persons' positions only (not every tracked
+            # pid — an unconfirmed candidate, e.g. a ghost, must not be able
+            # to exempt itself just by matching its own history), exempt
+            # from the wrist-liveness check below (see _passes_liveness_gate
+            # and _LIVENESS_CONFIRM_WINDOW_S) — computed from state as of
+            # the end of the previous iteration.
+            known_centroids = [e.centroid for e in self._persons.values() if e.confirmed_human]
             match_dist = _LIVENESS_EXEMPT_DIST * ((pw ** 2 + ph ** 2) ** 0.5)
 
             proc_frame = self._apply_low_light_enhance(proc_frame)
