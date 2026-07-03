@@ -146,12 +146,47 @@ def _wrist_shows_motion(
     return not seen_wrist  # no visible wrist → can't judge, don't reject
 
 
+def _passes_liveness_gate(
+    kps_row: np.ndarray,
+    centroid: tuple,
+    fg_mask: Optional[np.ndarray],
+    frame_w: int,
+    frame_h: int,
+    min_foreground_frac: float,
+    known_centroids: Optional[list] = None,
+    match_dist: float = 0.0,
+) -> bool:
+    """True if this candidate may be treated as a real person this frame.
+
+    known_centroids (each an (x, y) pixel tuple) are already-tracked persons'
+    last positions. A candidate near one of them is exempt from the wrist-
+    liveness check — the same acquire-strict/maintain-lenient asymmetry
+    already used for YOLO confidence in _run(). Without this, a real,
+    already-confirmed person who holds still for a while (e.g. typing) gets
+    silently dropped — both from tracking and from the debug overlay — the
+    moment their resting wrist gets absorbed into the background model,
+    which is a worse outcome than the ghost detections this check exists to
+    filter: a static object never gets a first chance to prove it belongs
+    to a real, currently-tracked person, but a real person shouldn't lose
+    that status just for sitting still.
+    """
+    near_known = known_centroids is not None and any(
+        (centroid[0] - kc[0]) ** 2 + (centroid[1] - kc[1]) ** 2 <= match_dist ** 2
+        for kc in known_centroids
+    )
+    if near_known:
+        return True
+    return _wrist_shows_motion(kps_row, fg_mask, frame_w, frame_h, min_foreground_frac)
+
+
 def _all_valid_landmarks(
     kps: Optional[np.ndarray],
     frame_w: int,
     frame_h: int,
     fg_mask: Optional[np.ndarray] = None,
     min_foreground_frac: float = 0.12,
+    known_centroids: Optional[list] = None,
+    match_dist: float = 0.0,
 ) -> list[tuple]:
     """Return list of (_YOLOLandmarks, centroid_px) for every real person detected."""
     if kps is None or kps.shape[0] == 0:
@@ -160,11 +195,15 @@ def _all_valid_landmarks(
     for i in range(kps.shape[0]):
         if _person_visible_kp_count(kps[i]) < _MIN_VISIBLE_KPS:
             continue
-        if not _wrist_shows_motion(kps[i], fg_mask, frame_w, frame_h, min_foreground_frac):
-            continue
         c = _person_centroid(kps[i])
-        if c is not None:
-            result.append((_YOLOLandmarks(kps[i], frame_w, frame_h), c))
+        if c is None:
+            continue
+        if not _passes_liveness_gate(
+            kps[i], c, fg_mask, frame_w, frame_h, min_foreground_frac,
+            known_centroids, match_dist,
+        ):
+            continue
+        result.append((_YOLOLandmarks(kps[i], frame_w, frame_h), c))
     return result
 
 
@@ -440,6 +479,11 @@ class CameraAnalyser(threading.Thread):
                 if getattr(self.s, 'bg_subtract_enable', True) else None
             )
             min_fg_frac = float(getattr(self.s, 'bg_subtract_min_foreground', 0.12))
+            # Already-tracked persons' positions, exempt from the wrist-
+            # liveness check below (see _passes_liveness_gate) — computed
+            # from state as of the end of the previous iteration.
+            known_centroids = [e.centroid for e in self._persons.values()]
+            match_dist = _PERSON_MATCH_DIST * ((pw ** 2 + ph ** 2) ** 0.5)
 
             proc_frame = self._apply_low_light_enhance(proc_frame)
 
@@ -484,6 +528,7 @@ class CameraAnalyser(threading.Thread):
 
                 detected = _all_valid_landmarks(
                     _cached_kps, pw, ph, fg_mask=fg_mask, min_foreground_frac=min_fg_frac,
+                    known_centroids=known_centroids, match_dist=match_dist,
                 )
                 self._match_persons(detected, pw, ph, now)
                 self._prune_persons(now)
@@ -575,16 +620,24 @@ class CameraAnalyser(threading.Thread):
                     _primary_reading = reading
 
             # ── Collect all valid persons' kps for the debug overlay ───────
-            # Same two checks _all_valid_landmarks applies to gesture candidates
-            # (keypoint count + wrist-liveness), so the overlay never shows a
-            # skeleton (e.g. on a framed picture) that could not actually have
-            # fired a gesture — otherwise the debug page looks like ghosts are
-            # still getting through when they are already correctly rejected.
+            # Same gate _all_valid_landmarks applies to gesture candidates, so
+            # a static ghost (e.g. a framed picture) never draws a skeleton —
+            # but an already-tracked real person is exempt from the wrist-
+            # liveness half of that gate (see _passes_liveness_gate), so
+            # holding still doesn't make them vanish from the overlay as
+            # "NO POSE DETECTED" while they're plainly still there.
             _all_dbg_kps: list[np.ndarray] = []
             if _cached_kps is not None:
                 for i in range(_cached_kps.shape[0]):
-                    if (_person_visible_kp_count(_cached_kps[i]) >= _MIN_VISIBLE_KPS
-                            and _wrist_shows_motion(_cached_kps[i], fg_mask, pw, ph, min_fg_frac)):
+                    if _person_visible_kp_count(_cached_kps[i]) < _MIN_VISIBLE_KPS:
+                        continue
+                    c = _person_centroid(_cached_kps[i])
+                    if c is None:
+                        continue
+                    if _passes_liveness_gate(
+                        _cached_kps[i], c, fg_mask, pw, ph, min_fg_frac,
+                        known_centroids, match_dist,
+                    ):
                         _all_dbg_kps.append(_cached_kps[i])
 
             # ── Frame capture on noteworthy events ────────────────────────────

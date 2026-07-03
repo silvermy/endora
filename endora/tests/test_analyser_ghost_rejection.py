@@ -13,8 +13,8 @@ rows and foreground masks by hand.
 import numpy as np
 
 from cameras.analyser import (
-    _all_valid_landmarks, _wrist_shows_motion,
-    _COCO_LEFT_WRIST, _COCO_RIGHT_WRIST,
+    _all_valid_landmarks, _wrist_shows_motion, _passes_liveness_gate,
+    _person_centroid, _COCO_LEFT_WRIST, _COCO_RIGHT_WRIST,
 )
 
 FRAME_W, FRAME_H = 640, 480
@@ -91,4 +91,51 @@ def test_all_valid_landmarks_keeps_moving_person():
 def test_all_valid_landmarks_unaffected_when_bg_subtract_disabled():
     kps = np.stack([_coco_row(right_wrist_xy=(500, 100))])
     detected = _all_valid_landmarks(kps, FRAME_W, FRAME_H, fg_mask=None)
+    assert len(detected) == 1
+
+
+# ── Regression: a real, already-tracked person holding still (e.g. typing)
+# must not be dropped just because their resting wrist gets absorbed into
+# the background model — that is a worse outcome than the ghost detections
+# the liveness check exists to filter. See _passes_liveness_gate.
+
+def _match_dist_for(frame_w, frame_h):
+    from cameras.analyser import _PERSON_MATCH_DIST
+    return _PERSON_MATCH_DIST * ((frame_w ** 2 + frame_h ** 2) ** 0.5)
+
+
+def test_still_person_near_known_centroid_is_exempt_from_liveness_check():
+    row = _coco_row(right_wrist_xy=(500, 100))
+    centroid = _person_centroid(row)
+    fg = np.zeros((FRAME_H, FRAME_W), dtype=np.uint8)  # wrist reads as pure background
+    assert _passes_liveness_gate(
+        row, centroid, fg, FRAME_W, FRAME_H, min_foreground_frac=0.12,
+        known_centroids=[centroid], match_dist=_match_dist_for(FRAME_W, FRAME_H),
+    )
+
+
+def test_unknown_static_object_is_still_rejected_despite_known_centroids_list():
+    row = _coco_row(right_wrist_xy=(500, 100))
+    centroid = _person_centroid(row)
+    fg = np.zeros((FRAME_H, FRAME_W), dtype=np.uint8)
+    far_away_known = (5.0, 5.0)  # nowhere near this candidate
+    assert not _passes_liveness_gate(
+        row, centroid, fg, FRAME_W, FRAME_H, min_foreground_frac=0.12,
+        known_centroids=[far_away_known], match_dist=_match_dist_for(FRAME_W, FRAME_H),
+    )
+
+
+def test_all_valid_landmarks_keeps_still_tracked_person():
+    """The exact regression: a real person YOLO still detects fine, but who
+    has been still long enough that fg_mask reads pure background at their
+    wrist, must stay in the result once their centroid is already tracked.
+    """
+    row = _coco_row(right_wrist_xy=(500, 100))
+    centroid = _person_centroid(row)
+    kps = np.stack([row])
+    fg = np.zeros((FRAME_H, FRAME_W), dtype=np.uint8)
+    detected = _all_valid_landmarks(
+        kps, FRAME_W, FRAME_H, fg_mask=fg, min_foreground_frac=0.12,
+        known_centroids=[centroid], match_dist=_match_dist_for(FRAME_W, FRAME_H),
+    )
     assert len(detected) == 1
