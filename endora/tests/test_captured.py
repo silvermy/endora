@@ -66,7 +66,7 @@ from core.state_machine import GestureStateMachine, StateMachineConfig, Gesture
 
 # ── Lightweight COCO→MediaPipe adapter (no cv2 / ultralytics needed) ──────────
 # Mirrors cameras/analyser.py:_YOLOLandmarks exactly.
-_COCO_TO_MP = {5: 11, 6: 12, 7: 13, 8: 14, 9: 15, 10: 16, 11: 23, 12: 24}
+_COCO_TO_MP = {0: 0, 5: 11, 6: 12, 7: 13, 8: 14, 9: 15, 10: 16, 11: 23, 12: 24}
 
 
 class _KP:

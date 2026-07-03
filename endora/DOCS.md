@@ -196,6 +196,8 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `yolo_imgsz` change has no effect | Only `320`/`480`/`640` are bundled — any other value silently falls back to `640` on a Pi (no runtime ONNX export on aarch64) |
 | SNAP fires with nobody in frame (framed pictures, mirrors, TV) | Raise `bg_subtract_min_foreground` toward `0.20`; check `/captures` on the debug page to confirm the ghost source |
 | Real gesture rejected as a "ghost" | Lower `bg_subtract_min_foreground` toward `0.05`, or disable `bg_subtract_enable` |
+| SNAP fires from resting a hand near your own face (glasses, phone, scratching) | Raise `wrist_head_exclude_dist` toward `0.12` |
+| Genuine raise near your head gets rejected | Lower `wrist_head_exclude_dist` toward `0.05` |
 
 ---
 
@@ -213,6 +215,7 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `arm_above_head_tolerance` | `0.15` | Wrist must be this far above shoulder (frame fraction) |
 | `body_upright_min` | `-0.15` | Hip-shoulder gap to confirm upright (negative OK for fisheye) |
 | `pose_visibility_min` | `0.45` | Min landmark visibility to accept a pose (filters furniture) |
+| `wrist_head_exclude_dist` | `0.09` | Reject a raised wrist within this distance of the nose keypoint (filters resting a hand against your own face) |
 | `snap_forearm_min` | `0.06` | Minimum forearm verticality for SNAP/HOLD |
 | `snap_sustain_s` | `0.10` | Seconds the arm must stay up before SNAP fires |
 | `hold_duration_s` | `1.5` | Seconds after SNAP that arm must stay up to fire HOLD |

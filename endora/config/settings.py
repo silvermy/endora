@@ -129,6 +129,14 @@ class Settings:
     # mounted high/at an angle so a raised arm's wrist stays near shoulder level
     # in the image. Raise toward 0.15 if resting a hand near your head misfires.
     forearm_vertical_min: float = 0.10
+    # Reject a raised wrist within this distance (frame fraction) of the nose
+    # keypoint — filters resting/adjusting a hand against your own face
+    # (glasses, phone, scratching, chin-on-hand), which otherwise reads
+    # geometrically identical to a deliberate raise. Only applied when the
+    # nose is confidently visible, so an occluded face never blocks a real
+    # gesture. Lower toward 0.05 if it ever rejects genuine close-to-head
+    # raises; raise toward 0.12 if hand-near-face is still misfiring.
+    wrist_head_exclude_dist: float = 0.09
 
     # ── Hands (gesture classification) ───────────────────────────────────
     # Advanced: override in settings.yaml if needed

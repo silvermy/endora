@@ -38,6 +38,7 @@ log = logging.getLogger(__name__)
 # YOLO Pose outputs 17 COCO keypoints; ArmTracker uses MediaPipe PoseLandmark
 # indices.  This map translates at read-time so ArmTracker needs no changes.
 _COCO_TO_MP: dict[int, int] = {
+    0:  0,   # nose
     5:  11,  # left shoulder
     6:  12,  # right shoulder
     7:  13,  # left elbow
@@ -345,6 +346,7 @@ class CameraAnalyser(threading.Thread):
             pose_visibility_min=float(getattr(s, 'pose_visibility_min', 0.45)),
             keypoint_visibility_min=float(getattr(s, 'keypoint_visibility_min', 0.30)),
             forearm_vertical_min=float(getattr(s, 'forearm_vertical_min', 0.10)),
+            wrist_head_exclude_dist=float(getattr(s, 'wrist_head_exclude_dist', 0.09)),
             leg_raise_margin=float(getattr(s, 'leg_raise_margin', 0.05)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),

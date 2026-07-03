@@ -67,7 +67,7 @@ REGISTRY: list[SettingField] = [
     SettingField("frame_crop_top", float, 0.0, "% of frame to crop from top", group="Frame"),
     SettingField("frame_crop_bottom", float, 0.0, "% of frame to crop from bottom", group="Frame",
                   user_facing=True,
-                  ui=UIMeta("Crop bottom (%)", "slider", 0, 60, 1, "View", order=7)),
+                  ui=UIMeta("Crop bottom (%)", "slider", 0, 60, 1, "View", order=8)),
     SettingField("frame_crop_left", float, 0.0, "% of frame to crop from left", group="Frame"),
     SettingField("frame_crop_right", float, 0.0, "% of frame to crop from right", group="Frame"),
 
@@ -78,7 +78,7 @@ REGISTRY: list[SettingField] = [
                   enum=("yolo11n-pose.onnx", "yolo11s-pose.onnx")),
     SettingField("yolo_conf", float, 0.30,
                   "Minimum YOLO detection confidence (0-1)", group="Pose", user_facing=True,
-                  ui=UIMeta("YOLO confidence", "slider", 0.10, 0.80, 0.01, "Body", order=5)),
+                  ui=UIMeta("YOLO confidence", "slider", 0.10, 0.80, 0.01, "Body", order=6)),
     SettingField("yolo_imgsz", str, "320",
                   "Inference resolution — only bundled sizes actually take "
                   "effect (others silently fall back to 640 on aarch64, "
@@ -123,12 +123,17 @@ REGISTRY: list[SettingField] = [
     SettingField("pose_visibility_min", float, 0.45,
                   "Min landmark visibility to accept a pose (filters furniture)",
                   group="Pose", user_facing=True,
-                  ui=UIMeta("Min visibility", "slider", 0.05, 0.8, 0.01, "View", order=8)),
+                  ui=UIMeta("Min visibility", "slider", 0.05, 0.8, 0.01, "View", order=9)),
     SettingField("keypoint_visibility_min", float, 0.30,
                   "Per-keypoint confidence below which a landmark is treated as not-visible", group="Pose"),
     SettingField("forearm_vertical_min", float, 0.10,
                   "Secondary raised-arm route: forearm verticality threshold when wrist is at/above shoulder",
                   group="Pose"),
+    SettingField("wrist_head_exclude_dist", float, 0.09,
+                  "Reject a raised wrist within this distance of the nose keypoint "
+                  "(filters resting a hand against your own face)",
+                  group="Pose", user_facing=True,
+                  ui=UIMeta("Face exclusion", "slider", 0.0, 0.20, 0.01, "Gesture", order=5)),
 
     # ── Hands (gesture classification) ──────────────────────────────────
     SettingField("hand_model_max_hands", int, 1, "Max hands for grlib/MediaPipe hand pipeline", group="Hands"),
@@ -198,7 +203,7 @@ REGISTRY: list[SettingField] = [
                   "Roll to level a tilted horizon", group="Dewarp", user_facing=True),
     SettingField("dewarp_vfov", float, 75.0,
                   "Virtual camera vertical FOV", group="Dewarp", user_facing=True,
-                  ui=UIMeta("Vertical FOV (°)", "slider", 20, 100, 1, "View", order=6)),
+                  ui=UIMeta("Vertical FOV (°)", "slider", 20, 100, 1, "View", order=7)),
     SettingField("dewarp_out_width", int, 1280,
                   "Output frame width of the dewarped image", group="Dewarp", user_facing=True),
     SettingField("dewarp_out_height", int, 480,

@@ -66,6 +66,7 @@ class _Landmarks(Protocol):
 
 # Landmark indices used by ArmTracker.  These match MediaPipe PoseLandmark
 # values; the YOLO backend remaps COCO indices to these before calling classify().
+NOSE           = 0
 LEFT_SHOULDER  = 11
 RIGHT_SHOULDER = 12
 LEFT_ELBOW     = 13
@@ -130,6 +131,18 @@ class ArmTrackerConfig:
     # far above the shoulder in image space.  Only applies when upright is not
     # confirmed-reclined.  Raise toward 0.15 if hand-near-head misfires.
     forearm_vertical_min: float = 0.10
+
+    # Wrist-near-head exclusion: a raised wrist within this distance (frame
+    # fraction, both axes) of the nose keypoint is rejected even if it
+    # otherwise passes the raise checks above. Resting/adjusting a hand
+    # against your own face (glasses, phone, scratching, chin-on-hand) reads
+    # geometrically identical to a raised arm — wrist above shoulder, forearm
+    # vertical — but a deliberate raise/snap holds the hand up and away from
+    # the head. Only applied when the nose keypoint is confidently visible,
+    # so an occluded face never blocks a real raise. Lower toward 0.05 if it
+    # ever rejects genuine close-to-head raises; raise toward 0.12 if
+    # hand-near-face is still misfiring.
+    wrist_head_exclude_dist: float = 0.09
 
     # Both-arms-up: each wrist must clear its shoulder by this margin.
     both_arms_margin: float = 0.10
@@ -243,6 +256,7 @@ class ArmTracker:
         lh, rh = landmarks[LEFT_HIP], landmarks[RIGHT_HIP]
         le, re = landmarks[LEFT_ELBOW], landmarks[RIGHT_ELBOW]
         lw, rw = landmarks[LEFT_WRIST],  landmarks[RIGHT_WRIST]
+        nose = landmarks[NOSE]
 
         KV = self.c.keypoint_visibility_min
 
@@ -343,6 +357,8 @@ class ArmTracker:
         m          = self.c.arm_above_head_tolerance
         m_reclined = self.c.arm_above_head_tolerance_reclined
         fv_min     = self.c.forearm_vertical_min
+        whd        = self.c.wrist_head_exclude_dist
+        nose_ok    = nose.visibility >= KV
 
         def _side_raised(wrist, shoulder, elbow) -> bool:
             """Is this arm raised?  Two routes, depending on body posture.
@@ -357,17 +373,31 @@ class ArmTracker:
             forearm_visible = elbow.visibility >= KV
             forearm_vertical = forearm_visible and forearm_dy >= fv_min
             if upright is True:
-                return (wrist.y < (shoulder.y - m)
-                        or (forearm_vertical and wrist.y <= shoulder.y))
-            if upright is False:
+                raised = (wrist.y < (shoulder.y - m)
+                          or (forearm_vertical and wrist.y <= shoulder.y))
+            elif upright is False:
                 # Lying down — demand a deliberate straight-up arm; no shortcut.
-                return wrist.y < (shoulder.y - m_reclined)
-            # upright is None (hips hidden): lenient margin requires the forearm
-            # to point up; if the elbow isn't visible to confirm that, fall back
-            # to the strict reclined margin instead.
-            if forearm_visible:
-                return wrist.y < (shoulder.y - m) and forearm_dy > 0
-            return wrist.y < (shoulder.y - m_reclined)
+                raised = wrist.y < (shoulder.y - m_reclined)
+            else:
+                # upright is None (hips hidden): lenient margin requires the
+                # forearm to point up; if the elbow isn't visible to confirm
+                # that, fall back to the strict reclined margin instead.
+                if forearm_visible:
+                    raised = wrist.y < (shoulder.y - m) and forearm_dy > 0
+                else:
+                    raised = wrist.y < (shoulder.y - m_reclined)
+            if not raised:
+                return False
+            # Wrist resting against the face (adjusting glasses, holding a
+            # phone, scratching, chin-on-hand) satisfies the height/verticality
+            # checks above but is not a deliberate raise — only reject when
+            # the nose is confidently visible, so an occluded face can't
+            # block a real gesture.
+            if nose_ok:
+                head_dist = ((wrist.x - nose.x) ** 2 + (wrist.y - nose.y) ** 2) ** 0.5
+                if head_dist < whd:
+                    return False
+            return True
 
         rw_raised = rs_ok and rw.visibility >= KV and _side_raised(rw, rs, re)
         lw_raised = ls_ok and lw.visibility >= KV and _side_raised(lw, ls, le)

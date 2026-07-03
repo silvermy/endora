@@ -200,6 +200,45 @@ def test_t_pose_needs_both_shoulders_visible():
     assert r.state != ArmState.T_POSE
 
 
+def test_hand_resting_near_face_does_not_fire_single_up():
+    # Realistic false positive: seated, resting/adjusting a hand right next to
+    # the face (glasses, phone, scratching, chin-on-hand). Wrist clears the
+    # shoulder margin the same way a deliberate raise would, but sits right on
+    # top of the nose keypoint — a real raise holds the hand up and away from
+    # the head.
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        # Nose default is (0.50, 0.30); this wrist is ~0.08 away — inside the
+        # default wrist_head_exclude_dist of 0.09.
+        right_elbow=Point(0.58, 0.35),
+        right_wrist=Point(0.52, 0.22),
+    )
+    r = _tracker()._classify_raw(lm, 1280, 720)
+    assert r.state == ArmState.DOWN, f"got {r.state}"
+
+
+def test_hand_resting_near_face_fires_when_nose_not_visible():
+    # Same near-face wrist position, but the face is occluded (nose not
+    # confidently visible) — must not block a genuine raise just because we
+    # can't confirm proximity to the head.
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        nose=Point(0.50, 0.30, visibility=0.1),
+        right_elbow=Point(0.58, 0.35),
+        right_wrist=Point(0.52, 0.22),
+    )
+    r = _tracker()._classify_raw(lm, 1280, 720)
+    assert r.state == ArmState.SINGLE_UP, f"got {r.state}"
+
+
+def test_raise_well_away_from_face_still_fires():
+    # Sanity check the exclusion is distance-gated, not a blanket rejection
+    # near the top of the frame — a real raise well clear of the head fires.
+    r = _tracker()._classify_raw(right_arm_up_vertical(), 1280, 720)
+    assert r.state == ArmState.SINGLE_UP
+    assert r.raised_side == Side.RIGHT
+
+
 def test_hips_hidden_forearm_up_fires():
     # Blanket to chest (hips not visible → upright unknown). Arm raised with a
     # visible, vertical forearm should fire via the lenient+forearm-up route.

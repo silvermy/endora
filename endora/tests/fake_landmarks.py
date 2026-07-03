@@ -29,6 +29,7 @@ class Landmarks:
 
 
 # MediaPipe PoseLandmark indices
+NOSE = 0
 LEFT_SHOULDER, RIGHT_SHOULDER = 11, 12
 LEFT_ELBOW,    RIGHT_ELBOW    = 13, 14
 LEFT_WRIST,    RIGHT_WRIST    = 15, 16
@@ -42,6 +43,7 @@ def _build(**overrides) -> Landmarks:
     Override any point by passing e.g. left_wrist=Point(0.3, 0.1).
     """
     defaults = {
+        NOSE:           Point(0.50, 0.30),
         LEFT_SHOULDER:  Point(0.40, 0.40),
         RIGHT_SHOULDER: Point(0.60, 0.40),
         LEFT_ELBOW:     Point(0.35, 0.55),
@@ -54,6 +56,7 @@ def _build(**overrides) -> Landmarks:
         RIGHT_KNEE:     Point(0.58, 0.80),
     }
     name_to_idx = {
+        'nose':           NOSE,
         'left_shoulder':  LEFT_SHOULDER,  'right_shoulder': RIGHT_SHOULDER,
         'left_elbow':     LEFT_ELBOW,     'right_elbow':    RIGHT_ELBOW,
         'left_wrist':     LEFT_WRIST,     'right_wrist':    RIGHT_WRIST,
