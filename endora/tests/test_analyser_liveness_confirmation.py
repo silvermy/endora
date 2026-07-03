@@ -31,7 +31,7 @@ instead of the intended defaults on a bare mock).
 """
 from unittest.mock import MagicMock
 
-from cameras.analyser import CameraAnalyser, _LIVENESS_CONFIRM_WINDOW_S
+from cameras.analyser import CameraAnalyser, _LIVENESS_CONFIRM_WINDOW_S, _known_centroids
 from config.settings import Settings
 
 CENTROID = (400.0, 300.0)
@@ -132,3 +132,44 @@ def test_confirmation_is_sticky_after_resting():
     for i in range(50):
         a._match_persons([(None, MOVED_CENTROID, False)], 640, 480, now=1010.0 + i * 10)
         assert a._persons[pid].confirmed_human is True
+
+
+# ── Regression: a real person who hasn't yet earned their second genuine
+# pass must not be pruned the instant they hold still — see _known_centroids.
+# Without this grace period, anyone who sits down and doesn't move their
+# wrist within a couple of seconds vanishes from tracking (and the debug
+# overlay) and has to start over as a brand-new pid, resetting the
+# confirmation clock, the next time they move.
+
+def test_unconfirmed_pid_is_self_exempt_within_grace_period():
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+    pid = _only_pid(a)
+    assert a._persons[pid].confirmed_human is False
+
+    known = _known_centroids(a._persons, now=1000.0 + _LIVENESS_CONFIRM_WINDOW_S - 1)
+    assert known == [CENTROID]
+
+
+def test_unconfirmed_pid_loses_exemption_after_grace_period_elapses():
+    """A static ghost gets the same grace window as a real person, not a
+    free pass forever — if it never earns a genuine, moved second pass
+    before the window elapses, it drops back out of known_centroids and is
+    pruned exactly as before this fix.
+    """
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+
+    known = _known_centroids(a._persons, now=1000.0 + _LIVENESS_CONFIRM_WINDOW_S + 1)
+    assert known == []
+
+
+def test_confirmed_pid_stays_exempt_regardless_of_grace_period():
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+    pid = _only_pid(a)
+    a._match_persons([(None, MOVED_CENTROID, True)], 640, 480, now=1010.0)
+    assert a._persons[pid].confirmed_human is True
+
+    known = _known_centroids(a._persons, now=1010.0 + 10 * _LIVENESS_CONFIRM_WINDOW_S)
+    assert known == [MOVED_CENTROID]
