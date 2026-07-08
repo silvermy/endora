@@ -108,7 +108,7 @@ class ArmTrackerConfig:
     # When body is NOT upright (reclined/lying down), OR when upright status
     # cannot be determined (hips hidden by blanket), the wrist must clear the
     # shoulder by this larger margin.  Requires a deliberate straight-up arm.
-    arm_above_head_tolerance_reclined: float = 0.30
+    arm_above_head_tolerance_reclined: float = 0.38
     # Leg-raise guard: if both knees are this far above the average shoulder y
     # (frame fraction, y increases downward so knee_y < shoulder_y means higher),
     # suppress all gesture detection.  Catches legs-in-V while lying down.

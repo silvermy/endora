@@ -73,8 +73,8 @@ def test_lying_down_straight_arm_accepted():
     lm = _build(
         # Hips well above shoulders (lying on back)
         left_hip=Point(0.42, 0.20), right_hip=Point(0.58, 0.20),
-        # Wrist at y=0.08, shoulder at y=0.40 → margin 0.32 > reclined threshold 0.30
-        right_elbow=Point(0.65, 0.22), right_wrist=Point(0.65, 0.08),
+        # Wrist at y=0.00, shoulder at y=0.40 → margin 0.40 > reclined threshold 0.38
+        right_elbow=Point(0.65, 0.22), right_wrist=Point(0.65, 0.00),
     )
     r = _tracker()._classify_raw(lm, 1280, 720)
     assert r.state == ArmState.SINGLE_UP

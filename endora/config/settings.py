@@ -96,9 +96,12 @@ class Settings:
     arm_above_head_tolerance: float = 0.15
     # Stricter threshold used when the body is reclined OR when upright status
     # cannot be confirmed (hips hidden by blanket).  Requires a deliberate
-    # straight-up arm.  0.40 = wrist must clear shoulder by ~40% of frame
-    # height — roughly "arm pointing straight at the ceiling".
-    arm_above_head_tolerance_reclined: float = 0.30
+    # straight-up arm.  0.38 = wrist must clear shoulder by ~38% of frame
+    # height — roughly "arm pointing straight at the ceiling". Raised from
+    # 0.30 after feedback.jsonl showed recurring late-night false SNAP fires
+    # while lying down (upright=False) — likely a habitual reach (phone,
+    # blanket, pillow) rather than a deliberate gesture; see commit message.
+    arm_above_head_tolerance_reclined: float = 0.38
     # Minimum gap (frame fraction) between average hip_y and average shoulder_y.
     # Guards against arm-raise false positives when lying down: when horizontal,
     # hips and shoulders converge; when upright, hips are 0.2–0.4 below shoulders.
