@@ -34,7 +34,7 @@ def test_save_only_persists_touched_and_preexisting_keys(tmp_path, monkeypatch):
 
     overrides_path = tmp_path / "data" / "runtime_overrides.yaml"
     overrides_path.parent.mkdir(parents=True, exist_ok=True)
-    overrides_path.write_text("snap_forearm_min: 0.06\nsnap_sustain_s: 0.1\n")
+    overrides_path.write_text("snap_forearm_min: 0.06\nsnap_sustain_s: 0.2\n")
 
     # Simulate the user only touching one unrelated slider this session.
     assert ds._apply_setting("cooldown_s", "3.0")
@@ -45,7 +45,7 @@ def test_save_only_persists_touched_and_preexisting_keys(tmp_path, monkeypatch):
     saved = overrides_path.read_text()
     assert "cooldown_s: 3" in saved
     assert "snap_forearm_min: 0.06" in saved
-    assert "snap_sustain_s: 0.1" in saved
+    assert "snap_sustain_s: 0.2" in saved
     # low_light_enhance was never touched and never previously saved —
     # it must NOT be pinned just because Save was clicked.
     assert "low_light_enhance" not in saved

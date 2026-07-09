@@ -396,7 +396,7 @@ class CameraAnalyser(threading.Thread):
             hold_duration_s=float(getattr(s, 'hold_duration_s', 1.5)),
             double_snap_window_s=float(getattr(s, 'double_snap_window_s', 3.0)),
             sustain_s=float(getattr(s, 'sustain_s', 0.5)),
-            snap_sustain_s=float(getattr(s, 'snap_sustain_s', 0.50)),
+            snap_sustain_s=float(getattr(s, 'snap_sustain_s', 0.20)),
             snap_roll_threshold=float(getattr(s, 'snap_roll_threshold', 0.0)),
         ), on_near_miss=self._near_miss_cb)
         # A brand-new pid can only be created from a candidate that didn't

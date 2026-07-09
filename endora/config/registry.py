@@ -165,7 +165,7 @@ REGISTRY: list[SettingField] = [
                   "Absolute hand_roll magnitude threshold for snap detection", group="Gesture"),
 
     # ── Hysteresis timing ────────────────────────────────────────────────
-    SettingField("snap_sustain_s", float, 0.10,
+    SettingField("snap_sustain_s", float, 0.20,
                   "Seconds the arm must stay up before SNAP fires", group="Hysteresis", user_facing=True,
                   ui=UIMeta("Snap hold time (s)", "slider", 0.0, 1.0, 0.05, "Gesture", order=2)),
     SettingField("state_confirm_s", float, 0.20,

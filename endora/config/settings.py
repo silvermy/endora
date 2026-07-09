@@ -192,7 +192,13 @@ class Settings:
     # Minimum time the arm must stay up before SNAP fires (seconds), measured
     # from the first confirmed SINGLE_UP frame.  Filters out brief accidental
     # raises; ArmTracker's state_confirm_s adds another 0.20s on top.
-    snap_sustain_s: float = 0.10
+    # Raised 0.10 -> 0.20 in v1.9.113 after feedback.jsonl showed a cluster of
+    # false SNAPs during a busy morning-routine window that forearm_dy/snap_roll
+    # couldn't separate from real fires — a moderate middle ground between this
+    # and the 0.50 default that v1.9.93 lowered specifically because real
+    # snaps were being missed at higher sustain values; watch near_miss entries
+    # for "sustain … < 0.20s required" if genuine snaps start getting dropped.
+    snap_sustain_s: float = 0.20
 
     # Seconds a new arm state must be seen before being accepted.
     # Lower = more responsive but may get single-frame false positives.
