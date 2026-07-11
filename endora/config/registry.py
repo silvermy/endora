@@ -72,14 +72,14 @@ REGISTRY: list[SettingField] = [
     SettingField("frame_crop_right", float, 0.0, "% of frame to crop from right", group="Frame"),
 
     # ── Pose (arm-raise detection) ──────────────────────────────────────
-    SettingField("yolo_pose_model", str, "yolo11n-pose.onnx",
+    SettingField("yolo_pose_model", str, "yolo11s-pose.onnx",
                   "Pose model: yolo11n-pose.onnx (fast/nano) or yolo11s-pose.onnx (accurate/small)",
                   group="Pose", user_facing=True,
                   enum=("yolo11n-pose.onnx", "yolo11s-pose.onnx")),
     SettingField("yolo_conf", float, 0.30,
                   "Minimum YOLO detection confidence (0-1)", group="Pose", user_facing=True,
                   ui=UIMeta("YOLO confidence", "slider", 0.10, 0.80, 0.01, "Body", order=7)),
-    SettingField("yolo_imgsz", str, "320",
+    SettingField("yolo_imgsz", str, "480",
                   "Inference resolution — only bundled sizes actually take "
                   "effect (others silently fall back to 640 on aarch64, "
                   "since there is no runtime export there)",
@@ -135,9 +135,17 @@ REGISTRY: list[SettingField] = [
                   "(filters resting a hand against your own face)",
                   group="Pose", user_facing=True,
                   ui=UIMeta("Face exclusion", "slider", 0.0, 0.20, 0.01, "Gesture", order=5)),
+    SettingField("body_scale_reference", float, 0.25,
+                  "Torso length (frame fraction) the geometric thresholds are tuned at — "
+                  "each person's margins scale with their detected body size relative to this",
+                  group="Pose", user_facing=True),
 
     # ── Hands (gesture classification) ──────────────────────────────────
     SettingField("hand_model_max_hands", int, 1, "Max hands for grlib/MediaPipe hand pipeline", group="Hands"),
+    SettingField("hand_crop_enable", bool, True,
+                  "Run hand detection on a crop around the raised wrist instead of the full "
+                  "frame — makes snap_roll usable at couch distance",
+                  group="Hands", user_facing=True),
     SettingField("hand_min_detection_confidence", float, 0.1, "Hand model detection confidence", group="Hands"),
     SettingField("hand_min_tracking_confidence", float, 0.1, "Hand model tracking confidence", group="Hands"),
     SettingField("palm_orientation_threshold", float, 0.05, "Palm orientation threshold", group="Hands"),
@@ -168,6 +176,18 @@ REGISTRY: list[SettingField] = [
     SettingField("snap_sustain_s", float, 0.20,
                   "Seconds the arm must stay up before SNAP fires", group="Hysteresis", user_facing=True,
                   ui=UIMeta("Snap hold time (s)", "slider", 0.0, 1.0, 0.05, "Gesture", order=2)),
+    SettingField("snap_require_rise", bool, True,
+                  "SNAP requires the wrist to have risen from below shoulder level within "
+                  "the last few seconds (blocks long-static poses like chin-on-hand)",
+                  group="Hysteresis", user_facing=True),
+    SettingField("snap_require_still", bool, True,
+                  "SNAP requires the raised wrist to hold still briefly "
+                  "(blocks pass-through reaches for phone/blanket)",
+                  group="Hysteresis", user_facing=True),
+    SettingField("wrist_still_max_travel", float, 0.05,
+                  "Max wrist travel (body-scaled frame fraction) during the stillness "
+                  "window for a raise to count as held still",
+                  group="Hysteresis", user_facing=True),
     SettingField("state_confirm_s", float, 0.20,
                   "Seconds a new arm state must be seen before being accepted",
                   group="Hysteresis", user_facing=True),

@@ -69,6 +69,16 @@ class StateMachineConfig:
     # 0.0 = disabled (rely on forearm_dy only).
     snap_roll_threshold: float = 0.0
 
+    # Trajectory gates (computed by ArmTracker, carried on the ArmReading):
+    # snap_require_rise — SNAP only fires if the wrist was seen below
+    #   shoulder level recently (reading.rose_recently); blocks re-fires from
+    #   long-static poses (hand propped against head, ghost detections).
+    # snap_require_still — SNAP only fires while the wrist is holding still
+    #   (reading.wrist_still); blocks pass-through reaches (phone, blanket).
+    # Either can be disabled live if it ever blocks genuine gestures.
+    snap_require_rise: bool = True
+    snap_require_still: bool = True
+
 
 # ── Internal per-arm-raise state ──────────────────────────────────────────────
 
@@ -80,6 +90,10 @@ class _RaiseState:
     snap_fired_at: float = 0.0
     up_frames:     int   = 0
     entered_at:    float = 0.0   # monotonic time of first SINGLE_UP frame
+    # Trajectory-gate near-miss reasons already logged for this raise — these
+    # gates can stay blocked for minutes (hand propped against head), and
+    # logging them per-frame would flood feedback.jsonl.
+    gates_logged:  set   = field(default_factory=set)
 
 
 @dataclass
@@ -152,12 +166,20 @@ class GestureStateMachine:
         if r.up_frames == 1:
             r.entered_at = now  # record when this raise began
 
-        arm_vertical = reading.forearm_dy >= self.c.snap_forearm_min
+        # snap_forearm_min is tuned at the reference body size; scale it by
+        # the per-person factor so a small/distant body's shorter forearm
+        # (in frame units) isn't held to a full-size bar.
+        forearm_min = self.c.snap_forearm_min * reading.scale_factor
+        arm_vertical = reading.forearm_dy >= forearm_min
         roll_snap = (
             self.c.snap_roll_threshold > 0
             and abs(reading.snap_roll) >= self.c.snap_roll_threshold
         )
         snap_condition = arm_vertical or roll_snap
+        # Trajectory gates — evidence the raise was a deliberate up-and-hold,
+        # not a static pose (rise) or a pass-through reach (still).
+        rise_ok  = (not self.c.snap_require_rise) or reading.rose_recently
+        still_ok = (not self.c.snap_require_still) or reading.wrist_still
 
         # HOLD: arm still vertical, SNAP already fired, enough time passed
         if (r.snap_fired and not r.hold_fired and snap_condition
@@ -166,16 +188,28 @@ class GestureStateMachine:
             return self._fire(Gesture.HOLD, now)
 
         # SNAP: arm has been held up long enough (time-based, rate-independent)
-        if (not r.snap_fired and snap_condition
+        if (not r.snap_fired and snap_condition and rise_ok and still_ok
                 and (now - r.entered_at) >= self.c.snap_sustain_s):
             return self._fire_snap(now)
 
         # Near-miss: arm is up but snap condition not met — log for tuning.
         if not r.snap_fired and self._on_near_miss and r.up_frames > 1:
             if not snap_condition:
-                reason = (f"forearm_dy={reading.forearm_dy:.3f} < {self.c.snap_forearm_min}"
-                          f" (min), snap_roll={reading.snap_roll:.3f}")
+                reason = (f"forearm_dy={reading.forearm_dy:.3f} < {forearm_min:.3f}"
+                          f" (min, scale={reading.scale_factor:.2f}),"
+                          f" snap_roll={reading.snap_roll:.3f}")
                 self._on_near_miss("SNAP", reason, reading)
+            elif not rise_ok:
+                if "no_rise" not in r.gates_logged:
+                    r.gates_logged.add("no_rise")
+                    self._on_near_miss(
+                        "SNAP", "no_rise: wrist not seen below shoulder recently",
+                        reading)
+            elif not still_ok:
+                if "wrist_moving" not in r.gates_logged:
+                    r.gates_logged.add("wrist_moving")
+                    self._on_near_miss(
+                        "SNAP", "wrist_moving: wrist not held still", reading)
             elif (now - r.entered_at) < self.c.snap_sustain_s:
                 held = now - r.entered_at
                 reason = f"sustain={held:.3f}s < {self.c.snap_sustain_s}s required"

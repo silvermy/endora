@@ -45,8 +45,11 @@ class Settings:
     #   yolo11s-pose.onnx  — small, ~2× slower (~50 ms), noticeably better at
     #                        unusual poses (lounging, arm raised, blanket-covered).
     #                        Recommended if Pi 5 CPU headroom allows it.
-    # Both models are bundled in the Docker image.
-    yolo_pose_model: str = "yolo11n-pose.onnx"
+    # Both models are bundled in the Docker image. Default is the small model:
+    # the deployment scenario (reclined on a dark couch, blanket, low light)
+    # is exactly where nano's keypoints get too noisy to classify reliably,
+    # and the motion gate keeps the average CPU cost well below worst case.
+    yolo_pose_model: str = "yolo11s-pose.onnx"
     # Minimum YOLO detection confidence (0–1). Raise to reduce false detections
     # from furniture/shadows, especially in low light. Default 0.25 is too
     # permissive; 0.45 filters most ghost detections without missing real people.
@@ -60,7 +63,9 @@ class Settings:
     # with int() at the point of use (see analyser.py).
     # 320 uses one-quarter the FLOPs of 640 — fastest, but may miss distant
     # or small people. 480 is a middle ground. 640 gives the most detail.
-    yolo_imgsz: str = "320"
+    # Default 480: at 320 a couch-distance person's wrist/elbow keypoints are
+    # too coarse for reliable gesture geometry, especially in low contrast.
+    yolo_imgsz: str = "480"
     # Motion gate: only run YOLO when the frame changes by more than this
     # fraction (0–1 mean absolute pixel difference over an 80×60 thumbnail).
     # 0.008 catches slow arm raises (low per-frame velocity); 0.0 = always run.
@@ -140,6 +145,15 @@ class Settings:
     # gesture. Lower toward 0.05 if it ever rejects genuine close-to-head
     # raises; raise toward 0.12 if hand-near-face is still misfiring.
     wrist_head_exclude_dist: float = 0.09
+    # Torso length (frame fraction, shoulder-mid to hip-mid) that all the
+    # geometric thresholds above are tuned at. Each person's thresholds are
+    # multiplied by detected_torso / this (clamped 0.5–2.0), so a body lying
+    # far from the camera isn't asked to clear margins sized for someone
+    # standing right in front of it — and vice versa. When hips are hidden
+    # (blanket), torso is estimated from shoulder width. Raise this if
+    # everyone in your frames is large/close (makes margins smaller for a
+    # given person); lower it if everyone is small/distant.
+    body_scale_reference: float = 0.25
 
     # ── Hands (gesture classification) ───────────────────────────────────
     # Advanced: override in settings.yaml if needed
@@ -147,6 +161,11 @@ class Settings:
     hand_min_detection_confidence: float = 0.1   # low = faster first-frame detect
     hand_min_tracking_confidence: float = 0.1
     palm_orientation_threshold: float = 0.05
+    # Run hand detection on a crop around the raised wrist instead of the
+    # full frame. At couch distance a hand is a few dozen pixels in the full
+    # frame and MediaPipe rarely finds it (snap_roll came back ~1 in 15
+    # fires); the crop makes the hand large enough to detect reliably.
+    hand_crop_enable: bool = True
 
     # ── Gesture thresholds ────────────────────────────────────────────────
     # Flip the image 180° (useful for cameras mounted upside-down).
@@ -199,6 +218,24 @@ class Settings:
     # snaps were being missed at higher sustain values; watch near_miss entries
     # for "sustain … < 0.20s required" if genuine snaps start getting dropped.
     snap_sustain_s: float = 0.20
+    # Trajectory gates for SNAP — both computed by the arm tracker from a
+    # short wrist-position history and carried on each reading:
+    # snap_require_rise: SNAP only fires if the wrist was seen below shoulder
+    # level within the last few seconds. Blocks fires from poses that have
+    # simply existed for a while (hand propped against the head, a ghost
+    # detection with a permanently "raised" arm, sleeping posture) — a
+    # deliberate gesture always starts with an actual upward motion.
+    snap_require_rise: bool = True
+    # snap_require_still: SNAP only fires while the raised wrist is holding
+    # still. A reach (phone, blanket, glass) passes through the raised zone
+    # while still moving; a deliberate raise stops and holds. Disable either
+    # gate live if it ever blocks genuine gestures.
+    snap_require_still: bool = True
+    # Max wrist travel (frame fraction at reference body scale) over the
+    # stillness window for the wrist to count as "holding still". Raise
+    # toward 0.08 if deliberate raises with a wobbly hand get blocked; lower
+    # toward 0.03 if slow reaches still fire.
+    wrist_still_max_travel: float = 0.05
 
     # Seconds a new arm state must be seen before being accepted.
     # Lower = more responsive but may get single-frame false positives.

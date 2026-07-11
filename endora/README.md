@@ -221,8 +221,8 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 
 | Option | Default | Description |
 |---|---|---|
-| `yolo_pose_model` | `yolo11n-pose.onnx` | Pose model: `yolo11n-pose.onnx` (fast/nano) or `yolo11s-pose.onnx` (accurate/small) |
-| `yolo_imgsz` | `320` | Inference resolution — `320`/`480`/`640` are bundled; other values fall back to `640` on a Pi |
+| `yolo_pose_model` | `yolo11s-pose.onnx` | Pose model: `yolo11n-pose.onnx` (fast/nano) or `yolo11s-pose.onnx` (accurate/small) |
+| `yolo_imgsz` | `480` | Inference resolution — `320`/`480`/`640` are bundled; other values fall back to `640` on a Pi |
 | `rtsp_url_a` | — | RTSP stream URL (required) |
 | `rtsp_url_b` | same as A | Second camera; set equal to A for single-camera mode |
 | `debug_port` | `8765` | Debug stream port |

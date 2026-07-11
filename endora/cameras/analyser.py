@@ -26,7 +26,10 @@ import cv2
 import numpy as np
 
 from version import __version__
-from cameras.arm_tracker import ArmState, ArmTracker, ArmTrackerConfig
+from cameras.arm_tracker import (
+    ArmState, ArmTracker, ArmTrackerConfig, Side,
+    LEFT_ELBOW, RIGHT_ELBOW, LEFT_WRIST, RIGHT_WRIST,
+)
 from cameras.frame_capture import FrameCapture
 from core.state_machine import (
     Gesture, GestureStateMachine, StateMachineConfig,
@@ -291,6 +294,9 @@ class _PersonEntry:
     last_lm:           object        # cached _YOLOLandmarks from last YOLO frame
     last_arm_state:    ArmState      = ArmState.DOWN
     last_logged_state: object        = None
+    # Last non-None ArmReading — used to centre the hand-detection crop on
+    # the raised wrist (see _crop_around_wrist).
+    last_reading:      object        = None
     # Liveness confirmation — see _LIVENESS_CONFIRM_WINDOW_S. Sticky once
     # True; confirmed_human pids (and pids still inside their own grace
     # period since last_genuine_live_at — see _known_centroids) contribute
@@ -325,6 +331,49 @@ def _known_centroids(
             and now - e.last_genuine_live_at <= _LIVENESS_CONFIRM_WINDOW_S
         )
     ]
+
+
+# ── Hand-crop helpers ─────────────────────────────────────────────────────────
+# MediaPipe Hands (via grlib) detects almost nothing when the hand is a
+# couch-distance speck in the full frame — historically snap_roll came back
+# nonzero on only ~1 in 15 fires. Cropping a box around the known raised
+# wrist and upscaling it gives the hand model a hand-sized hand.
+
+_HAND_CROP_MIN_HALF_PX = 40    # never crop tighter than this half-size
+_HAND_CROP_FOREARM_FACTOR = 1.6  # crop half-size as a multiple of forearm length
+_HAND_CROP_UPSCALE_PX = 256    # upscale small crops to this square size
+
+
+def _crop_around_wrist(frame: np.ndarray, reading, lm) -> Optional[np.ndarray]:
+    """Square crop of *frame* centred just above the raised wrist (the hand
+    sits above the wrist when the arm is up). Sized from the forearm length
+    so it tracks person scale/distance. Returns None when the crop cannot be
+    built (missing side, degenerate box) — caller falls back to the full frame.
+    """
+    h, w = frame.shape[:2]
+    side = getattr(reading, 'raised_side', None)
+    if side is None or lm is None:
+        return None
+    try:
+        e_idx, w_idx = ((LEFT_ELBOW, LEFT_WRIST) if side is Side.LEFT
+                        else (RIGHT_ELBOW, RIGHT_WRIST))
+        el, wr = lm[e_idx], lm[w_idx]
+        forearm_px = (((el.x - wr.x) * w) ** 2 + ((el.y - wr.y) * h) ** 2) ** 0.5
+    except Exception:
+        return None
+    half = int(max(_HAND_CROP_MIN_HALF_PX, _HAND_CROP_FOREARM_FACTOR * forearm_px))
+    half = min(half, int(0.45 * min(h, w)))
+    cx = int(reading.wrist_x)
+    cy = int(reading.wrist_y - 0.4 * half)   # bias upward toward the hand
+    x0, x1 = max(0, cx - half), min(w, cx + half)
+    y0, y1 = max(0, cy - half), min(h, cy + half)
+    if x1 - x0 < 32 or y1 - y0 < 32:
+        return None
+    crop = frame[y0:y1, x0:x1]
+    if max(crop.shape[:2]) < _HAND_CROP_UPSCALE_PX:
+        crop = cv2.resize(crop, (_HAND_CROP_UPSCALE_PX, _HAND_CROP_UPSCALE_PX),
+                          interpolation=cv2.INTER_LINEAR)
+    return crop
 
 
 class CameraAnalyser(threading.Thread):
@@ -389,6 +438,8 @@ class CameraAnalyser(threading.Thread):
             leg_raise_margin=float(getattr(s, 'leg_raise_margin', 0.05)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),
+            body_scale_reference=float(getattr(s, 'body_scale_reference', 0.25)),
+            wrist_still_max_travel=float(getattr(s, 'wrist_still_max_travel', 0.05)),
         ))
         state_machine = GestureStateMachine(StateMachineConfig(
             cooldown_s=float(getattr(s, 'cooldown_s', 2.0)),
@@ -398,6 +449,8 @@ class CameraAnalyser(threading.Thread):
             sustain_s=float(getattr(s, 'sustain_s', 0.5)),
             snap_sustain_s=float(getattr(s, 'snap_sustain_s', 0.20)),
             snap_roll_threshold=float(getattr(s, 'snap_roll_threshold', 0.0)),
+            snap_require_rise=bool(getattr(s, 'snap_require_rise', True)),
+            snap_require_still=bool(getattr(s, 'snap_require_still', True)),
         ), on_near_miss=self._near_miss_cb)
         # A brand-new pid can only be created from a candidate that didn't
         # match any existing tracked pid (see _match_persons) — and since
@@ -712,8 +765,25 @@ class CameraAnalyser(threading.Thread):
                         _grlib_ok = False
 
                 if _hand_pipeline is not None:
+                    # Crop around the raised wrist so the hand fills a useful
+                    # fraction of the image MediaPipe sees — full-frame hands
+                    # at couch distance are too small to detect reliably.
+                    # snap_roll is a ratio of intra-hand x-distances, so it is
+                    # unaffected by the crop's translation/upscale.
+                    hand_img = proc_frame
+                    if bool(getattr(self.s, 'hand_crop_enable', True)):
+                        up_entry = next(
+                            (e for e in self._persons.values()
+                             if e.last_arm_state == ArmState.SINGLE_UP
+                             and e.last_reading is not None),
+                            None)
+                        if up_entry is not None:
+                            crop = _crop_around_wrist(
+                                proc_frame, up_entry.last_reading, up_entry.last_lm)
+                            if crop is not None:
+                                hand_img = crop
                     try:
-                        flat_lm, _ = _hand_pipeline.get_landmarks_from_image(proc_frame)
+                        flat_lm, _ = _hand_pipeline.get_landmarks_from_image(hand_img)
                         hand_lm = flat_lm
                     except Exception as e:
                         if _NoHandDetected is None or not isinstance(e, _NoHandDetected):
@@ -736,6 +806,7 @@ class CameraAnalyser(threading.Thread):
 
                 if reading is not None:
                     entry.last_arm_state = reading.state
+                    entry.last_reading = reading
                     if reading.state != entry.last_logged_state:
                         log.info("[%s] pid=%d state → %s",
                                  self.label, pid, reading.state.name)
@@ -876,7 +947,14 @@ def _draw_debug(frame, all_person_kps, hand_lm, reading, fired_gesture):
             (f"forearm_dy: {forearm:.3f}", (255, 255, 255)),
             (f"snap_roll:  {hand_str}", (255, 255, 255)),
             (f"upright: {reading.upright}", (255, 255, 255)),
+            (f"scale: {getattr(reading, 'scale_factor', 1.0):.2f}", (255, 255, 255)),
         ]
+        if state_name == 'SINGLE_UP':
+            rose = getattr(reading, 'rose_recently', True)
+            still = getattr(reading, 'wrist_still', True)
+            color = (0, 255, 100) if (rose and still) else (0, 165, 255)
+            lines.append((f"rose: {'Y' if rose else 'N'}  "
+                          f"still: {'Y' if still else 'N'}", color))
     else:
         lines = [("state: none", (160, 160, 160))]
 

@@ -61,6 +61,9 @@ def _snap(reading) -> dict:
         "snap_roll": round(float(reading.snap_roll), 4),
         "upright": bool(reading.upright),
         "raised_side": reading.raised_side.name if reading.raised_side else None,
+        "scale_factor": round(float(getattr(reading, "scale_factor", 1.0)), 3),
+        "rose_recently": bool(getattr(reading, "rose_recently", True)),
+        "wrist_still": bool(getattr(reading, "wrist_still", True)),
     }
 
 
