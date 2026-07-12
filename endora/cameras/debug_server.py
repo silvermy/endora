@@ -354,6 +354,37 @@ def _save_to_yaml() -> tuple[bool, str]:
     return True, ""
 
 
+def _reset_overrides() -> tuple[bool, str]:
+    """Delete /data/runtime_overrides.yaml and reload settings without it.
+
+    Reverts every debug-page override to the HA Configuration tab value (or
+    the shipped default) IMMEDIATELY — the analyser reads the shared settings
+    object live, so no add-on restart is needed. Exists because overrides
+    accumulate every slider ever touched, silently outranking new defaults
+    shipped in later releases; clearing them used to require shell access to
+    the add-on container.
+    """
+    global _touched
+    path = Path("/data/runtime_overrides.yaml")
+    try:
+        if path.exists():
+            path.unlink()
+    except Exception as e:
+        return False, f"could not delete runtime_overrides.yaml: {e}"
+    if _settings is not None:
+        try:
+            import dataclasses as _dc
+            from config.settings import Settings
+            fresh = Settings.load()   # file is gone → options.json + defaults
+            for fld in _dc.fields(Settings):
+                setattr(_settings, fld.name, getattr(fresh, fld.name))
+        except Exception as e:
+            return False, f"file deleted, but live reload failed — restart the add-on ({e})"
+    _touched = set()
+    log.info("Runtime overrides reset — settings reloaded from options/defaults")
+    return True, ""
+
+
 # ── HTML page ─────────────────────────────────────────────────────────────────
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -463,6 +494,14 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 #savebtn:hover{background:#163016}
 #savebtn:disabled{opacity:.45;cursor:default}
 #savemsg{font-size:12px;min-height:16px;text-align:center;padding-top:3px}
+#resetbtn{
+  width:100%;padding:6px;background:#2e1414;border:1px solid #6e2e2e;
+  color:#c66;border-radius:6px;cursor:pointer;
+  font-family:system-ui,-apple-system,sans-serif;
+  font-size:12px;margin-top:6px
+}
+#resetbtn:hover{background:#3a1818}
+#resetbtn:disabled{opacity:.45;cursor:default}
 @media(max-width:860px){
   #wrap{flex-direction:column}
   #panel{flex:none;width:100%;max-height:none}
@@ -544,6 +583,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     <div id="booltoggles"></div>
     <div id="sliders"></div>
     <button id="savebtn" onclick="doSave()">&#128190;&nbsp; Save to settings.yaml</button>
+    <button id="resetbtn" onclick="doReset()">&#8634;&nbsp; Reset overrides to config defaults</button>
     <div id="savemsg"></div>
     <button id="capturebtn" onclick="doCapture()" style="display:none">&#128249;&nbsp; Capture test case</button>
     <div id="capturemsg" style="font-size:12px;min-height:16px;text-align:center;padding-top:3px"></div>
@@ -719,6 +759,23 @@ function doSave() {
     .then(d => {
       msg.style.color = d.ok ? '#5c5' : '#c55';
       msg.textContent = d.ok ? '\u2713 saved' : '\u2717 ' + (d.error || 'error');
+    })
+    .catch(() => { msg.style.color='#c55'; msg.textContent='\u2717 request failed'; })
+    .finally(() => { btn.disabled = false; });
+}
+
+function doReset() {
+  if (!confirm('Delete runtime_overrides.yaml and revert every slider to the ' +
+               'HA Configuration tab values / shipped defaults?')) return;
+  const btn = document.getElementById('resetbtn');
+  const msg = document.getElementById('savemsg');
+  btn.disabled = true;
+  msg.style.color = '#888'; msg.textContent = 'resetting\u2026';
+  fetch('reset_overrides', {method:'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) { location.reload(); }
+      else { msg.style.color='#c55'; msg.textContent='\u2717 ' + (d.error || 'error'); }
     })
     .catch(() => { msg.style.color='#c55'; msg.textContent='\u2717 request failed'; })
     .finally(() => { btn.disabled = false; });
@@ -1246,6 +1303,20 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_response(200)
             else:
                 log.warning("Save failed: %s", err)
+                body = json.dumps({"ok": False, "error": err}).encode()
+                self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/reset_overrides":
+            ok, err = _reset_overrides()
+            if ok:
+                body = b'{"ok":true}'
+                self.send_response(200)
+            else:
+                log.warning("Reset overrides failed: %s", err)
                 body = json.dumps({"ok": False, "error": err}).encode()
                 self.send_response(500)
             self.send_header("Content-Type", "application/json")

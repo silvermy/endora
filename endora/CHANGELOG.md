@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.118
+
+### Added
+
+- **"Reset overrides" button on the debug page.** Deletes `/data/runtime_overrides.yaml` and reloads settings live (no restart needed), reverting every debug-page override to the HA Configuration tab values / shipped defaults. Overrides accumulate every slider ever touched and silently outrank new defaults shipped in later releases; clearing them previously required shell access into the add-on container.
+
+## 1.9.117
+
+### Fixed
+
+- **Configuration-tab translations refreshed.** `snap_forearm_min` shows there as "Snap forearm threshold", and its description still recommended a value from two defaults ago. Stale entries updated, deprecated ones removed, and friendly names/descriptions added for all the new tuning settings.
+
 ## 1.9.116
 
 ### Fixed — resting-arm SNAP storm and CROSS_ARMS re-fire storm
