@@ -135,7 +135,7 @@ REGISTRY: list[SettingField] = [
                   "(filters resting a hand against your own face)",
                   group="Pose", user_facing=True,
                   ui=UIMeta("Face exclusion", "slider", 0.0, 0.20, 0.01, "Gesture", order=5)),
-    SettingField("body_scale_reference", float, 0.25,
+    SettingField("body_scale_reference", float, 0.18,
                   "Torso length (frame fraction) the geometric thresholds are tuned at — "
                   "each person's margins scale with their detected body size relative to this",
                   group="Pose", user_facing=True),
@@ -169,8 +169,9 @@ REGISTRY: list[SettingField] = [
     SettingField("fist_curl_threshold", float, 0.85, "Fist curl threshold", group="Gesture"),
     SettingField("palm_twist_threshold", float, 0.40,
                   "Minimum peak single-frame swing in 2D hand_roll to register a snap", group="Gesture"),
-    SettingField("snap_roll_threshold", float, 0.65,
-                  "Absolute hand_roll magnitude threshold for snap detection", group="Gesture"),
+    SettingField("snap_roll_threshold", float, 0.0,
+                  "Absolute snap_roll magnitude that counts a raise as snap even below "
+                  "snap_forearm_min (0 = disabled; see settings.py for why)", group="Gesture"),
 
     # ── Hysteresis timing ────────────────────────────────────────────────
     SettingField("snap_sustain_s", float, 0.20,

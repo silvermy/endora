@@ -438,7 +438,7 @@ class CameraAnalyser(threading.Thread):
             leg_raise_margin=float(getattr(s, 'leg_raise_margin', 0.05)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),
-            body_scale_reference=float(getattr(s, 'body_scale_reference', 0.25)),
+            body_scale_reference=float(getattr(s, 'body_scale_reference', 0.18)),
             wrist_still_max_travel=float(getattr(s, 'wrist_still_max_travel', 0.05)),
         ))
         state_machine = GestureStateMachine(StateMachineConfig(

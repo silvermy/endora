@@ -30,6 +30,9 @@ def test_right_arm_vertical_is_single_up_right():
     assert r.state == ArmState.SINGLE_UP
     assert r.raised_side == Side.RIGHT
     assert r.forearm_dy > 0.10, f"forearm_dy should be vertical, got {r.forearm_dy}"
+    # Achieved wrist-above-shoulder margin is logged for threshold tuning:
+    # fixture wrist y=0.10, shoulder y=0.40.
+    assert abs(r.raise_margin - 0.30) < 1e-6, f"got {r.raise_margin}"
 
 
 def test_right_arm_horizontal_is_not_single_up():

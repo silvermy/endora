@@ -64,6 +64,7 @@ def _snap(reading) -> dict:
         "scale_factor": round(float(getattr(reading, "scale_factor", 1.0)), 3),
         "rose_recently": bool(getattr(reading, "rose_recently", True)),
         "wrist_still": bool(getattr(reading, "wrist_still", True)),
+        "raise_margin": round(float(getattr(reading, "raise_margin", 0.0)), 4),
     }
 
 

@@ -153,7 +153,14 @@ class Settings:
     # (blanket), torso is estimated from shoulder width. Raise this if
     # everyone in your frames is large/close (makes margins smaller for a
     # given person); lower it if everyone is small/distant.
-    body_scale_reference: float = 0.25
+    # 0.18 was calibrated from live feedback.jsonl scale_factor logs
+    # (2026-07-11): the initial 0.25 guess put the resident's typical seated
+    # position at factor 0.6–0.8, silently tightening every tuned margin by
+    # 20–40% and causing a false-positive burst. At 0.18 the typical
+    # position reads ≈1.0. (ArmTrackerConfig's own dataclass default stays
+    # 0.25 — the unit-test fixtures have a 0.25 torso and are calibrated
+    # against it; production always takes THIS value via the analyser.)
+    body_scale_reference: float = 0.18
 
     # ── Hands (gesture classification) ───────────────────────────────────
     # Advanced: override in settings.yaml if needed
@@ -201,11 +208,17 @@ class Settings:
     # A full palm flip ≈ 0.8–1.2 swing.  0.40 catches deliberate snaps
     # while ignoring small lateral sways.
     palm_twist_threshold: float = 0.40
-    # Absolute hand_roll magnitude threshold for snap detection.
-    # hand_roll ≈ ±1 when palm is 90° rotated sideways; ≈ 0 when facing camera.
-    # If |hand_roll| exceeds this on the first raised frame, snap fires even
-    # without a cross-raise swing baseline.  0.65 = palm tilted >~40° from neutral.
-    snap_roll_threshold: float = 0.65
+    # Absolute snap_roll magnitude that lets a raise count as a snap even
+    # when forearm_dy is below snap_forearm_min (an OR-route in the state
+    # machine). 0.0 = disabled.
+    # Disabled by default since v1.9.115: the old roll formula returned
+    # exactly ±1.0 for ANY detected hand, so once the wrist-crop (v1.9.114)
+    # made hand detection reliable, this route degenerated into "hand
+    # visible while arm up ⇒ snap" and contributed to a false-positive
+    # burst. The formula is fixed now (|roll|≈1 palm-to-camera, ≈0 edge-on),
+    # but re-enable only after feedback.jsonl shows the new values actually
+    # separate real snaps from false fires.
+    snap_roll_threshold: float = 0.0
 
     # ── Hysteresis timing ─────────────────────────────────────────────────
     # Minimum time the arm must stay up before SNAP fires (seconds), measured

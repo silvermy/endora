@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.115
+
+### Fixed — false-positive burst after 1.9.114
+
+Analysis of the first post-1.9.114 feedback batch (7 false SNAPs in 12 minutes, all `rose=true still=true`, `scale_factor` 0.61–0.80) found three contributors:
+
+- **`body_scale_reference` default 0.25 → 0.18.** The initial reference was calibrated to the test fixtures, not the real room: the resident's typical seated position read `scale_factor` 0.6–0.8, which silently tightened every tuned margin by 20–40% and made the whole system more trigger-happy than before the update. At 0.18 the typical position reads ≈1.0, restoring the tuned margins' intended meaning. **If your add-on configuration already shows `body_scale_reference: 0.25` saved, change it to 0.18 by hand** — saved options override the new default.
+- **`snap_roll` formula fixed; `snap_roll_threshold` default 0.65 → 0.0 (route disabled).** The old formula divided (index.x − pinky.x) by its own absolute value, so every detected hand read exactly ±1.0. That made the "roll ≥ threshold counts as snap even with a non-vertical forearm" OR-route degenerate into *"any visible hand while the arm is up counts as a snap"* — harmless while full-frame hand detection almost never fired (~1 in 15), but armed on nearly every raise once the 1.9.114 wrist-crop made hand detection reliable. Roll is now a real orientation signal (|roll| ≈ 1 palm-to-camera, ≈ 0 edge-on, clamped ±1.5); re-enable the threshold route only after feedback data shows the new values separate real snaps from false fires.
+- **`raise_margin` now logged.** Readings (and feedback.jsonl rows) include the achieved wrist-above-shoulder margin, closing the long-standing gap where reclined-threshold tuning had to be done blind against `forearm_dy`, a different quantity.
+
 ## 1.9.114
 
 ### Changed — gesture recognition overhaul (fewer false positives AND fewer missed gestures)

@@ -69,6 +69,12 @@ class ArmReading:
     #     passing through on its way to grab a phone/blanket/glass.
     rose_recently: bool = True
     wrist_still: bool = True
+    # SINGLE_UP only: how far the raised wrist actually cleared its shoulder
+    # (shoulder_y - wrist_y, frame fraction, positive = above). Logged to
+    # feedback.jsonl so threshold tuning can finally see the achieved margin
+    # instead of inferring it from forearm_dy (a different quantity) —
+    # divide by scale_factor to compare against the configured tolerances.
+    raise_margin: float = 0.0
 
 
 # ── Landmark protocol for type hints ──────────────────────────────────────────
@@ -99,20 +105,33 @@ RIGHT_KNEE     = 26
 
 
 def _hand_snap_roll(hand_lm: np.ndarray) -> float:
-    """Compute palm roll from a flat grlib hand-landmark array (1 hand, 63 floats).
+    """Palm-orientation signal from a flat grlib hand-landmark array
+    (1 hand, 63 floats; MediaPipe indices WRIST=0, INDEX_FINGER_MCP=5,
+    MIDDLE_FINGER_MCP=9, PINKY_MCP=17).
 
-    roll = (index_mcp.x - pinky_mcp.x) / hand_width
-    MediaPipe hand indices: INDEX_FINGER_MCP=5, PINKY_MCP=17.
-    Ranges roughly -1 to +1; sign depends on which hand is raised.
+    roll = (index_mcp.x - pinky_mcp.x) / hand_size, where hand_size is the
+    wrist→middle-MCP distance — an apparent-hand-size proxy that doesn't
+    collapse when the knuckle line is edge-on.  |roll| ≈ 0.8–1.1 when the
+    palm or back of the hand faces the camera (knuckles spread laterally),
+    ≈ 0–0.3 when the hand is edge-on; the sign encodes palm-vs-back /
+    left-vs-right hand. Clamped to ±1.5.
+
+    The previous formula divided (index.x − pinky.x) by its own absolute
+    value, so every detected hand read exactly ±1.0 — an orientation signal
+    in name only, and one that silently armed the snap_roll_threshold OR-
+    route once the wrist-crop made hand detection reliable (v1.9.114).
     """
     if len(hand_lm) < 21 * 3:
         return 0.0
+    wr_x, wr_y = float(hand_lm[0]), float(hand_lm[1])          # WRIST
+    md_x, md_y = float(hand_lm[9 * 3]), float(hand_lm[9 * 3 + 1])  # MIDDLE_MCP
+    hand_size = ((md_x - wr_x) ** 2 + (md_y - wr_y) ** 2) ** 0.5
+    if hand_size < 1e-6:
+        return 0.0
     idx_mcp_x = float(hand_lm[5 * 3])    # INDEX_FINGER_MCP.x
     pnk_mcp_x = float(hand_lm[17 * 3])   # PINKY_MCP.x
-    hand_w = abs(idx_mcp_x - pnk_mcp_x)
-    if hand_w < 1e-6:
-        return 0.0
-    return (idx_mcp_x - pnk_mcp_x) / hand_w
+    roll = (idx_mcp_x - pnk_mcp_x) / hand_size
+    return max(-1.5, min(1.5, roll))
 
 
 # ── Tracker ───────────────────────────────────────────────────────────────────
@@ -219,6 +238,10 @@ class ArmTrackerConfig:
     # above are tuned at. Detected torso / this = the per-person scale factor
     # applied to every distance threshold. When hips are hidden the torso is
     # estimated from shoulder width; if neither is measurable the factor is 1.
+    # NOTE: this dataclass default (0.25) matches the unit-test fixtures'
+    # torso and keeps them scale-neutral; the PRODUCTION default lives in
+    # config/settings.py (0.18, calibrated from live feedback logs) and is
+    # always passed in by the analyser.
     body_scale_reference: float = 0.25
 
     # ── Trajectory (rise / stillness evidence for SNAP) ────────────────────
@@ -566,7 +589,7 @@ class ArmTracker:
 
         if rw_raised or lw_raised:
             side = Side.RIGHT if rw_raised else Side.LEFT
-            wrist, elbow = (rw, re) if rw_raised else (lw, le)
+            wrist, elbow, shoulder = (rw, re, rs) if rw_raised else (lw, le, ls)
             if now is not None:
                 rose  = self._rose_recently(side, now, f)
                 still = self._wrist_still(side, wrist.x, wrist.y, now, f)
@@ -582,6 +605,7 @@ class ArmTracker:
                 scale_factor=f,
                 rose_recently=rose,
                 wrist_still=still,
+                raise_margin=shoulder.y - wrist.y,
             )
 
         # Detect wrist approaching shoulder — fires chime early to compensate
