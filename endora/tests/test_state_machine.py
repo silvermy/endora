@@ -152,6 +152,41 @@ def test_brief_t_pose_while_raising_both_does_not_fire():
 
 # ── Cooldown ─────────────────────────────────────────────────────────────────
 
+def test_sustained_pose_fires_once_while_held():
+    # Sitting with arms crossed must fire CROSS_ARMS exactly once — before
+    # the latch, it re-fired on every cooldown (~100 fires in 20 minutes of
+    # TV-watching in live feedback).
+    m = _machine(sustain_s=0.5, cooldown_s=0.1, sustained_rearm_s=2.0)
+    fires = [m.tick(_state(ArmState.CROSS_ARMS), now=t / 10.0)
+             for t in range(0, 600)]  # pose held for 60 s
+    assert fires.count(Gesture.CROSS_ARMS) == 1, \
+        f"expected 1 fire, got {fires.count(Gesture.CROSS_ARMS)}"
+
+
+def test_sustained_pose_rearms_after_release():
+    m = _machine(sustain_s=0.5, cooldown_s=0.1, sustained_rearm_s=2.0)
+    assert m.tick(_state(ArmState.CROSS_ARMS), now=0.0) is None
+    assert m.tick(_state(ArmState.CROSS_ARMS), now=0.6) == Gesture.CROSS_ARMS
+    # Release the pose for longer than sustained_rearm_s…
+    for t in (1.0, 2.0, 3.0):
+        m.tick(_down(), now=t)
+    # …then a fresh crossing fires again after its own sustain period.
+    assert m.tick(_state(ArmState.CROSS_ARMS), now=3.6) is None
+    assert m.tick(_state(ArmState.CROSS_ARMS), now=4.2) == Gesture.CROSS_ARMS
+
+
+def test_sustained_latch_survives_brief_dropout():
+    # A one-frame flicker to DOWN (keypoint dropout) must not re-arm the
+    # pose — release requires sustained_rearm_s of continuous absence.
+    m = _machine(sustain_s=0.5, cooldown_s=0.1, sustained_rearm_s=2.0)
+    m.tick(_state(ArmState.CROSS_ARMS), now=0.0)
+    assert m.tick(_state(ArmState.CROSS_ARMS), now=0.6) == Gesture.CROSS_ARMS
+    m.tick(_down(), now=0.7)   # single dropout frame
+    fires = [m.tick(_state(ArmState.CROSS_ARMS), now=0.8 + t / 10.0)
+             for t in range(0, 100)]
+    assert Gesture.CROSS_ARMS not in fires
+
+
 def test_cooldown_blocks_sustained_refire():
     """Cooldown prevents rapid re-fire of sustained gestures like RAISE_BOTH."""
     m = _machine(sustain_s=0.5, cooldown_s=2.0)

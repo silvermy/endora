@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.116
+
+### Fixed — resting-arm SNAP storm and CROSS_ARMS re-fire storm
+
+The first feedback batch with `raise_margin` logging made two failure modes precisely visible:
+
+- **Resting-arm/phone posture fired SNAP+HOLD all day through the forearm-vertical route.** Every flagged false fire had the wrist sitting AT shoulder level (`raise_margin` 0.000–0.049) while every confirmed deliberate raise cleared 0.17+. Two compounding causes, both fixed:
+  - Reclining feet-toward-the-camera foreshortens the torso in image space, which collapsed the body-scale factor to 0.5–0.65 and shrank every margin. The size estimate now takes the **larger** of the torso-length and shoulder-width estimates — each collapses under a different projection (foreshortening kills torso, side-on kills shoulder width), so the max is robust to both.
+  - The forearm-vertical route accepted a wrist merely *at* shoulder height. It now requires `forearm_route_min_margin` (0.06, body-scaled) of actual clearance — right between the false fires (≤0.049) and the real ones (≥0.17).
+- **CROSS_ARMS fired ~100 times in 20 minutes of sitting with arms crossed.** Sustained-pose gestures (CROSS_ARMS / T_POSE / RAISE_BOTH) now fire **once per pose entry** and latch until the pose has been released for `sustained_rearm_s` (2 s). A one-frame keypoint dropout does not re-arm them.
+- `snap_forearm_min` 0.06 → 0.05: with the margin and trajectory gates carrying false-positive rejection, a slightly bent elbow on a clearly raised arm shouldn't block SNAP — feedback showed a genuine attempt retried four times at dy 0.070 against a scale-adjusted 0.071 bar, never firing.
+
 ## 1.9.115
 
 ### Fixed — false-positive burst after 1.9.114

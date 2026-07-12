@@ -167,16 +167,30 @@ def test_one_shoulder_occluded_still_detects_raise():
 
 
 def test_forearm_vertical_route_fires_when_wrist_near_shoulder():
-    # Camera angle: raised arm whose wrist barely clears the shoulder (0.02),
-    # well under arm_above_head_tolerance, but forearm is clearly vertical.
+    # Camera angle: raised arm whose wrist clears the shoulder by 0.07 —
+    # under arm_above_head_tolerance (0.15) but over the route's own
+    # forearm_route_min_margin (0.06) — with a clearly vertical forearm.
     from tests.fake_landmarks import _build, Point
     lm = _build(
-        right_elbow=Point(0.60, 0.55),  # elbow low → forearm_dy = 0.17
-        right_wrist=Point(0.60, 0.38),  # wrist just above shoulder (y=0.40)
+        right_elbow=Point(0.60, 0.55),  # elbow low → forearm_dy = 0.22
+        right_wrist=Point(0.60, 0.33),  # wrist 0.07 above shoulder (y=0.40)
     )
     r = _tracker()._classify_raw(lm, 1280, 720)
     assert r.state == ArmState.SINGLE_UP, f"got {r.state}"
     assert r.raised_side == Side.RIGHT
+
+
+def test_wrist_at_shoulder_level_does_not_fire_forearm_route():
+    # The resting-arm/phone posture that caused a day-long false-SNAP storm:
+    # wrist sitting AT shoulder level (margin ~0.01) with a vertical-ish
+    # forearm. The route now demands forearm_route_min_margin of clearance.
+    from tests.fake_landmarks import _build, Point
+    lm = _build(
+        right_elbow=Point(0.60, 0.61),
+        right_wrist=Point(0.60, 0.39),  # only 0.01 above shoulder (y=0.40)
+    )
+    r = _tracker()._classify_raw(lm, 1280, 720)
+    assert r.state == ArmState.DOWN, f"got {r.state}"
 
 
 def test_low_visibility_wrist_does_not_create_false_raise():

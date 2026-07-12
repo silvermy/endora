@@ -130,6 +130,10 @@ REGISTRY: list[SettingField] = [
     SettingField("forearm_vertical_min", float, 0.10,
                   "Secondary raised-arm route: forearm verticality threshold when wrist is at/above shoulder",
                   group="Pose"),
+    SettingField("forearm_route_min_margin", float, 0.06,
+                  "Forearm-vertical route also requires the wrist to clear the shoulder by this "
+                  "body-scaled margin (blocks resting-arm/phone postures at shoulder level)",
+                  group="Pose", user_facing=True),
     SettingField("wrist_head_exclude_dist", float, 0.09,
                   "Reject a raised wrist within this distance of the nose keypoint "
                   "(filters resting a hand against your own face)",
@@ -153,7 +157,7 @@ REGISTRY: list[SettingField] = [
     # ── Gesture thresholds ───────────────────────────────────────────────
     SettingField("flip_image", bool, False, "Rotate frame 180 degrees", group="Gesture", user_facing=True),
     SettingField("mirror_camera", bool, False, "Reserved for future use", group="Gesture", user_facing=True),
-    SettingField("snap_forearm_min", float, 0.06,
+    SettingField("snap_forearm_min", float, 0.05,
                   "Minimum forearm verticality for SNAP/HOLD", group="Gesture", user_facing=True,
                   ui=UIMeta("Snap sensitivity", "slider", 0.03, 0.20, 0.01, "Gesture", order=1)),
     SettingField("snap_elbow_min", float, 0.06,
@@ -268,6 +272,9 @@ REGISTRY: list[SettingField] = [
                   "Seconds within which two snaps count as DOUBLE_SNAP", group="Hysteresis", user_facing=True),
     SettingField("sustain_s", float, 0.5,
                   "Seconds held for CROSS_ARMS / T_POSE / RAISE_BOTH", group="Hysteresis", user_facing=True),
+    SettingField("sustained_rearm_s", float, 2.0,
+                  "Sustained-pose gestures fire once per pose entry; the pose must be released "
+                  "this long before it can fire again", group="Hysteresis", user_facing=True),
 ]
 
 REGISTRY_BY_KEY: dict[str, SettingField] = {f.key: f for f in REGISTRY}

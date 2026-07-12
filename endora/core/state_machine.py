@@ -79,6 +79,13 @@ class StateMachineConfig:
     snap_require_rise: bool = True
     snap_require_still: bool = True
 
+    # A sustained-pose gesture (CROSS_ARMS / T_POSE / RAISE_BOTH) fires once
+    # per pose entry and then latches: it cannot re-fire until the pose has
+    # been ABSENT for this many seconds. Without the latch, sitting with
+    # arms crossed re-fired CROSS_ARMS on every cooldown — ~100 fires in 20
+    # minutes of normal TV-watching in live feedback (2026-07-11).
+    sustained_rearm_s: float = 2.0
+
 
 # ── Internal per-arm-raise state ──────────────────────────────────────────────
 
@@ -116,6 +123,11 @@ class GestureStateMachine:
         # Ring buffer of recent SNAP fire times for DOUBLE_SNAP detection.
         self._snap_times: list[float] = []
 
+        # Sustained-pose latch: ArmState → last time the pose was observed
+        # while latched. A pose that fired stays latched (no re-fire) until
+        # it goes unobserved for sustained_rearm_s (see StateMachineConfig).
+        self._pose_latch: dict[ArmState, float] = {}
+
         # Per-gesture last fired (for per-gesture cooldown) and global.
         # -inf sentinel means "never fired" — avoids blocking very first tick.
         self._last_fired: dict[Gesture, float] = {g: float('-inf') for g in Gesture}
@@ -130,6 +142,15 @@ class GestureStateMachine:
         Advance one frame. Returns a gesture to fire, or None.
         `now` is a monotonic timestamp in seconds.
         """
+        # Re-arm latched sustained poses that have gone unobserved long
+        # enough. Must run every tick regardless of state — the pose stops
+        # being observed precisely when its _tick_sustained stops running.
+        if self._pose_latch:
+            self._pose_latch = {
+                s: t for s, t in self._pose_latch.items()
+                if now - t <= self.c.sustained_rearm_s
+            }
+
         # No pose or arm down → reset raise state, clear sustain timers.
         if reading is None or reading.state == ArmState.DOWN:
             self._reset_raise()
@@ -137,6 +158,15 @@ class GestureStateMachine:
             return None
 
         state = reading.state
+
+        # Latched sustained pose still being held: refresh the latch clock
+        # and stay silent. Checked BEFORE the cooldown gate — the gate
+        # returns early, and a latch that isn't refreshed while the pose is
+        # merely cooldown-blocked would expire mid-hold and re-fire.
+        if state in self._pose_latch:
+            self._pose_latch[state] = now
+            self._sustain.entered_at.clear()
+            return None
 
         # Cooldown gate for sustained-state gestures only — these need the
         # cooldown to avoid rapid re-fire while the user holds the pose.
@@ -227,13 +257,15 @@ class GestureStateMachine:
         if (now - entered) < self.c.sustain_s:
             return None
 
-        # Held long enough — fire
+        # Held long enough — fire once and latch until the pose is released
+        # for sustained_rearm_s (see tick()).
         gesture = {
             ArmState.BOTH_UP:    Gesture.RAISE_BOTH,
             ArmState.T_POSE:     Gesture.T_POSE,
             ArmState.CROSS_ARMS: Gesture.CROSS_ARMS,
         }[state]
         self._sustain.entered_at.clear()
+        self._pose_latch[state] = now
         return self._fire(gesture, now)
 
     # ── SNAP + DOUBLE_SNAP logic ──────────────────────────────────────────

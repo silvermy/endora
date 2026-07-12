@@ -1,6 +1,6 @@
 {
   "name": "Endora",
-  "version": "1.9.115",
+  "version": "1.9.116",
   "slug": "endora",
   "description": "Pose-based gesture detection — SNAP, HOLD, DOUBLE_SNAP, CROSS_ARMS, T_POSE, RAISE_BOTH.",
   "url": "https://github.com/silvermy/endora",
@@ -23,12 +23,13 @@
     "arm_above_head_tolerance_reclined": 0.38,
     "body_upright_min": -0.5,
     "pose_visibility_min": 0.45,
+    "forearm_route_min_margin": 0.06,
     "wrist_head_exclude_dist": 0.09,
     "body_scale_reference": 0.18,
     "hand_crop_enable": true,
     "flip_image": false,
     "mirror_camera": false,
-    "snap_forearm_min": 0.06,
+    "snap_forearm_min": 0.05,
     "snap_sustain_s": 0.2,
     "snap_require_rise": true,
     "snap_require_still": true,
@@ -55,7 +56,8 @@
     "debug_port": 0,
     "hold_duration_s": 1.5,
     "double_snap_window_s": 3.0,
-    "sustain_s": 0.5
+    "sustain_s": 0.5,
+    "sustained_rearm_s": 2.0
   },
   "schema": {
     "rtsp_url_a": "str",
@@ -72,6 +74,7 @@
     "arm_above_head_tolerance_reclined": "float",
     "body_upright_min": "float",
     "pose_visibility_min": "float",
+    "forearm_route_min_margin": "float",
     "wrist_head_exclude_dist": "float",
     "body_scale_reference": "float",
     "hand_crop_enable": "bool",
@@ -104,7 +107,8 @@
     "debug_port": "int",
     "hold_duration_s": "float",
     "double_snap_window_s": "float",
-    "sustain_s": "float"
+    "sustain_s": "float",
+    "sustained_rearm_s": "float"
   },
   "map": ["data", "media:rw"],
   "host_network": false,

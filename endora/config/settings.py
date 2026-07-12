@@ -137,6 +137,14 @@ class Settings:
     # mounted high/at an angle so a raised arm's wrist stays near shoulder level
     # in the image. Raise toward 0.15 if resting a hand near your head misfires.
     forearm_vertical_min: float = 0.10
+    # The forearm-vertical route additionally requires the wrist to clear the
+    # shoulder by this body-scaled margin. Live feedback (2026-07-12) showed a
+    # day-long false-SNAP storm through this route with the wrist sitting AT
+    # shoulder level (raise_margin ≤ 0.049 on every flagged fire — arm resting
+    # on an armrest / holding a phone) while every confirmed deliberate raise
+    # cleared 0.17+. Lower toward 0.03 if high-camera raises get missed; raise
+    # toward 0.10 if resting-arm fires persist.
+    forearm_route_min_margin: float = 0.06
     # Reject a raised wrist within this distance (frame fraction) of the nose
     # keypoint — filters resting/adjusting a hand against your own face
     # (glasses, phone, scratching, chin-on-hand), which otherwise reads
@@ -188,7 +196,11 @@ class Settings:
     #   snap should read 0.10+, wave should read 0.00 or negative.
     # Lower toward 0.03 if snaps misfire as wave.
     # Raise toward 0.10 if waves misfire as snap.
-    snap_forearm_min: float = 0.06
+    # 0.06 → 0.05 (2026-07-12): with the forearm-route margin + trajectory
+    # gates carrying FP rejection, a slightly-bent elbow on a clearly-raised
+    # arm shouldn't block SNAP — feedback showed a genuine attempt stuck at
+    # dy 0.070 vs a scale-adjusted 0.071 bar, retried four times, never fired.
+    snap_forearm_min: float = 0.05
     # Deprecated name — kept so old settings.yaml files don't cause errors.
     snap_elbow_min: float = 0.06
     # wave_lateral_fraction: wrist offset from body midline as a fraction of
@@ -264,6 +276,11 @@ class Settings:
     double_snap_window_s: float = 3.0
     # Seconds held for CROSS_ARMS / T_POSE / RAISE_BOTH before firing.
     sustain_s: float = 0.5
+    # A sustained-pose gesture fires ONCE per pose entry, then can't re-fire
+    # until the pose has been released for this many seconds. Stops sitting
+    # with crossed arms from re-firing CROSS_ARMS every cooldown (~100 fires
+    # in 20 minutes of TV-watching seen in live feedback before this).
+    sustained_rearm_s: float = 2.0
 
     # ── Fusion ────────────────────────────────────────────────────────────
     # Advanced: override in settings.yaml if needed

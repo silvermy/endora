@@ -94,6 +94,30 @@ def test_shoulder_width_fallback_when_hips_hidden():
     assert abs(r.scale_factor - 2.0) < 0.05, f"got {r.scale_factor}"
 
 
+def test_foreshortened_reclined_body_uses_shoulder_width():
+    # Reclining feet-toward-the-camera foreshortens the torso to a sliver in
+    # image space while the shoulders stay lateral. The size estimate must
+    # take the LARGER of torso and shoulder-width estimates, or every margin
+    # collapses and a resting arm fires all day (live data: scale 0.5–0.65
+    # for a normal-sized person on the couch).
+    lm = Landmarks({
+        NOSE:           Point(0.46, 0.36),
+        LEFT_SHOULDER:  Point(0.30, 0.45),
+        RIGHT_SHOULDER: Point(0.62, 0.45),   # width 0.32 → estimate 0.40
+        LEFT_HIP:       Point(0.44, 0.52),
+        RIGHT_HIP:      Point(0.52, 0.52),   # torso only ~0.07 (foreshortened)
+        LEFT_KNEE:      Point(0.44, 0.60),
+        RIGHT_KNEE:     Point(0.52, 0.60),
+        LEFT_ELBOW:     Point(0.26, 0.60),
+        LEFT_WRIST:     Point(0.24, 0.66),
+        RIGHT_ELBOW:    Point(0.66, 0.60),
+        RIGHT_WRIST:    Point(0.68, 0.66),
+    })
+    r = _tracker()._classify_raw(lm, 1280, 720)
+    assert r.scale_factor > 1.0, \
+        f"foreshortened torso must not shrink the scale, got {r.scale_factor}"
+
+
 def test_scale_factor_clamped_on_degenerate_shoulders():
     # Side-on: shoulders nearly coincide and hips are hidden — the size
     # estimate collapses, but the factor must clamp at 0.5, not zero the

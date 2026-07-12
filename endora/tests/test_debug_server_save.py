@@ -35,6 +35,12 @@ def test_save_only_persists_touched_and_preexisting_keys(tmp_path, monkeypatch):
     overrides_path = tmp_path / "data" / "runtime_overrides.yaml"
     overrides_path.parent.mkdir(parents=True, exist_ok=True)
     overrides_path.write_text("snap_forearm_min: 0.06\nsnap_sustain_s: 0.2\n")
+    # In production settings.py loads runtime_overrides.yaml at startup, so
+    # the in-memory values match the file. Mirror that here — Save re-
+    # serializes pre-existing keys from the live settings object, and this
+    # fixture's 0.06 deliberately differs from the current default (0.05).
+    ds._settings.snap_forearm_min = 0.06
+    ds._settings.snap_sustain_s = 0.2
 
     # Simulate the user only touching one unrelated slider this session.
     assert ds._apply_setting("cooldown_s", "3.0")

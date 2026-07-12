@@ -195,6 +195,15 @@ class ArmTrackerConfig:
     # far above the shoulder in image space.  Only applies when upright is not
     # confirmed-reclined.  Raise toward 0.15 if hand-near-head misfires.
     forearm_vertical_min: float = 0.10
+    # The forearm-vertical route still requires the wrist to clear the
+    # shoulder by this (body-scaled) margin. Feedback data (2026-07-12)
+    # showed a day-long false-fire storm through this route with the wrist
+    # sitting exactly AT shoulder level (raise_margin 0.000–0.049 on every
+    # flagged fire — arm resting on a couch armrest / holding a phone) while
+    # every confirmed deliberate raise cleared 0.17+. This margin splits
+    # those cleanly while keeping the route's purpose (high-mounted cameras
+    # compressing raise height) intact.
+    forearm_route_min_margin: float = 0.06
 
     # Wrist-near-head exclusion: a raised wrist within this distance (frame
     # fraction, both axes) of the nose keypoint is rejected even if it
@@ -466,16 +475,24 @@ class ArmTracker:
         # Body-scale factor: all distance thresholds below are tuned at
         # body_scale_reference and scale with this person's apparent size, so
         # a body lying far from the camera isn't asked to clear margins sized
-        # for one standing right in front of it (and vice versa). Torso length
-        # is the preferred size reference — it survives reclined postures;
-        # shoulder width is the blanket fallback (hips hidden). Clamped so a
-        # degenerate estimate (side-on shoulders collapsing in x) can't zero
-        # the margins or push them out of reach.
-        if torso_len is None and ls_ok and rs_ok:
+        # for one standing right in front of it (and vice versa). The size
+        # estimate is the LARGER of torso length and shoulder-width×ratio:
+        # each collapses under a different projection — reclining feet-toward-
+        # the-camera foreshortens the torso to a sliver while the shoulders
+        # stay lateral (live data showed torso-only estimates of 0.5–0.65×
+        # for a normal-sized person on the couch, silently shrinking every
+        # margin), and a side-on pose collapses shoulder width while the
+        # torso stays long. Clamped so whatever survives a degenerate
+        # detection can't zero the margins or push them out of reach.
+        size_estimates = []
+        if torso_len is not None and torso_len > 1e-6:
+            size_estimates.append(torso_len)
+        if ls_ok and rs_ok:
             shoulder_w = ((ls.x - rs.x) ** 2 + (ls.y - rs.y) ** 2) ** 0.5
-            torso_len = shoulder_w * _TORSO_PER_SHOULDER_WIDTH
-        if torso_len is not None and torso_len > 1e-6 and self.c.body_scale_reference > 1e-6:
-            f = torso_len / self.c.body_scale_reference
+            if shoulder_w > 1e-6:
+                size_estimates.append(shoulder_w * _TORSO_PER_SHOULDER_WIDTH)
+        if size_estimates and self.c.body_scale_reference > 1e-6:
+            f = max(size_estimates) / self.c.body_scale_reference
             f = min(max(f, _SCALE_FACTOR_MIN), _SCALE_FACTOR_MAX)
         else:
             f = 1.0
@@ -542,6 +559,7 @@ class ArmTracker:
         m          = self.c.arm_above_head_tolerance * f
         m_reclined = self.c.arm_above_head_tolerance_reclined * f
         fv_min     = self.c.forearm_vertical_min * f
+        fr_margin  = self.c.forearm_route_min_margin * f
         whd        = self.c.wrist_head_exclude_dist * f
         nose_ok    = nose.visibility >= KV
 
@@ -558,8 +576,13 @@ class ArmTracker:
             forearm_visible = elbow.visibility >= KV
             forearm_vertical = forearm_visible and forearm_dy >= fv_min
             if upright is True:
+                # Secondary route demands the wrist actually clear the
+                # shoulder by fr_margin — wrist merely AT shoulder level with
+                # a vertical-ish forearm is the resting-arm/phone posture,
+                # not a raise (see forearm_route_min_margin).
                 raised = (wrist.y < (shoulder.y - m)
-                          or (forearm_vertical and wrist.y <= shoulder.y))
+                          or (forearm_vertical
+                              and wrist.y <= shoulder.y - fr_margin))
             elif upright is False:
                 # Lying down — demand a deliberate straight-up arm; no shortcut.
                 raised = wrist.y < (shoulder.y - m_reclined)
