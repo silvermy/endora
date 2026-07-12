@@ -9,12 +9,22 @@
       "description": "e.g. rtsp://admin:pass@192.168.1.101:554/stream1"
     },
     "rtsp_transport": { "name": "RTSP transport", "description": "tcp (reliable) or udp (lower latency)" },
-    "pose_model_complexity": { "name": "Pose model", "description": "0=fastest, 1=balanced, 2=accurate" },
     "ha_event_name": { "name": "HA event name", "description": "Event fired in Home Assistant" },
     "log_level": { "name": "Log level", "description": "debug|info|warning|error" },
+    "yolo_pose_model": { "name": "Pose model", "description": "yolo11s-pose.onnx (accurate, default) or yolo11n-pose.onnx (fast/nano)" },
+    "yolo_imgsz": { "name": "Pose inference resolution", "description": "480 (default) balances accuracy and CPU; 320 is fastest, 640 most detailed" },
     "body_upright_min": { "name": "Body upright threshold", "description": "Hips must be this far below shoulders (negative = fisheye OK)" },
+    "body_scale_reference": { "name": "Body scale reference", "description": "Torso size (frame fraction) the thresholds are tuned at — should read scale ≈ 1.0 on the debug page at your usual spot (default 0.18)" },
+    "arm_above_head_tolerance": { "name": "Arm raise margin", "description": "Wrist must clear the shoulder by this much (body-scaled) to count as raised" },
+    "arm_above_head_tolerance_reclined": { "name": "Arm raise margin (reclined)", "description": "Stricter raise margin used while lying down or when posture is unknown" },
+    "forearm_route_min_margin": { "name": "Forearm-route shoulder clearance", "description": "Vertical-forearm raises must still clear the shoulder by this much — blocks resting-arm/phone postures (default 0.06)" },
     "leg_raise_margin": { "name": "Leg-raise suppression margin", "description": "Suppress gestures when ankle/knee rises this far above hip (0=disable)" },
-    "snap_forearm_min": { "name": "Snap forearm threshold", "description": "Forearm must be this vertical (0.10 recommended) to classify as SNAP" },
-    "wave_lateral_fraction": { "name": "Wave lateral fraction", "description": "Wrist must be this fraction of frame width off-centre for a WAVE to fire" }
+    "snap_forearm_min": { "name": "Snap forearm threshold", "description": "Forearm verticality needed for SNAP (default 0.05; raise toward 0.10 if sideways arm sweeps misfire)" },
+    "snap_sustain_s": { "name": "Snap hold time (s)", "description": "Arm must stay up this long before SNAP fires (default 0.20)" },
+    "snap_require_rise": { "name": "SNAP requires a rise", "description": "Only fire if the wrist rose from shoulder level recently — blocks long-static poses (default on)" },
+    "snap_require_still": { "name": "SNAP requires stillness", "description": "Only fire while the raised wrist holds still — blocks pass-through reaches (default on)" },
+    "wrist_still_max_travel": { "name": "Stillness tolerance", "description": "Max wrist travel (body-scaled) that still counts as holding still (default 0.05)" },
+    "sustained_rearm_s": { "name": "Pose re-arm time (s)", "description": "CROSS_ARMS/T_POSE/RAISE_BOTH fire once per pose; the pose must be released this long to fire again (default 2.0)" },
+    "hand_crop_enable": { "name": "Hand detection crop", "description": "Run hand detection on a crop around the raised wrist — much better at couch distance (default on)" }
   }
 }
