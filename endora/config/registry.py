@@ -130,7 +130,7 @@ REGISTRY: list[SettingField] = [
     SettingField("forearm_vertical_min", float, 0.10,
                   "Secondary raised-arm route: forearm verticality threshold when wrist is at/above shoulder",
                   group="Pose"),
-    SettingField("forearm_route_min_margin", float, 0.06,
+    SettingField("forearm_route_min_margin", float, 0.10,
                   "Forearm-vertical route also requires the wrist to clear the shoulder by this "
                   "body-scaled margin (blocks resting-arm/phone postures at shoulder level)",
                   group="Pose", user_facing=True),

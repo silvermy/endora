@@ -142,9 +142,11 @@ class Settings:
     # day-long false-SNAP storm through this route with the wrist sitting AT
     # shoulder level (raise_margin ≤ 0.049 on every flagged fire — arm resting
     # on an armrest / holding a phone) while every confirmed deliberate raise
-    # cleared 0.17+. Lower toward 0.03 if high-camera raises get missed; raise
-    # toward 0.10 if resting-arm fires persist.
-    forearm_route_min_margin: float = 0.06
+    # cleared 0.17+. Raised 0.06 → 0.10 (2026-07-13): after the camera move
+    # the resting-arm fires drifted to 0.065–0.088 (reference units),
+    # straddling the old bar; deliberate raises on record all clear 0.16+.
+    # Lower toward 0.06 if high-camera raises get missed.
+    forearm_route_min_margin: float = 0.10
     # Reject a raised wrist within this distance (frame fraction) of the nose
     # keypoint — filters resting/adjusting a hand against your own face
     # (glasses, phone, scratching, chin-on-hand), which otherwise reads

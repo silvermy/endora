@@ -74,7 +74,7 @@ def test_pose_static_since_tracking_start_loses_rise_benefit():
 def test_moving_wrist_is_not_still():
     # A reach: the wrist keeps travelling upward through the raised zone.
     tr = _tracker()
-    ys = [0.70, 0.58, 0.46, 0.34, 0.22, 0.10, 0.22]   # up and back down
+    ys = [0.70, 0.58, 0.46, 0.34, 0.22, 0.10, 0.22, 0.12]   # up, bobbing back down
     sched = []
     for i, y in enumerate(ys):
         sched.append((round(0.1 * i, 1), _build(
@@ -86,6 +86,35 @@ def test_moving_wrist_is_not_still():
     assert ups, "moving arm should still classify as SINGLE_UP while high"
     assert all(not r.wrist_still for r in ups), \
         "a wrist in transit must never read as still"
+
+
+def test_upright_backrest_drape_does_not_rearm_rise():
+    # Arm draped over a sofa backrest: the wrist hovers ABOVE the shoulder
+    # and periodically dips close to it (but never below). For an upright
+    # body those near-shoulder dips must NOT count as rise evidence — they
+    # re-armed the gate every few minutes in live data. (Reclined bodies
+    # keep the lenient near-shoulder band; see the reclined test below.)
+    def _drape(wrist_y):
+        return _build(
+            right_elbow=Point(0.65, wrist_y + 0.20),
+            right_wrist=Point(0.65, wrist_y),
+        )
+    high = _drape(0.16)   # raised: 0.24 above shoulder (y=0.40)
+    dip  = _drape(0.37)   # dipped: still 0.03 ABOVE the shoulder
+
+    tr = _tracker()
+    sched = []
+    for i in range(40):                       # 0.0–3.9s, dip every 10th frame
+        t = round(0.1 * i, 1)
+        sched.append((t, dip if i % 10 == 9 else high))
+    readings = _feed(tr, sched)
+
+    ups = [(t, r) for t, r in readings
+           if r is not None and r.state == ArmState.SINGLE_UP]
+    late = [r for t, r in ups if t >= 3.0]    # buffer fully spans the window
+    assert late, "drape pose should still classify as SINGLE_UP"
+    assert all(not r.rose_recently for r in late), \
+        "near-shoulder dips must not re-arm rise evidence while upright"
 
 
 def test_reclined_resting_wrist_still_counts_as_rise_evidence():

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.119
+
+### Fixed — sofa-backrest/armrest arm postures re-arming SNAP
+
+Post-camera-move feedback showed the storms gone (CROSS_ARMS latch: 2 isolated fires vs ~100 the day before) but two remaining leaks, both from arms resting *above* shoulder level:
+
+- **Rise evidence is now posture-aware.** For an upright body, the wrist must have been seen AT or BELOW shoulder level to count as "the arm rose" — an arm draped over the sofa backrest hovers a few percent above the shoulder and bobbed in and out of the old near-shoulder tolerance band, re-arming the gate every few minutes. A genuine upright raise starts from the lap and is unaffected. Reclined bodies keep the lenient band (a lying person's resting wrist sits at shoulder height by geometry).
+- **`forearm_route_min_margin` 0.06 → 0.10.** After the camera move the resting-arm fires drifted to 0.065–0.088 (reference units), straddling the old bar. Deliberate raises on record all clear 0.16+.
+
 ## 1.9.118
 
 ### Added

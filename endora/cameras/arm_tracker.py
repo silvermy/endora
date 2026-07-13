@@ -202,8 +202,11 @@ class ArmTrackerConfig:
     # flagged fire — arm resting on a couch armrest / holding a phone) while
     # every confirmed deliberate raise cleared 0.17+. This margin splits
     # those cleanly while keeping the route's purpose (high-mounted cameras
-    # compressing raise height) intact.
-    forearm_route_min_margin: float = 0.06
+    # compressing raise height) intact. Raised 0.06 → 0.10 (2026-07-13):
+    # the resting-arm population drifted to 0.065–0.088 in reference units
+    # after the camera move, straddling the old bar; deliberate raises on
+    # record all clear 0.16+.
+    forearm_route_min_margin: float = 0.10
 
     # Wrist-near-head exclusion: a raised wrist within this distance (frame
     # fraction, both axes) of the nose keypoint is rejected even if it
@@ -296,19 +299,31 @@ class ArmTracker:
         while self._hist and now - self._hist[0].t > horizon:
             self._hist.popleft()
 
-    def _rose_recently(self, side: Side, now: float, factor: float) -> bool:
-        """Was this side's wrist seen at/near/below shoulder level within the
-        raise window?  "Near" (within arm_rising_threshold) matters for the
-        reclined case: a resting wrist on a horizontal body sits at almost
-        the same image height as the shoulder, so demanding strictly-below
-        would leave a lying person with no rise evidence at all.  Unknown
-        (buffer doesn't span the window yet — person only just acquired)
-        counts as True: only assert "did not rise" when there is enough
-        history to actually know. A static pose that persists longer than
-        the window loses the benefit of the doubt.
+    def _rose_recently(self, side: Side, now: float, factor: float,
+                       upright: Optional[bool]) -> bool:
+        """Was this side's wrist seen at/below "down" level within the raise
+        window?  What counts as down is posture-aware:
+
+        Upright — the wrist must have been AT or BELOW shoulder level. An
+        arm draped over a sofa backrest or resting on a tall armrest hovers
+        a few percent ABOVE the shoulder and bobs in and out of any
+        above-shoulder tolerance band, re-arming the gate every few minutes
+        (live data 2026-07-12 evening: repeated no_rise blocks followed by
+        re-fires at raise_margin 0.04–0.06). A genuine upright raise starts
+        from the lap — far below — and is unaffected by the strict line.
+
+        Reclined/unknown — the wrist may be within arm_rising_threshold
+        ABOVE the shoulder: a resting wrist on a horizontal body sits at
+        almost the same image height as the shoulder, so demanding
+        strictly-below would leave a lying person with no rise evidence.
+
+        Unknown history (buffer doesn't span the window yet — person only
+        just acquired) counts as True: only assert "did not rise" when
+        there is enough history to actually know. A static pose that
+        persists longer than the window loses the benefit of the doubt.
         """
         window = self.c.raise_travel_window_s
-        down_line = self.c.arm_rising_threshold * factor
+        down_line = 0.0 if upright is True else self.c.arm_rising_threshold * factor
         for s in self._hist:
             if now - s.t > window:
                 continue
@@ -614,7 +629,7 @@ class ArmTracker:
             side = Side.RIGHT if rw_raised else Side.LEFT
             wrist, elbow, shoulder = (rw, re, rs) if rw_raised else (lw, le, ls)
             if now is not None:
-                rose  = self._rose_recently(side, now, f)
+                rose  = self._rose_recently(side, now, f, upright)
                 still = self._wrist_still(side, wrist.x, wrist.y, now, f)
             else:
                 rose = still = True

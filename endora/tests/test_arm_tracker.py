@@ -167,13 +167,13 @@ def test_one_shoulder_occluded_still_detects_raise():
 
 
 def test_forearm_vertical_route_fires_when_wrist_near_shoulder():
-    # Camera angle: raised arm whose wrist clears the shoulder by 0.07 —
+    # Camera angle: raised arm whose wrist clears the shoulder by 0.11 —
     # under arm_above_head_tolerance (0.15) but over the route's own
-    # forearm_route_min_margin (0.06) — with a clearly vertical forearm.
+    # forearm_route_min_margin (0.10) — with a clearly vertical forearm.
     from tests.fake_landmarks import _build, Point
     lm = _build(
-        right_elbow=Point(0.60, 0.55),  # elbow low → forearm_dy = 0.22
-        right_wrist=Point(0.60, 0.33),  # wrist 0.07 above shoulder (y=0.40)
+        right_elbow=Point(0.60, 0.55),  # elbow low → forearm_dy = 0.26
+        right_wrist=Point(0.60, 0.29),  # wrist 0.11 above shoulder (y=0.40)
     )
     r = _tracker()._classify_raw(lm, 1280, 720)
     assert r.state == ArmState.SINGLE_UP, f"got {r.state}"
