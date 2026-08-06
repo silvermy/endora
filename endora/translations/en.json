@@ -91,6 +91,10 @@
     "flourish_min_rate": {
       "name": "Flourish speed",
       "description": "How fast the sweep must be, in elevation per second. A resting arm is ~0, a deliberate flourish 2-3 (default 0.80)"
+    },
+    "cross_gesture_cooldown_s": {
+      "name": "Different-gesture cooldown (s)",
+      "description": "Minimum seconds before a DIFFERENT gesture type may fire. Short on purpose — the full cooldown still applies per gesture (default 0.5)"
     }
   }
 }

@@ -254,6 +254,11 @@ REGISTRY: list[SettingField] = [
     SettingField("cooldown_s", float, 2.0,
                   "Minimum seconds between any two gestures", group="Fusion", user_facing=True,
                   ui=UIMeta("Cooldown (s)", "slider", 0, 10, 0.25, "Gesture", order=3)),
+    SettingField("cross_gesture_cooldown_s", float, 0.5,
+                  "Minimum seconds before a DIFFERENT gesture type may fire. Deliberately "
+                  "short — its only job is to stop one gesture's residual motion triggering "
+                  "another; the full cooldown_s still applies per gesture",
+                  group="Fusion", user_facing=True),
     SettingField("single_camera_mode", bool, False,
                   "Run a single analyser using the full core count", group="Fusion", user_facing=True),
 

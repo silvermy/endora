@@ -32,7 +32,8 @@ class GestureSystem:
         self.backend = make_backend(settings)
         self.feedback = FeedbackLogger()
 
-        self.fusion = GestureFusion(settings, on_gesture=self._on_gesture)
+        self.fusion = GestureFusion(settings, on_gesture=self._on_gesture,
+                                    on_suppressed=self._on_suppressed)
 
         # Single-camera mode: explicit flag OR both URLs identical
         self._single = (
@@ -156,6 +157,11 @@ class GestureSystem:
         if self.cam_b:
             self.cam_b.stop()
         self.backend.close()
+
+    def _on_suppressed(self, gesture_name: str, reason: str) -> None:
+        """A gesture fired in the analyser but never reached Home Assistant."""
+        if self.feedback:
+            self.feedback.on_suppressed(gesture_name, reason)
 
     def _on_gesture(self, gesture: Gesture, confidence: float, sources: list):
         # Update UI immediately — don't wait for the HTTP round-trip to HA

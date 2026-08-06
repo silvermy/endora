@@ -137,6 +137,24 @@ class FeedbackLogger:
             self._write(entry)
             self._counts["near_miss"] += 1
 
+    def on_suppressed(self, gesture_name: str, reason: str) -> None:
+        """Call when a gesture fired in the analyser but never reached HA.
+
+        Previously this happened only at log.debug level, so a gesture that
+        was detected perfectly and then dropped downstream was invisible in
+        feedback.jsonl — indistinguishable from one that never fired. That
+        gap cost a full diagnostic round-trip.
+        """
+        entry = {
+            "ts": time.time(),
+            "label": "suppressed",
+            "gesture": gesture_name,
+            "reason": reason,
+        }
+        with self._lock:
+            self._write(entry)
+            self._counts["suppressed"] += 1
+
     def mark_false_positive(self) -> bool:
         """Mark the most recent (unmarked) gesture as a false positive.
 

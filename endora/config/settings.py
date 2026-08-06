@@ -268,6 +268,13 @@ class Settings:
     # Advanced: override in settings.yaml if needed
     fusion_agreement_window_s: float = 1.0
     cooldown_s: float = 2.0
+    # Minimum seconds before a DIFFERENT gesture type may fire. Deliberately
+    # much shorter than cooldown_s: its only job is to stop the residual
+    # motion of one gesture immediately triggering another. Sharing the full
+    # cooldown_s meant a single spurious CROSS_ARMS swallowed a real SNAP for
+    # two seconds — after the chime had already played, which reads as "the
+    # sound fired but nothing happened".
+    cross_gesture_cooldown_s: float = 0.5
     single_camera_mode: bool = False
 
     # ── HA ────────────────────────────────────────────────────────────────

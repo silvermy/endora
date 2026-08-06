@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from core.state_machine import Gesture
 
@@ -21,9 +21,12 @@ log = logging.getLogger(__name__)
 
 
 class GestureFusion:
-    def __init__(self, settings, on_gesture: Callable[[Gesture, float, list], None]):
+    def __init__(self, settings, on_gesture: Callable[[Gesture, float, list], None],
+                 on_suppressed: Optional[Callable[[str, str], None]] = None):
         self.s = settings
         self.on_gesture = on_gesture
+        # Reports a gesture that fired in the analyser but was dropped here.
+        self.on_suppressed = on_suppressed
         self._lock = threading.Lock()
 
         # Detect single-camera mode automatically
@@ -54,17 +57,31 @@ class GestureFusion:
             # ── Global cooldown check FIRST ───────────────────────────────
             # A single cooldown window covers ALL gesture types.  Per-gesture
             # clocks are kept for logging/stats but the global gate fires first.
+            # Cross-gesture cooldown: deliberately much shorter than the
+            # per-gesture one below. Its job is only to stop the residual
+            # motion of one gesture immediately triggering a different one.
+            # At the full cooldown_s it did far more than that — a single
+            # spurious CROSS_ARMS swallowed a real SNAP for two seconds,
+            # after the chime had already played, which reads as "the sound
+            # fired but nothing happened".
+            cross_cd = float(getattr(self.s, 'cross_gesture_cooldown_s', 0.5))
             global_elapsed = now - self._last_emitted_any
-            if global_elapsed < self.s.cooldown_s:
-                log.debug("Gesture %s suppressed by global cooldown (%.1fs remaining)",
-                          gesture, self.s.cooldown_s - global_elapsed)
+            if global_elapsed < cross_cd:
+                reason = (f"cross-gesture cooldown, {cross_cd - global_elapsed:.1f}s "
+                          f"remaining")
+                log.info("Gesture %s suppressed: %s", gesture, reason)
+                if self.on_suppressed:
+                    self.on_suppressed(gesture.name, reason)
                 return
 
             # Per-gesture cooldown (secondary, guards same-gesture repeats)
             if now - self._last_emitted[gesture] < self.s.cooldown_s:
-                log.debug("Gesture %s suppressed by per-gesture cooldown (%.1fs remaining)",
-                          gesture,
-                          self.s.cooldown_s - (now - self._last_emitted[gesture]))
+                reason = (f"cooldown for this gesture, "
+                          f"{self.s.cooldown_s - (now - self._last_emitted[gesture]):.1f}s "
+                          f"remaining")
+                log.info("Gesture %s suppressed: %s", gesture, reason)
+                if self.on_suppressed:
+                    self.on_suppressed(gesture.name, reason)
                 return
 
             window = self.s.fusion_agreement_window_s

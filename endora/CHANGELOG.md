@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.130
+
+### Fixed — a gesture could fire perfectly and never reach Home Assistant
+
+The chime is emitted in the analyser, but the HA event only happens if **fusion** emits, and fusion applied its full `cooldown_s` (2 s) across *all* gesture types. So a single spurious CROSS_ARMS swallowed a real SNAP for two seconds — after the sound had already played. The symptom is "the chime fires at the right moment but nothing happens", with **no trace at all in `feedback.jsonl`**, because the `fired` row is only written after fusion emits. A correctly-detected gesture that was dropped downstream looked identical to one that was never detected.
+
+- **Suppressed gestures are now recorded** as a `suppressed` row in `feedback.jsonl` with the reason, and logged at info rather than debug. This was the actual diagnostic gap — it cost a full round-trip to find.
+- **The cross-gesture cooldown is now separate and short** (`cross_gesture_cooldown_s`, 0.5 s). Its only job is stopping one gesture's residual motion from immediately triggering a different one; the full `cooldown_s` still applies per gesture, so repeats are unchanged. Sustained poses already have their own re-arm latch, so they never needed a two-second veto over everything else.
+
 ## 1.9.129
 
 ### Fixed — SNAP arriving seconds late, or not at all
