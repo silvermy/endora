@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.134
+
+### Fixed — chiming for a sweep that never became a raise
+
+Read live from a running install: **three chimes in 151 seconds, with no `SINGLE_UP` transition and no gesture at all.**
+
+Sweep is computed for the highest arm regardless of its state, so an arm swung up with a bent elbow — one that never clears `arm_extension_min` and therefore can never become a gesture — still produced a climb and rate that satisfied the chime. The chime now additionally requires the reading to be a confirmed raise, so a sweep that goes nowhere stays silent.
+
 ## 1.9.133
 
 ### Fixed / Added — the live diagnostics were nearly unusable

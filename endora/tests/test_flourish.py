@@ -155,7 +155,10 @@ def test_chime_requires_climb_not_just_rate():
     from cameras.arm_tracker import ArmReading, ArmState
 
     def r(climb, rate):
-        return ArmReading(state=ArmState.DOWN, sweep_climb=climb, sweep_rate=rate)
+        # SINGLE_UP so this test isolates the climb/rate terms; the
+        # raised-state requirement is covered separately below.
+        return ArmReading(state=ArmState.SINGLE_UP,
+                          sweep_climb=climb, sweep_rate=rate)
 
     # Jitter: negligible travel, but a huge rate because the interval is tiny.
     assert not _sweep_meets_flourish(r(0.08, 4.0), 0.60, 0.80)
@@ -252,3 +255,23 @@ def test_flourish_latch_clears_when_the_arm_comes_down():
     # A raise with no sweep behind it must not inherit the earlier latch.
     fired = [m.tick(up_static, 2.0 + i / 10) for i in range(20)]
     assert not any(f for f in fired), f"stale latch fired {fired}"
+
+
+def test_chime_requires_the_arm_to_actually_be_raised():
+    """Regression from a live install: three chimes in 151 s with no
+    SINGLE_UP transition at all.
+
+    Sweep is computed for the highest arm whatever its state, so an arm
+    swung up with a bent elbow — which never clears arm_extension_min and
+    so never becomes a gesture — still produced a climb and chimed.
+    """
+    from cameras.analyser import _sweep_meets_flourish
+    from cameras.arm_tracker import ArmReading, ArmState as S
+
+    swept_but_not_raised = ArmReading(state=S.DOWN, sweep_climb=1.6,
+                                      sweep_rate=2.4, extension=0.65)
+    assert not _sweep_meets_flourish(swept_but_not_raised, 0.60, 0.80)
+
+    swept_and_raised = ArmReading(state=S.SINGLE_UP, sweep_climb=1.6,
+                                  sweep_rate=2.4, extension=0.95)
+    assert _sweep_meets_flourish(swept_and_raised, 0.60, 0.80)

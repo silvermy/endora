@@ -380,16 +380,24 @@ def _crop_around_wrist(frame: np.ndarray, reading, lm) -> Optional[np.ndarray]:
 
 
 def _sweep_meets_flourish(reading, climb_min: float, rate_min: float) -> bool:
-    """Does this reading show a sweep good enough to chime for?
+    """Does this reading show a sweep worth chiming for?
 
-    Deliberately the SAME bar the gesture gate uses, both terms required.
+    Requires BOTH terms of the gesture gate, and that the arm actually
+    arrived somewhere — i.e. the reading is a confirmed raise.
+
     Rate alone is not usable: it is climb divided by elapsed time, so a
     hand's worth of keypoint jitter between two adjacent frames divides a
-    tiny climb by a tiny interval and produces a large rate. An arm resting
-    near horizontal — where elevation is most sensitive to wrist noise —
-    chimed several times a minute that way with no gesture behind it.
+    tiny climb by a tiny interval and produces a large rate.
+
+    The raised-state requirement matters just as much. Sweep is computed for
+    the highest arm whatever its state, so an arm swung up with a bent elbow
+    — which never clears arm_extension_min and never becomes a gesture —
+    still produced a climb and chimed. A live install logged three chimes in
+    151 seconds with no SINGLE_UP transition at all.
     """
     if reading is None:
+        return False
+    if getattr(reading, 'state', None) is not ArmState.SINGLE_UP:
         return False
     return (float(getattr(reading, 'sweep_climb', 0.0)) >= climb_min
             and float(getattr(reading, 'sweep_rate', 0.0)) >= rate_min)
