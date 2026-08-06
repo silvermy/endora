@@ -27,7 +27,7 @@ def _vertical_up() -> ArmReading:
         state=ArmState.SINGLE_UP,
         raised_side=Side.RIGHT,
         wrist_x=800, wrist_y=100,
-        forearm_dy=0.15,
+        elevation=0.92, extension=0.95,
     )
 
 
@@ -36,7 +36,7 @@ def _horizontal_up() -> ArmReading:
         state=ArmState.SINGLE_UP,
         raised_side=Side.RIGHT,
         wrist_x=1000, wrist_y=300,
-        forearm_dy=0.02,
+        elevation=0.10, extension=0.95,
     )
 
 

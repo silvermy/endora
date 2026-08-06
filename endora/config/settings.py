@@ -93,27 +93,27 @@ class Settings:
     # Deprecated — was MediaPipe model complexity (0/1/2).  Kept so old
     # settings.yaml files don't cause load errors.
     pose_model_complexity: int = 2
-    # Wrist must be this fraction of frame height above the shoulder to count
-    # as a raised arm.  0.10 is more permissive than 0.15 — better for seated
-    # or lounging postures where the wrist doesn't travel as high in the frame.
-    # Lower toward 0.05 if still missing raises; raise toward 0.20 if you get
-    # false triggers from resting your hand on top of your head.
+    # ── Raise geometry ────────────────────────────────────────────────────
+    # elevation = (shoulder_y - wrist_y) / |shoulder - wrist|, computed in
+    # PIXELS: the sine of the arm's angle above horizontal. 1.0 = straight
+    # up, 0.0 = level, -1.0 = hanging down. Dimensionless, so it means the
+    # same thing at any camera distance, any frame shape, and in any posture
+    # — standing, sitting or lying on a couch.
+    raise_elevation_min: float = 0.70
+    # How straight the arm must be: |shoulder-wrist| / (upper arm + forearm).
+    # 1.0 = fully extended, 0.71 = elbow at 90 degrees. A hand held against
+    # your own face scores low, which is why the old wrist-near-nose veto is
+    # gone. Lower toward 0.70 if bent-elbow raises should count.
+    arm_extension_min: float = 0.80
+    # An arm pointing at the camera projects to almost nothing, and angles
+    # computed from a few pixels are noise. If the projected arm is shorter
+    # than this multiple of shoulder width, refuse to judge it rather than
+    # guess.
+    min_arm_len_frac: float = 0.55
+    # Deprecated — superseded by the settings above. Kept so existing
+    # settings files keep loading; no code reads them.
     arm_above_head_tolerance: float = 0.15
-    # Stricter threshold used when the body is reclined OR when upright status
-    # cannot be confirmed (hips hidden by blanket).  Requires a deliberate
-    # straight-up arm.  0.38 = wrist must clear shoulder by ~38% of frame
-    # height — roughly "arm pointing straight at the ceiling". Raised from
-    # 0.30 after feedback.jsonl showed recurring late-night false SNAP fires
-    # while lying down (upright=False) — likely a habitual reach (phone,
-    # blanket, pillow) rather than a deliberate gesture; see commit message.
     arm_above_head_tolerance_reclined: float = 0.38
-    # Minimum gap (frame fraction) between average hip_y and average shoulder_y.
-    # Guards against arm-raise false positives when lying down: when horizontal,
-    # hips and shoulders converge; when upright, hips are 0.2–0.4 below shoulders.
-    # 0.10 = overhead cameras (hips below shoulders in image).
-    # -0.15 = frontal fisheye, fully upright seated.
-    # -0.50 = allows reclined/lounging posture (hips appear much higher in frame)
-    #         while still rejecting fully horizontal (lying flat).
     body_upright_min: float = -0.50
     # Leg-raise guard: if any ankle or knee is this far above hip level
     # (normalised frame fraction), all gesture detection is suppressed.
@@ -130,46 +130,9 @@ class Settings:
     # treated as not-visible. Drives per-side arm-raise detection so an occluded
     # or mis-placed keypoint can't block a real raise on the other, visible arm.
     keypoint_visibility_min: float = 0.30
-    # Forearm-vertical secondary route to a raised-arm: if the forearm is at
-    # least this vertical (elbow_y − wrist_y, frame fraction) and the wrist is
-    # at/above shoulder height, the arm counts as raised even if the wrist
-    # doesn't clear the full arm_above_head_tolerance. Helps when the camera is
-    # mounted high/at an angle so a raised arm's wrist stays near shoulder level
-    # in the image. Raise toward 0.15 if resting a hand near your head misfires.
     forearm_vertical_min: float = 0.10
-    # The forearm-vertical route additionally requires the wrist to clear the
-    # shoulder by this body-scaled margin. Live feedback (2026-07-12) showed a
-    # day-long false-SNAP storm through this route with the wrist sitting AT
-    # shoulder level (raise_margin ≤ 0.049 on every flagged fire — arm resting
-    # on an armrest / holding a phone) while every confirmed deliberate raise
-    # cleared 0.17+. Raised 0.06 → 0.10 (2026-07-13): after the camera move
-    # the resting-arm fires drifted to 0.065–0.088 (reference units),
-    # straddling the old bar; deliberate raises on record all clear 0.16+.
-    # Lower toward 0.06 if high-camera raises get missed.
     forearm_route_min_margin: float = 0.10
-    # Reject a raised wrist within this distance (frame fraction) of the nose
-    # keypoint — filters resting/adjusting a hand against your own face
-    # (glasses, phone, scratching, chin-on-hand), which otherwise reads
-    # geometrically identical to a deliberate raise. Only applied when the
-    # nose is confidently visible, so an occluded face never blocks a real
-    # gesture. Lower toward 0.05 if it ever rejects genuine close-to-head
-    # raises; raise toward 0.12 if hand-near-face is still misfiring.
     wrist_head_exclude_dist: float = 0.09
-    # Torso length (frame fraction, shoulder-mid to hip-mid) that all the
-    # geometric thresholds above are tuned at. Each person's thresholds are
-    # multiplied by detected_torso / this (clamped 0.5–2.0), so a body lying
-    # far from the camera isn't asked to clear margins sized for someone
-    # standing right in front of it — and vice versa. When hips are hidden
-    # (blanket), torso is estimated from shoulder width. Raise this if
-    # everyone in your frames is large/close (makes margins smaller for a
-    # given person); lower it if everyone is small/distant.
-    # 0.18 was calibrated from live feedback.jsonl scale_factor logs
-    # (2026-07-11): the initial 0.25 guess put the resident's typical seated
-    # position at factor 0.6–0.8, silently tightening every tuned margin by
-    # 20–40% and causing a false-positive burst. At 0.18 the typical
-    # position reads ≈1.0. (ArmTrackerConfig's own dataclass default stays
-    # 0.25 — the unit-test fixtures have a 0.25 torso and are calibrated
-    # against it; production always takes THIS value via the analyser.)
     body_scale_reference: float = 0.18
 
     # ── Hands (gesture classification) ───────────────────────────────────
@@ -190,18 +153,12 @@ class Settings:
     # Flip gesture left/right (set True if the camera faces you and you have
     # NOT already mirrored it in the camera's own app).
     mirror_camera: bool = False
-    # Minimum forearm vertical extent (normalised frame height) to classify
-    # an arm raise as SNAP.  snap_forearm_min = elbow_y_norm − wrist_y_norm.
-    # Arm straight up → forearm_dy ≈ 0.08–0.18  (wrist clearly above elbow)
-    # Arm swept sideways → forearm_dy ≈ −0.05–0.04 (wrist at elbow height)
-    # 0.06 is the crossover.  Watch forearm_dy in the debug overlay:
-    #   snap should read 0.10+, wave should read 0.00 or negative.
-    # Lower toward 0.03 if snaps misfire as wave.
-    # Raise toward 0.10 if waves misfire as snap.
-    # 0.06 → 0.05 (2026-07-12): with the forearm-route margin + trajectory
-    # gates carrying FP rejection, a slightly-bent elbow on a clearly-raised
-    # arm shouldn't block SNAP — feedback showed a genuine attempt stuck at
-    # dy 0.070 vs a scale-adjusted 0.071 bar, retried four times, never fired.
+    # Minimum arm elevation for SNAP/HOLD to fire. The tracker already
+    # applied raise_elevation_min to reach SINGLE_UP, so this only bites when
+    # set higher — i.e. to demand a straighter-up arm for firing than for
+    # showing "arm up" on the overlay.
+    snap_elevation_min: float = 0.70
+    # Deprecated — the forearm-only test was replaced by whole-arm elevation.
     snap_forearm_min: float = 0.05
     # Deprecated name — kept so old settings.yaml files don't cause errors.
     snap_elbow_min: float = 0.06
@@ -258,18 +215,22 @@ class Settings:
     # while still moving; a deliberate raise stops and holds. Disable either
     # gate live if it ever blocks genuine gestures.
     snap_require_still: bool = True
-    # Max wrist travel (frame fraction at reference body scale) over the
-    # stillness window for the wrist to count as "holding still". Raise
-    # toward 0.08 if deliberate raises with a wobbly hand get blocked; lower
-    # toward 0.03 if slow reaches still fire.
+    # Max wrist travel during the stillness window, as a multiple of that
+    # arm's OWN length — so it means the same thing near or far from the
+    # camera. Raise toward 0.25 if deliberate raises with a wobbly hand get
+    # blocked; lower toward 0.10 if slow reaches still fire.
+    wrist_still_max_travel_arm: float = 0.15
+    # An arm counts as having risen if its elevation climbed by at least this
+    # much within the rise window, wherever it started. This is what lets a
+    # raise that begins with the arm already up (armrest, sofa backrest) fire
+    # at all — such an arm never reads low.
+    rise_elevation_delta: float = 0.35
+    # …or if it was seen at/below this elevation within the window, i.e. it
+    # started from a normally lowered position.
+    rise_start_elevation_max: float = 0.35
+    # Deprecated — replaced by the two settings above (which are measured
+    # against the arm rather than the frame).
     wrist_still_max_travel: float = 0.05
-    # How far the wrist must RISE (body-scaled frame fraction, within the
-    # rise window) to satisfy snap_require_rise when the arm starts above
-    # shoulder level — an arm resting on an armrest or sofa backrest never
-    # dips below the shoulder, so without this a genuine raise from that
-    # position could never fire. Lower toward 0.05 if raises still get
-    # blocked with "no_rise"; raise toward 0.12 if a resting arm shifting
-    # position starts firing.
     raise_travel_min: float = 0.08
 
     # Seconds a new arm state must be seen before being accepted.

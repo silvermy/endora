@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.121
+
+### Changed — gesture geometry rewritten around two dimensionless numbers
+
+The raise test used to ask "is the wrist higher *in the frame* than the shoulder, by a tuned margin?" — with separate margins for upright, reclined and unknown posture, a secondary forearm-vertical route, a wrist-near-nose veto, and a per-person scale factor to keep the frame-fraction margins meaningful at different distances. That accumulated complexity was the source of most of the false positives and misses in the last several releases. It is replaced by a direct statement of the gesture:
+
+- **elevation** = `(shoulder_y − wrist_y) / |shoulder − wrist|` — the sine of the arm's angle above horizontal. 1.0 is straight up, 0.0 level, −1.0 hanging down.
+- **extension** = `|shoulder − wrist| / (upper arm + forearm)` — 1.0 fully straight, 0.71 elbow at 90°.
+
+"Arm extended straight up" is now exactly `elevation ≥ raise_elevation_min AND extension ≥ arm_extension_min`. Both are dimensionless, so distance, frame size and posture all cancel: **one threshold covers standing, sitting and lying on the couch.**
+
+**Unit-mixing bug fixed.** All geometry is now computed in pixels. Landmarks are normalised per-axis, so on the 1280×640 frame the fisheye dewarp emits, every previous distance calculation mixed two different units — shoulder width was understated 2× against torso length. That is why the old body-scale estimate collapsed to its 0.5 floor whenever the hips were hidden, silently halving every margin.
+
+**What this removes:** `arm_above_head_tolerance`, `arm_above_head_tolerance_reclined`, `body_upright_min`, `forearm_vertical_min`, `forearm_route_min_margin`, `wrist_head_exclude_dist`, `body_scale_reference`, `snap_forearm_min`, `raise_travel_min` and `wrist_still_max_travel` — ten thresholds, replaced by four. They remain in the settings schema as deprecated no-ops so existing configs keep loading; **saved values for them stop having any effect**, which is deliberate — a stale saved number can no longer silently override a shipped default.
+
+T-pose, raise-both and cross-arms are expressed in the same terms (angles, and lengths measured against shoulder width) rather than frame fractions. A hand held at your face is now rejected because a bent arm scores low on extension, not by a special-case nose rule. An arm pointing nearly at the camera is *refused* rather than guessed at, via `min_arm_len_frac`.
+
+The temporal gates are unchanged in spirit but now speak elevation: `rose_recently` fires when the arm was seen low **or** its elevation climbed by `rise_elevation_delta`, and stillness is measured against the arm's own length.
+
+Verified end-to-end at 1280×640 across ten scenarios drawn from real feedback: deliberate raises fire identically at three body sizes and while reclined; raises starting from an armrest fire; and armrest-resting, backrest-draped, hand-at-face and arm-down postures all stay silent — reading DOWN rather than SINGLE_UP, so they no longer trigger the chime either.
+
 ## 1.9.120
 
 ### Fixed — "just a sound, no gesture" and phantom chimes

@@ -77,13 +77,12 @@ def test_debug_page_lists_derived_from_registry_match_known_layout():
     from cameras.debug_server import _PARAMS, _JOY_PARAMS, _TOGGLES
 
     assert [p[0] for p in _PARAMS] == [
-        "arm_above_head_tolerance", "snap_forearm_min", "snap_sustain_s",
-        "cooldown_s", "bg_subtract_min_foreground", "wrist_head_exclude_dist",
-        "arm_above_head_tolerance_reclined",
+        "raise_elevation_min", "snap_elevation_min", "snap_sustain_s",
+        "cooldown_s", "bg_subtract_min_foreground", "arm_extension_min",
         "yolo_conf", "dewarp_vfov", "frame_crop_bottom", "pose_visibility_min",
     ]
     assert [p[5] for p in _PARAMS] == [
-        "Gesture", "Gesture", "Gesture", "Gesture", "Gesture", "Gesture", "Gesture",
+        "Gesture", "Gesture", "Gesture", "Gesture", "Gesture", "Gesture",
         "Body", "View", "View", "View",
     ]
     assert [p[0] for p in _JOY_PARAMS] == ["dewarp_pan", "dewarp_tilt"]

@@ -61,11 +61,12 @@ def _snap(reading) -> dict:
         "snap_roll": round(float(reading.snap_roll), 4),
         "upright": bool(reading.upright),
         "raised_side": reading.raised_side.name if reading.raised_side else None,
-        "scale_factor": round(float(getattr(reading, "scale_factor", 1.0)), 3),
+        "elevation": round(float(getattr(reading, "elevation", 0.0)), 3),
+        "extension": round(float(getattr(reading, "extension", 0.0)), 3),
+        "arm_len_px": round(float(getattr(reading, "arm_len_px", 0.0)), 1),
         "rose_recently": bool(getattr(reading, "rose_recently", True)),
         "wrist_still": bool(getattr(reading, "wrist_still", True)),
-        "raise_margin": round(float(getattr(reading, "raise_margin", 0.0)), 4),
-        "rise_travel": round(float(getattr(reading, "rise_travel", 0.0)), 4),
+        "rise_delta": round(float(getattr(reading, "rise_delta", 0.0)), 3),
     }
 
 

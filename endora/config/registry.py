@@ -108,17 +108,36 @@ REGISTRY: list[SettingField] = [
                   "Deprecated — was MediaPipe tracking threshold", group="Pose", deprecated=True),
     SettingField("pose_model_complexity", int, 2,
                   "Deprecated — was MediaPipe model complexity (0/1/2)", group="Pose", deprecated=True),
+    # ── Raise geometry (v1.9.121 rewrite) ────────────────────────────────
+    # elevation = (shoulder_y - wrist_y) / |shoulder - wrist|, measured in
+    # pixels: the sine of the arm's angle above horizontal. Dimensionless,
+    # so it needs no body-size or frame-size scaling.
+    SettingField("raise_elevation_min", float, 0.70,
+                  "How far above horizontal an arm must point to count as raised "
+                  "(1.0 = straight up, 0.70 ~ 45 degrees). Replaces the old "
+                  "frame-fraction margins",
+                  group="Pose", user_facing=True,
+                  ui=UIMeta("Arm raise angle", "slider", 0.30, 1.0, 0.01, "Gesture", order=0)),
+    SettingField("arm_extension_min", float, 0.80,
+                  "How straight the arm must be (1.0 = fully extended, 0.71 = elbow "
+                  "at 90 degrees) — rejects a hand held at the face",
+                  group="Pose", user_facing=True,
+                  ui=UIMeta("Arm straightness", "slider", 0.50, 1.0, 0.01, "Gesture", order=6)),
+    SettingField("min_arm_len_frac", float, 0.55,
+                  "Refuse to judge an arm whose projection is shorter than this multiple "
+                  "of shoulder width (too foreshortened to read reliably)",
+                  group="Pose"),
+    # Superseded by the two above — kept so existing settings files load,
+    # but no longer read by any code path.
     SettingField("arm_above_head_tolerance", float, 0.15,
-                  "Wrist must be this far above shoulder (frame fraction) to count as raised",
-                  group="Pose", user_facing=True,
-                  ui=UIMeta("Arm raise margin", "slider", 0.0, 0.30, 0.01, "Gesture", order=0)),
+                  "Deprecated — replaced by raise_elevation_min", group="Pose",
+                  deprecated=True),
     SettingField("arm_above_head_tolerance_reclined", float, 0.38,
-                  "Stricter arm-raise threshold used when reclined or upright status is unknown",
-                  group="Pose", user_facing=True,
-                  ui=UIMeta("Reclined arm raise margin", "slider", 0.0, 0.50, 0.01, "Gesture", order=6)),
+                  "Deprecated — posture-specific thresholds are no longer needed",
+                  group="Pose", deprecated=True),
     SettingField("body_upright_min", float, -0.50,
-                  "Hip-shoulder gap to confirm upright (negative allows reclined/fisheye)",
-                  group="Pose", user_facing=True),
+                  "Deprecated — upright is reported for diagnostics only", group="Pose",
+                  deprecated=True),
     SettingField("leg_raise_margin", float, 0.05,
                   "Leg-raise guard: suppresses gestures if ankle/knee is this far above hip", group="Pose"),
     SettingField("pose_visibility_min", float, 0.45,
@@ -128,21 +147,18 @@ REGISTRY: list[SettingField] = [
     SettingField("keypoint_visibility_min", float, 0.30,
                   "Per-keypoint confidence below which a landmark is treated as not-visible", group="Pose"),
     SettingField("forearm_vertical_min", float, 0.10,
-                  "Secondary raised-arm route: forearm verticality threshold when wrist is at/above shoulder",
-                  group="Pose"),
+                  "Deprecated — the forearm-vertical route is gone; elevation measures "
+                  "the whole arm", group="Pose", deprecated=True),
     SettingField("forearm_route_min_margin", float, 0.10,
-                  "Forearm-vertical route also requires the wrist to clear the shoulder by this "
-                  "body-scaled margin (blocks resting-arm/phone postures at shoulder level)",
-                  group="Pose", user_facing=True),
+                  "Deprecated — the forearm-vertical route is gone", group="Pose",
+                  deprecated=True),
     SettingField("wrist_head_exclude_dist", float, 0.09,
-                  "Reject a raised wrist within this distance of the nose keypoint "
-                  "(filters resting a hand against your own face)",
-                  group="Pose", user_facing=True,
-                  ui=UIMeta("Face exclusion", "slider", 0.0, 0.20, 0.01, "Gesture", order=5)),
+                  "Deprecated — a hand at the face now fails arm_extension_min",
+                  group="Pose", deprecated=True),
     SettingField("body_scale_reference", float, 0.18,
-                  "Torso length (frame fraction) the geometric thresholds are tuned at — "
-                  "each person's margins scale with their detected body size relative to this",
-                  group="Pose", user_facing=True),
+                  "Deprecated — thresholds are dimensionless or measured against the "
+                  "body itself, so there is nothing left to calibrate",
+                  group="Pose", deprecated=True),
 
     # ── Hands (gesture classification) ──────────────────────────────────
     SettingField("hand_model_max_hands", int, 1, "Max hands for grlib/MediaPipe hand pipeline", group="Hands"),
@@ -157,9 +173,14 @@ REGISTRY: list[SettingField] = [
     # ── Gesture thresholds ───────────────────────────────────────────────
     SettingField("flip_image", bool, False, "Rotate frame 180 degrees", group="Gesture", user_facing=True),
     SettingField("mirror_camera", bool, False, "Reserved for future use", group="Gesture", user_facing=True),
+    SettingField("snap_elevation_min", float, 0.70,
+                  "Minimum arm elevation for SNAP/HOLD to fire — raise above "
+                  "raise_elevation_min to demand a straighter-up arm for firing than "
+                  "for showing 'arm up'", group="Gesture", user_facing=True,
+                  ui=UIMeta("Snap angle", "slider", 0.30, 1.0, 0.01, "Gesture", order=1)),
     SettingField("snap_forearm_min", float, 0.05,
-                  "Minimum forearm verticality for SNAP/HOLD", group="Gesture", user_facing=True,
-                  ui=UIMeta("Snap sensitivity", "slider", 0.03, 0.20, 0.01, "Gesture", order=1)),
+                  "Deprecated — replaced by snap_elevation_min", group="Gesture",
+                  deprecated=True),
     SettingField("snap_elbow_min", float, 0.06,
                   "Deprecated name for snap_forearm_min", group="Gesture", deprecated=True),
     SettingField("wave_lateral_fraction", float, 0.10,
@@ -189,15 +210,23 @@ REGISTRY: list[SettingField] = [
                   "SNAP requires the raised wrist to hold still briefly "
                   "(blocks pass-through reaches for phone/blanket)",
                   group="Hysteresis", user_facing=True),
+    SettingField("wrist_still_max_travel_arm", float, 0.15,
+                  "Max wrist travel during the stillness window, as a multiple of that "
+                  "arm's own length", group="Hysteresis", user_facing=True),
+    SettingField("rise_elevation_delta", float, 0.35,
+                  "How much an arm's elevation must climb to count as a deliberate lift "
+                  "when it starts already raised (armrest/backrest)",
+                  group="Hysteresis", user_facing=True),
+    SettingField("rise_start_elevation_max", float, 0.35,
+                  "An arm seen at or below this elevation within the rise window counts "
+                  "as having started from a lowered position",
+                  group="Hysteresis", user_facing=True),
     SettingField("wrist_still_max_travel", float, 0.05,
-                  "Max wrist travel (body-scaled frame fraction) during the stillness "
-                  "window for a raise to count as held still",
-                  group="Hysteresis", user_facing=True),
+                  "Deprecated — replaced by wrist_still_max_travel_arm (arm-relative)",
+                  group="Hysteresis", deprecated=True),
     SettingField("raise_travel_min", float, 0.08,
-                  "How far the wrist must rise (body-scaled) to satisfy the rise "
-                  "requirement when the arm starts above shoulder level "
-                  "(armrest/backrest raises)",
-                  group="Hysteresis", user_facing=True),
+                  "Deprecated — replaced by rise_elevation_delta", group="Hysteresis",
+                  deprecated=True),
     SettingField("state_confirm_s", float, 0.20,
                   "Seconds a new arm state must be seen before being accepted",
                   group="Hysteresis", user_facing=True),

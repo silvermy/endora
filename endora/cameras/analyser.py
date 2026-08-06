@@ -428,24 +428,21 @@ class CameraAnalyser(threading.Thread):
     def _make_person_entry(self, lm, centroid: tuple, now: float) -> _PersonEntry:
         s = self.s
         arm_tracker = ArmTracker(ArmTrackerConfig(
-            arm_above_head_tolerance=float(getattr(s, 'arm_above_head_tolerance', 0.15)),
-            arm_above_head_tolerance_reclined=float(getattr(s, 'arm_above_head_tolerance_reclined', 0.38)),
-            body_upright_min=float(getattr(s, 'body_upright_min', -0.15)),
+            raise_elevation_min=float(getattr(s, 'raise_elevation_min', 0.70)),
+            arm_extension_min=float(getattr(s, 'arm_extension_min', 0.80)),
+            min_arm_len_frac=float(getattr(s, 'min_arm_len_frac', 0.55)),
             pose_visibility_min=float(getattr(s, 'pose_visibility_min', 0.45)),
             keypoint_visibility_min=float(getattr(s, 'keypoint_visibility_min', 0.30)),
-            forearm_vertical_min=float(getattr(s, 'forearm_vertical_min', 0.10)),
-            forearm_route_min_margin=float(getattr(s, 'forearm_route_min_margin', 0.10)),
-            wrist_head_exclude_dist=float(getattr(s, 'wrist_head_exclude_dist', 0.09)),
             leg_raise_margin=float(getattr(s, 'leg_raise_margin', 0.05)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),
-            body_scale_reference=float(getattr(s, 'body_scale_reference', 0.18)),
-            wrist_still_max_travel=float(getattr(s, 'wrist_still_max_travel', 0.05)),
-            raise_travel_min=float(getattr(s, 'raise_travel_min', 0.08)),
+            rise_elevation_delta=float(getattr(s, 'rise_elevation_delta', 0.35)),
+            rise_start_elevation_max=float(getattr(s, 'rise_start_elevation_max', 0.35)),
+            wrist_still_max_travel=float(getattr(s, 'wrist_still_max_travel_arm', 0.15)),
         ))
         state_machine = GestureStateMachine(StateMachineConfig(
             cooldown_s=float(getattr(s, 'cooldown_s', 2.0)),
-            snap_forearm_min=float(getattr(s, 'snap_forearm_min', 0.10)),
+            snap_elevation_min=float(getattr(s, 'snap_elevation_min', 0.70)),
             hold_duration_s=float(getattr(s, 'hold_duration_s', 1.5)),
             double_snap_window_s=float(getattr(s, 'double_snap_window_s', 3.0)),
             sustain_s=float(getattr(s, 'sustain_s', 0.5)),
@@ -831,8 +828,9 @@ class CameraAnalyser(threading.Thread):
                                 getattr(reading, 'rose_recently', True)):
                             self._sonos.notify()
                     if reading.state.name == 'SINGLE_UP':
-                        log.debug("[%s] pid=%d SINGLE_UP forearm_dy=%.3f snap_roll=%.3f",
-                                  self.label, pid, reading.forearm_dy, reading.snap_roll)
+                        log.debug("[%s] pid=%d SINGLE_UP elev=%.2f ext=%.2f snap_roll=%.3f",
+                                  self.label, pid, reading.elevation,
+                                  reading.extension, reading.snap_roll)
                     if self._feedback:
                         self._feedback.push_reading(reading)
 
@@ -957,17 +955,17 @@ def _draw_debug(frame, all_person_kps, hand_lm, reading, fired_gesture):
         hand_str = f"{snap_roll:+.2f}" if hand_lm is not None else "none"
         lines = [
             (f"state: {state_name}", (0, 255, 100)),
-            (f"forearm_dy: {forearm:.3f}", (255, 255, 255)),
+            (f"elevation: {getattr(reading, 'elevation', 0.0):+.2f}", (255, 255, 255)),
+            (f"extension: {getattr(reading, 'extension', 0.0):.2f}", (255, 255, 255)),
             (f"snap_roll:  {hand_str}", (255, 255, 255)),
             (f"upright: {reading.upright}", (255, 255, 255)),
-            (f"scale: {getattr(reading, 'scale_factor', 1.0):.2f}", (255, 255, 255)),
         ]
         if state_name == 'SINGLE_UP':
             rose = getattr(reading, 'rose_recently', True)
             still = getattr(reading, 'wrist_still', True)
             color = (0, 255, 100) if (rose and still) else (0, 165, 255)
-            lines.append((f"rose: {'Y' if rose else 'N'}  "
-                          f"still: {'Y' if still else 'N'}", color))
+            lines.append((f"rose: {'Y' if rose else 'N'} (+{getattr(reading, 'rise_delta', 0.0):.2f})"
+                          f"  still: {'Y' if still else 'N'}", color))
     else:
         lines = [("state: none", (160, 160, 160))]
 

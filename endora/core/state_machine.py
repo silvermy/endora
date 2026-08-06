@@ -45,6 +45,14 @@ class Gesture(Enum):
 class StateMachineConfig:
     """Timing thresholds. All values in seconds unless noted."""
     cooldown_s: float = 2.0
+    # Minimum arm elevation for a raise to count as SNAP/HOLD. The tracker
+    # has already applied its own raise_elevation_min to reach SINGLE_UP, so
+    # this only bites when set higher — i.e. to demand a straighter-up arm
+    # for firing than for merely showing "arm up" on the overlay.
+    snap_elevation_min: float = 0.70
+    # Deprecated — the forearm-verticality test was replaced by elevation,
+    # which measures the whole arm rather than the forearm alone. Kept so
+    # old configs don't error.
     snap_forearm_min: float = 0.10
     hold_duration_s: float = 1.5
     double_snap_window_s: float = 3.0
@@ -196,11 +204,9 @@ class GestureStateMachine:
         if r.up_frames == 1:
             r.entered_at = now  # record when this raise began
 
-        # snap_forearm_min is tuned at the reference body size; scale it by
-        # the per-person factor so a small/distant body's shorter forearm
-        # (in frame units) isn't held to a full-size bar.
-        forearm_min = self.c.snap_forearm_min * reading.scale_factor
-        arm_vertical = reading.forearm_dy >= forearm_min
+        # Elevation is dimensionless (sine of the arm's angle above the
+        # horizon), so no per-person scaling is needed or possible here.
+        arm_vertical = reading.elevation >= self.c.snap_elevation_min
         roll_snap = (
             self.c.snap_roll_threshold > 0
             and abs(reading.snap_roll) >= self.c.snap_roll_threshold
@@ -225,8 +231,9 @@ class GestureStateMachine:
         # Near-miss: arm is up but snap condition not met — log for tuning.
         if not r.snap_fired and self._on_near_miss and r.up_frames > 1:
             if not snap_condition:
-                reason = (f"forearm_dy={reading.forearm_dy:.3f} < {forearm_min:.3f}"
-                          f" (min, scale={reading.scale_factor:.2f}),"
+                reason = (f"elevation={reading.elevation:.2f} < "
+                          f"{self.c.snap_elevation_min:.2f} (min),"
+                          f" extension={reading.extension:.2f},"
                           f" snap_roll={reading.snap_roll:.3f}")
                 self._on_near_miss("SNAP", reason, reading)
             elif not rise_ok:
@@ -234,9 +241,8 @@ class GestureStateMachine:
                     r.gates_logged.add("no_rise")
                     self._on_near_miss(
                         "SNAP",
-                        f"no_rise: no lift seen — rise_travel="
-                        f"{reading.rise_travel:.3f} (scale={reading.scale_factor:.2f})"
-                        f" and wrist never at/below shoulder",
+                        f"no_rise: no lift seen — elevation climbed only "
+                        f"{reading.rise_delta:.2f} and the arm was never low",
                         reading)
             elif not still_ok:
                 if "wrist_moving" not in r.gates_logged:

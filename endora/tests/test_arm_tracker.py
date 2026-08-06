@@ -29,10 +29,8 @@ def test_right_arm_vertical_is_single_up_right():
     r = _tracker()._classify_raw(right_arm_up_vertical(), 1280, 720)
     assert r.state == ArmState.SINGLE_UP
     assert r.raised_side == Side.RIGHT
-    assert r.forearm_dy > 0.10, f"forearm_dy should be vertical, got {r.forearm_dy}"
-    # Achieved wrist-above-shoulder margin is logged for threshold tuning:
-    # fixture wrist y=0.10, shoulder y=0.40.
-    assert abs(r.raise_margin - 0.30) < 1e-6, f"got {r.raise_margin}"
+    assert r.elevation > 0.90, f"arm should read near-vertical, got {r.elevation}"
+    assert r.extension > 0.90, f"arm should read straight, got {r.extension}"
 
 
 def test_right_arm_horizontal_is_not_single_up():
@@ -166,24 +164,25 @@ def test_one_shoulder_occluded_still_detects_raise():
     assert r.raised_side == Side.RIGHT
 
 
-def test_forearm_vertical_route_fires_when_wrist_near_shoulder():
-    # Camera angle: raised arm whose wrist clears the shoulder by 0.11 —
-    # under arm_above_head_tolerance (0.15) but over the route's own
-    # forearm_route_min_margin (0.10) — with a clearly vertical forearm.
+def test_vertical_forearm_with_low_elevation_is_not_a_raise():
+    # Forearm pointing up but the whole arm barely above horizontal: the
+    # elbow is still low and out, so shoulder->wrist is a shallow vector.
+    # The old "vertical forearm" shortcut fired here; elevation does not,
+    # which is the resting-arm-on-an-armrest case that produced day-long
+    # false-fire storms.
     from tests.fake_landmarks import _build, Point
     lm = _build(
-        right_elbow=Point(0.60, 0.55),  # elbow low → forearm_dy = 0.26
-        right_wrist=Point(0.60, 0.29),  # wrist 0.11 above shoulder (y=0.40)
+        right_elbow=Point(0.72, 0.52),
+        right_wrist=Point(0.72, 0.33),
     )
     r = _tracker()._classify_raw(lm, 1280, 720)
-    assert r.state == ArmState.SINGLE_UP, f"got {r.state}"
-    assert r.raised_side == Side.RIGHT
+    assert r.state == ArmState.DOWN, f"got {r.state} (elevation {r.elevation:.2f})"
 
 
-def test_wrist_at_shoulder_level_does_not_fire_forearm_route():
+def test_wrist_at_shoulder_level_is_not_a_raise():
     # The resting-arm/phone posture that caused a day-long false-SNAP storm:
-    # wrist sitting AT shoulder level (margin ~0.01) with a vertical-ish
-    # forearm. The route now demands forearm_route_min_margin of clearance.
+    # wrist sitting AT shoulder level with a vertical-ish forearm. Elevation
+    # is ~0 here, nowhere near raise_elevation_min.
     from tests.fake_landmarks import _build, Point
     lm = _build(
         right_elbow=Point(0.60, 0.61),
@@ -225,24 +224,23 @@ def test_hand_resting_near_face_does_not_fire_single_up():
     # the head.
     from tests.fake_landmarks import _build, Point
     lm = _build(
-        # Nose default is (0.50, 0.30); this wrist is ~0.08 away — inside the
-        # default wrist_head_exclude_dist of 0.09.
-        right_elbow=Point(0.58, 0.35),
-        right_wrist=Point(0.52, 0.22),
+        # Elbow hanging by the ribs, hand brought up to the face: a sharply
+        # bent arm. extension ~0.4 rejects it, so no nose-proximity veto is
+        # needed any more.
+        right_elbow=Point(0.62, 0.55),
+        right_wrist=Point(0.52, 0.28),
     )
     r = _tracker()._classify_raw(lm, 1280, 720)
-    assert r.state == ArmState.DOWN, f"got {r.state}"
+    assert r.state == ArmState.DOWN, f"got {r.state} (extension {r.extension:.2f})"
 
 
-def test_hand_resting_near_face_fires_when_nose_not_visible():
-    # Same near-face wrist position, but the face is occluded (nose not
-    # confidently visible) — must not block a genuine raise just because we
-    # can't confirm proximity to the head.
+def test_raise_fires_with_the_face_occluded():
+    # Nothing in the raise test depends on the nose any more, so an occluded
+    # face can neither block a real raise nor let a false one through.
     from tests.fake_landmarks import _build, Point
     lm = _build(
         nose=Point(0.50, 0.30, visibility=0.1),
-        right_elbow=Point(0.58, 0.35),
-        right_wrist=Point(0.52, 0.22),
+        right_elbow=Point(0.65, 0.25), right_wrist=Point(0.65, 0.10),
     )
     r = _tracker()._classify_raw(lm, 1280, 720)
     assert r.state == ArmState.SINGLE_UP, f"got {r.state}"

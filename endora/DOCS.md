@@ -212,11 +212,12 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `debug_port` | `8765` | Debug stream port |
 | `ha_event_name` | `gesture_detected` | HA event type fired on gesture |
 | `log_level` | `info` | `debug` / `info` / `warning` / `error` |
-| `arm_above_head_tolerance` | `0.15` | Wrist must be this far above shoulder (frame fraction) |
+| `raise_elevation_min` | `0.70` | How far above horizontal an arm must point to count as raised (1.0 = straight up). Same value standing, sitting or lying down |
+| `arm_extension_min` | `0.80` | How straight the arm must be (1.0 = fully extended, 0.71 = elbow at 90°) |
 | `body_upright_min` | `-0.15` | Hip-shoulder gap to confirm upright (negative OK for fisheye) |
 | `pose_visibility_min` | `0.45` | Min landmark visibility to accept a pose (filters furniture) |
 | `wrist_head_exclude_dist` | `0.09` | Reject a raised wrist within this distance of the nose keypoint (filters resting a hand against your own face) |
-| `snap_forearm_min` | `0.06` | Minimum forearm verticality for SNAP/HOLD |
+| `snap_elevation_min` | `0.70` | Minimum arm elevation for SNAP to fire |
 | `snap_sustain_s` | `0.10` | Seconds the arm must stay up before SNAP fires |
 | `hold_duration_s` | `1.5` | Seconds after SNAP that arm must stay up to fire HOLD |
 | `double_snap_window_s` | `3.0` | Seconds within which two snaps count as DOUBLE_SNAP |

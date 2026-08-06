@@ -6,6 +6,41 @@ Pure classifier: pose landmarks → ArmState.
 No pose-backend dependency in the classifier itself — it takes a dict-like
 landmarks object with x/y/visibility per landmark index, so tests can pass
 fake landmarks without installing any inference library.
+
+Geometry
+--------
+Everything is measured in PIXEL space and normalised by the person's own
+arm length. That combination is what makes the thresholds mean the same
+thing regardless of how far away the person is, what shape the frame is,
+and whether they are standing, sitting or lying on a couch.
+
+Landmarks arrive normalised to [0, 1] on each axis *independently*, so on a
+non-square frame — e.g. the 1280x640 a fisheye dewarp produces — a distance
+computed straight from them mixes two different units and is meaningless.
+Converting to pixels first is not a detail; it is a correctness fix.
+
+Two numbers describe an arm:
+
+  elevation = (shoulder_y - wrist_y) / |shoulder - wrist|
+      +1.0 = wrist straight above the shoulder, 0.0 = horizontal,
+      -1.0 = hanging straight down. This is the sine of the arm's angle
+      above the horizon: dimensionless, so distance and body size cancel.
+
+  extension = |shoulder - wrist| / (|shoulder - elbow| + |elbow - wrist|)
+      1.0 = perfectly straight arm, ~0.71 = elbow bent 90 degrees.
+      A hand held against your own face scores low here, which is why no
+      separate "wrist near the nose" veto is needed any more.
+
+"Arm extended straight up" is then exactly: elevation high AND extension
+high. There is no posture detection, no separate reclined threshold, and
+no frame-fraction margin to re-tune whenever the camera moves.
+
+Why image-vertical and not the body's own axis? Because raising your arm is
+a statement about gravity, not anatomy. Standing, the two agree. Lying on a
+couch they do not — and what the camera actually sees when someone reclined
+raises their arm is the wrist moving up the frame, not along their spine.
+Image-vertical is (modulo camera roll) world-vertical, so one threshold
+covers every posture.
 """
 from __future__ import annotations
 
@@ -14,7 +49,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Deque, Optional, Protocol
+from typing import Deque, Optional, Protocol, Tuple
 
 import numpy as np
 
@@ -40,46 +75,40 @@ class ArmReading:
     raised_side: Optional[Side] = None
     wrist_x: float = 0.0
     wrist_y: float = 0.0
-    # Forearm verticality (positive = wrist above elbow in frame).
-    # Only meaningful when state == SINGLE_UP.
+    # ── Primary geometry (SINGLE_UP; also populated for the raised side) ──
+    # How far above horizontal the arm points: +1 straight up, 0 level,
+    # -1 straight down. Scale-free and posture-free.
+    elevation: float = 0.0
+    # How straight the arm is: 1.0 fully extended, ~0.71 elbow at 90 degrees.
+    extension: float = 0.0
+    # Shoulder-to-wrist distance in pixels — used to normalise the movement
+    # thresholds, and reported for diagnosing foreshortening.
+    arm_len_px: float = 0.0
+    # Forearm verticality (elbow_y - wrist_y, frame fraction). No longer used
+    # for classification; kept because it is a genuine quantity and appears
+    # in historical feedback logs.
     forearm_dy: float = 0.0
-    # True if the body pose is upright enough to trust (hips below shoulders).
+    # True if the body pose is upright (hips below shoulders, torso more
+    # vertical than horizontal). Reported for diagnostics only — no
+    # threshold depends on it any more.
     upright: bool = True
-    # Palm roll from grlib hand landmarks: (index_mcp.x - pinky_mcp.x) / hand_width.
-    # Ranges roughly -1 to +1; only populated when hand_lm is provided to classify().
+    # Palm roll from grlib hand landmarks; only populated when hand_lm is
+    # provided to classify(). See _hand_snap_roll.
     snap_roll: float = 0.0
-    # True when a wrist is approaching shoulder level but not yet classified
-    # as SINGLE_UP — used to fire the chime early to compensate for speaker latency.
+    # True when an arm is on its way up but not yet a confirmed raise — used
+    # to fire the chime early to compensate for speaker latency.
     arm_rising: bool = False
-    # Body-scale factor applied to the geometric thresholds for this person:
-    # detected body size / body_scale_reference, clamped. 1.0 = reference size
-    # (or size could not be estimated). Consumers that compare raw landmark
-    # distances against configured thresholds (e.g. snap_forearm_min in the
-    # state machine) should multiply the threshold by this.
-    scale_factor: float = 1.0
-    # Trajectory evidence, only meaningful for SINGLE_UP (defaults are the
-    # permissive value so tests/back-compat callers that build readings by
-    # hand are unaffected):
-    #   rose_recently — the wrist was seen below shoulder level within the
-    #     last raise_travel_window_s, i.e. this raise was an actual upward
-    #     motion, not a pose that has simply existed since tracking began
-    #     (hand propped against head, furniture ghost, sleeping posture).
-    #   wrist_still — the wrist has stayed within wrist_still_max_travel over
-    #     the last wrist_still_window_s, i.e. the arm is being HELD up, not
-    #     passing through on its way to grab a phone/blanket/glass.
+    # ── Trajectory evidence (SINGLE_UP only) ─────────────────────────────
+    #   rose_recently — this arm was seen low, or has climbed by
+    #     rise_elevation_delta, within raise_travel_window_s. Distinguishes
+    #     a deliberate lift from an arm that has simply been resting in a
+    #     raised-looking position (armrest, backrest, propped on a cushion).
+    #   wrist_still — the wrist has held position, so the arm is being HELD
+    #     up rather than passing through on the way to grab something.
     rose_recently: bool = True
     wrist_still: bool = True
-    # How far the wrist has risen (frame fraction) from its lowest position
-    # in the last raise_travel_window_s. This is the evidence that makes
-    # rose_recently true for a raise that STARTS above shoulder level (arm
-    # on an armrest/backrest) — see _rose_recently. Logged for tuning.
-    rise_travel: float = 0.0
-    # SINGLE_UP only: how far the raised wrist actually cleared its shoulder
-    # (shoulder_y - wrist_y, frame fraction, positive = above). Logged to
-    # feedback.jsonl so threshold tuning can finally see the achieved margin
-    # instead of inferring it from forearm_dy (a different quantity) —
-    # divide by scale_factor to compare against the configured tolerances.
-    raise_margin: float = 0.0
+    # How much this arm's elevation has climbed within the rise window.
+    rise_delta: float = 0.0
 
 
 # ── Landmark protocol for type hints ──────────────────────────────────────────
@@ -108,6 +137,8 @@ RIGHT_HIP      = 24
 LEFT_KNEE      = 25
 RIGHT_KNEE     = 26
 
+_Pt = Tuple[float, float]
+
 
 def _hand_snap_roll(hand_lm: np.ndarray) -> float:
     """Palm-orientation signal from a flat grlib hand-landmark array
@@ -115,16 +146,10 @@ def _hand_snap_roll(hand_lm: np.ndarray) -> float:
     MIDDLE_FINGER_MCP=9, PINKY_MCP=17).
 
     roll = (index_mcp.x - pinky_mcp.x) / hand_size, where hand_size is the
-    wrist→middle-MCP distance — an apparent-hand-size proxy that doesn't
-    collapse when the knuckle line is edge-on.  |roll| ≈ 0.8–1.1 when the
-    palm or back of the hand faces the camera (knuckles spread laterally),
-    ≈ 0–0.3 when the hand is edge-on; the sign encodes palm-vs-back /
-    left-vs-right hand. Clamped to ±1.5.
-
-    The previous formula divided (index.x − pinky.x) by its own absolute
-    value, so every detected hand read exactly ±1.0 — an orientation signal
-    in name only, and one that silently armed the snap_roll_threshold OR-
-    route once the wrist-crop made hand detection reliable (v1.9.114).
+    wrist->middle-MCP distance — an apparent-hand-size proxy that doesn't
+    collapse when the knuckle line is edge-on.  |roll| ~ 0.8-1.1 when the
+    palm or back of the hand faces the camera, ~0-0.3 when edge-on; the sign
+    encodes palm-vs-back / left-vs-right hand. Clamped to +/-1.5.
     """
     if len(hand_lm) < 21 * 3:
         return 0.0
@@ -139,153 +164,127 @@ def _hand_snap_roll(hand_lm: np.ndarray) -> float:
     return max(-1.5, min(1.5, roll))
 
 
+def _dist(a: _Pt, b: _Pt) -> float:
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+def _arm_metrics(shoulder: _Pt, elbow: _Pt, wrist: _Pt) -> Tuple[float, float, float]:
+    """Return (elevation, extension, arm_len_px) for one arm.
+
+    All inputs are pixel coordinates with y increasing downward.
+    """
+    arm_len = _dist(shoulder, wrist)
+    if arm_len < 1e-6:
+        return 0.0, 0.0, 0.0
+    elevation = (shoulder[1] - wrist[1]) / arm_len
+    segments = _dist(shoulder, elbow) + _dist(elbow, wrist)
+    extension = arm_len / segments if segments > 1e-6 else 0.0
+    return elevation, extension, arm_len
+
+
 # ── Tracker ───────────────────────────────────────────────────────────────────
 
-# Bounds on the body-scale factor so a bad size estimate (side-on shoulders
-# collapsing to a sliver, a partial detection) can at worst halve/double the
-# margins, never zero them out or make them unreachable.
-_SCALE_FACTOR_MIN = 0.5
-_SCALE_FACTOR_MAX = 2.0
-# Torso length estimated from shoulder width when the hips are hidden
-# (blanket). Matches the ~1.25 torso/biacromial ratio of a typical adult.
-_TORSO_PER_SHOULDER_WIDTH = 1.25
+@dataclass
+class _SideSample:
+    """One frame of one arm's state, for the trajectory checks."""
+    ok: bool = False
+    x: float = 0.0
+    y: float = 0.0
+    elevation: float = 0.0
 
 
 @dataclass
 class _HistSample:
-    """One frame of wrist/shoulder positions for trajectory checks."""
     t: float
-    lw_x: float; lw_y: float; lw_ok: bool
-    rw_x: float; rw_y: float; rw_ok: bool
-    ls_y: float; ls_ok: bool
-    rs_y: float; rs_ok: bool
+    left: _SideSample
+    right: _SideSample
 
 
 @dataclass
 class ArmTrackerConfig:
-    """Thresholds for arm-state classification. All values are frame fractions.
+    """Thresholds for arm-state classification.
 
-    Distance-type thresholds are interpreted at the reference body size
-    (body_scale_reference) and scaled per-person: a person whose torso spans
-    half the reference gets half the margins, so the same config works for a
-    body lying far from the camera and one standing right in front of it.
+    Angular/ratio thresholds (elevation, extension) are dimensionless.
+    Length thresholds are expressed as multiples of a measured body part —
+    arm length or shoulder width — never as a fraction of the frame, so
+    nothing here needs re-tuning when the camera or its resolution changes.
     """
-    arm_above_head_tolerance: float = 0.15
-    # Wrist within this distance BELOW shoulder level triggers arm_rising=True
-    # for early chime firing (compensates for speaker network latency).
-    arm_rising_threshold: float = 0.05
-    # When body is NOT upright (reclined/lying down), OR when upright status
-    # cannot be determined (hips hidden by blanket), the wrist must clear the
-    # shoulder by this larger margin.  Requires a deliberate straight-up arm.
-    arm_above_head_tolerance_reclined: float = 0.38
-    # Leg-raise guard: if both knees are this far above the average shoulder y
-    # (frame fraction, y increases downward so knee_y < shoulder_y means higher),
-    # suppress all gesture detection.  Catches legs-in-V while lying down.
+
+    # ── Raise: "arm extended straight up" ─────────────────────────────────
+    # Minimum elevation for an arm to count as raised. 0.70 ~ 45 degrees
+    # above horizontal; 1.0 would demand a perfectly vertical arm. A truly
+    # vertical arm still projects near 1.0 even on a steeply tilted camera,
+    # so there is plenty of headroom here.
+    raise_elevation_min: float = 0.70
+    # Minimum extension (straightness). 0.80 ~ elbow open past ~105 degrees.
+    # Rejects a hand held at the face or a chicken-winged forearm, which is
+    # why no separate wrist-near-nose exclusion is needed.
+    arm_extension_min: float = 0.80
+    # Foreshortening guard: an arm pointing at the camera projects to almost
+    # nothing, and elevation/extension computed from a 5-pixel vector are
+    # noise. Require the projected arm to be at least this multiple of
+    # shoulder width (or torso length when shoulders are unusable) before
+    # trusting it. Refusing to judge is the correct failure here.
+    min_arm_len_frac: float = 0.55
+    # Elevation at/above which an arm counts as "on its way up" for the
+    # early chime.
+    arm_rising_elevation: float = 0.45
+
+    # ── T-pose: both arms out sideways ────────────────────────────────────
+    # |elevation| must stay within this band of horizontal. 0.30 ~ 17 deg.
+    tpose_elevation_band: float = 0.30
+    # Each wrist must sit this far to its own side of the body midline,
+    # as a multiple of that arm's length.
+    tpose_lateral_min: float = 0.50
+
+    # ── Cross-arms: wrists crossed at chest height ────────────────────────
+    # Each wrist must cross the body midline by this multiple of shoulder
+    # width, and the two wrists must be closer together than
+    # cross_arms_wrist_proximity shoulder-widths.
+    cross_arms_min_crossing: float = 0.40
+    cross_arms_wrist_proximity: float = 1.20
+    # Vertical band counting as "chest", as a multiple of torso length
+    # beyond the shoulder line and the hip line respectively.
+    cross_arms_chest_pad: float = 0.15
+
+    # ── Leg-raise guard ───────────────────────────────────────────────────
+    # If both knees rise this far above shoulder level (frame fraction of
+    # height — this one stays frame-relative because it is a coarse
+    # whole-body sanity check, not a gesture measurement), suppress
+    # everything. Catches legs-in-a-V while lying on the couch.
     leg_raise_margin: float = 0.05
-    body_upright_min: float = -0.15
-    # Furniture/ghost rejection: at least ONE shoulder must exceed this
-    # confidence.  Uses max (not average) so a real person with one shoulder
-    # hidden by a blanket, cushion, or side-on pose is not wrongly rejected.
+
+    # ── Detection quality ─────────────────────────────────────────────────
+    # At least ONE shoulder must exceed this confidence. Uses max (not
+    # average) so a real person with one shoulder hidden by a blanket,
+    # cushion or side-on pose is not rejected outright.
     pose_visibility_min: float = 0.55
-    # Per-keypoint confidence below which a single landmark (shoulder, wrist,
-    # elbow) is treated as not-visible.  Drives per-side arm-raise gating so a
-    # garbage/occluded keypoint can neither create a false raise nor block a
-    # real one on the opposite, visible side.
+    # Per-keypoint confidence below which a single landmark is treated as
+    # not-visible, gating each arm independently.
     keypoint_visibility_min: float = 0.30
-    # Forearm-vertical secondary route to SINGLE_UP: if the forearm is at least
-    # this vertical (elbow_y - wrist_y, frame fraction) and the wrist is at or
-    # above shoulder height, count the arm as raised even when it doesn't clear
-    # the full arm_above_head_tolerance.  Makes detection robust to camera
-    # angles (e.g. ceiling/high-mount) where a raised arm's wrist doesn't travel
-    # far above the shoulder in image space.  Only applies when upright is not
-    # confirmed-reclined.  Raise toward 0.15 if hand-near-head misfires.
-    forearm_vertical_min: float = 0.10
-    # The forearm-vertical route still requires the wrist to clear the
-    # shoulder by this (body-scaled) margin. Feedback data (2026-07-12)
-    # showed a day-long false-fire storm through this route with the wrist
-    # sitting exactly AT shoulder level (raise_margin 0.000–0.049 on every
-    # flagged fire — arm resting on a couch armrest / holding a phone) while
-    # every confirmed deliberate raise cleared 0.17+. This margin splits
-    # those cleanly while keeping the route's purpose (high-mounted cameras
-    # compressing raise height) intact. Raised 0.06 → 0.10 (2026-07-13):
-    # the resting-arm population drifted to 0.065–0.088 in reference units
-    # after the camera move, straddling the old bar; deliberate raises on
-    # record all clear 0.16+.
-    forearm_route_min_margin: float = 0.10
 
-    # Wrist-near-head exclusion: a raised wrist within this distance (frame
-    # fraction, both axes) of the nose keypoint is rejected even if it
-    # otherwise passes the raise checks above. Resting/adjusting a hand
-    # against your own face (glasses, phone, scratching, chin-on-hand) reads
-    # geometrically identical to a raised arm — wrist above shoulder, forearm
-    # vertical — but a deliberate raise/snap holds the hand up and away from
-    # the head. Only applied when the nose keypoint is confidently visible,
-    # so an occluded face never blocks a real raise. Lower toward 0.05 if it
-    # ever rejects genuine close-to-head raises; raise toward 0.12 if
-    # hand-near-face is still misfiring.
-    wrist_head_exclude_dist: float = 0.09
-
-    # Both-arms-up: each wrist must clear its shoulder by this margin.
-    both_arms_margin: float = 0.10
-
-    # T-pose: wrists roughly at shoulder height AND clearly lateral from body.
-    # wrist.y within this band of shoulder.y (frame fraction) counts as "at shoulder height".
-    tpose_wrist_y_band: float = 0.15
-    # Wrists must be this far lateral from body midline (frame fraction of width).
-    tpose_lateral_min: float = 0.13
-
-    # Cross-arms:
-    #   - Each wrist must cross the body midline by min_crossing.
-    #   - Wrists must be close together (chest-clasp OR actual crossed position).
-    # 0.03 was too sensitive — typing/working with hands in front fires it.
-    # 0.08 requires a more deliberate crossing (~8% of frame width past midline).
-    cross_arms_min_crossing: float = 0.08
-    cross_arms_wrist_proximity: float = 0.22
-
-    # ── Hysteresis ─────────────────────────────────────────────────────────
+    # ── Hysteresis ────────────────────────────────────────────────────────
     # Seconds a new non-DOWN state must be seen before being accepted.
-    # Kills single-frame phantoms without adding noticeable latency.
     state_confirm_s: float = 0.20
-    # Seconds of contradictory frames before releasing a stable state back to
-    # DOWN. Allows brief keypoint dropouts mid-gesture without resetting.
+    # Seconds of contradictory frames before releasing a stable state.
     state_release_s: float = 0.30
 
-    # ── Body scale ─────────────────────────────────────────────────────────
-    # Torso length (frame fraction, shoulder-mid to hip-mid) the thresholds
-    # above are tuned at. Detected torso / this = the per-person scale factor
-    # applied to every distance threshold. When hips are hidden the torso is
-    # estimated from shoulder width; if neither is measurable the factor is 1.
-    # NOTE: this dataclass default (0.25) matches the unit-test fixtures'
-    # torso and keeps them scale-neutral; the PRODUCTION default lives in
-    # config/settings.py (0.18, calibrated from live feedback logs) and is
-    # always passed in by the analyser.
-    body_scale_reference: float = 0.25
-
-    # ── Trajectory (rise / stillness evidence for SNAP) ────────────────────
-    # A raise only counts as "rose recently" if the wrist was seen below
-    # shoulder level within this many seconds. Blocks re-fires from poses
-    # that have simply existed for a while (hand propped against the head,
-    # a ghost with a permanently-raised arm). Evidence is only asserted
-    # negative once the history buffer actually spans the window, so a
-    # freshly-acquired person is never blocked by an empty buffer.
+    # ── Trajectory (rise / stillness evidence for SNAP) ───────────────────
     raise_travel_window_s: float = 2.5
-    # …OR the wrist has RISEN by at least this much (body-scaled frame
-    # fraction) within the same window, wherever it started. The absolute
-    # below-shoulder test alone cannot see a raise that begins with the arm
-    # already resting on an armrest or sofa backrest — the wrist never goes
-    # below the shoulder, so a genuine deliberate raise from that position
-    # was permanently blocked (live data 2026-08-05: seven deliberate-sized
-    # raises, ref-margin 0.13–0.20, blocked back-to-back with no fire).
-    # Movement is what actually separates a raise from a resting arm, so
-    # travel is the more fundamental signal; the below-shoulder test is kept
-    # because it also covers a slow lift that outruns the window.
-    raise_travel_min: float = 0.08
-    # The wrist must stay within wrist_still_max_travel (body-scaled frame
-    # fraction) of every position sampled in the last wrist_still_window_s
-    # for the raise to count as "held still". A reach for a phone/blanket
-    # keeps moving through this window and never qualifies.
+    # An arm counts as having risen if it was seen at/below this elevation
+    # within the window (a normal lift starts from a low arm) …
+    rise_start_elevation_max: float = 0.35
+    # … OR if its elevation has climbed by at least this much within the
+    # window, wherever it started. The second route is what lets a raise
+    # that begins with the arm already up on an armrest or draped over the
+    # backrest fire at all — such an arm never reads low, so the first
+    # route alone would block it forever.
+    rise_elevation_delta: float = 0.35
+    # The wrist must stay within this multiple of its own arm length over
+    # wrist_still_window_s for the raise to count as held rather than in
+    # transit toward a phone, a glass or a blanket.
     wrist_still_window_s: float = 0.30
-    wrist_still_max_travel: float = 0.05
+    wrist_still_max_travel: float = 0.15
 
 
 class ArmTracker:
@@ -294,102 +293,71 @@ class ArmTracker:
         self._stable_reading: Optional[ArmReading] = None
         self._pending_state: Optional[ArmState] = None
         self._pending_since: float = 0.0
-        # Rolling wrist/shoulder history for the trajectory checks.
+        # Rolling per-arm history for the trajectory checks.
         self._hist: Deque[_HistSample] = deque()
 
     # ── Trajectory history ────────────────────────────────────────────────
 
-    def _record_history(self, landmarks: _Landmarks, now: float) -> None:
-        KV = self.c.keypoint_visibility_min
-        ls, rs = landmarks[LEFT_SHOULDER], landmarks[RIGHT_SHOULDER]
-        lw, rw = landmarks[LEFT_WRIST], landmarks[RIGHT_WRIST]
-        self._hist.append(_HistSample(
-            t=now,
-            lw_x=lw.x, lw_y=lw.y, lw_ok=lw.visibility >= KV,
-            rw_x=rw.x, rw_y=rw.y, rw_ok=rw.visibility >= KV,
-            ls_y=ls.y, ls_ok=ls.visibility >= KV,
-            rs_y=rs.y, rs_ok=rs.visibility >= KV,
-        ))
+    def _record(self, now: float, left: _SideSample, right: _SideSample) -> None:
+        self._hist.append(_HistSample(t=now, left=left, right=right))
         horizon = max(self.c.raise_travel_window_s,
                       self.c.wrist_still_window_s) + 1.0
         while self._hist and now - self._hist[0].t > horizon:
             self._hist.popleft()
 
-    def _rose_recently(self, side: Side, wy_now: float, now: float,
-                       factor: float,
-                       upright: Optional[bool]) -> tuple[bool, float]:
-        """Did this arm actually rise?  Returns (rose, travel).
+    def _side_hist(self, side: Side, now: float, window: float):
+        """Yield this side's samples inside *window* seconds of now."""
+        for s in self._hist:
+            if now - s.t > window:
+                continue
+            sample = s.left if side is Side.LEFT else s.right
+            if sample.ok:
+                yield sample
 
-        Two independent kinds of evidence, either of which suffices:
+    def _rose_recently(self, side: Side, elevation: float,
+                       now: float) -> Tuple[bool, float]:
+        """Did this arm actually rise? Returns (rose, rise_delta).
 
-        1. TRAVEL — the wrist is now at least raise_travel_min (body-scaled)
-           higher than it was at some point in the window. This is the
-           general test: it sees a raise no matter where it started, which
-           matters because an arm resting on an armrest or draped over the
-           backrest never goes below the shoulder, and test 2 alone left
-           genuine raises from that position permanently blocked.
+        Two independent routes, either of which suffices: the arm was seen
+        low at some point in the window, or its elevation has climbed by
+        rise_elevation_delta from its lowest point in the window. The second
+        route is essential — an arm resting on an armrest or backrest never
+        reads low, so requiring the first alone makes a genuine raise from
+        that position impossible.
 
-        2. POSITION — the wrist was seen at/below "down" level, which is
-           posture-aware:
-
-           Upright — the wrist must have been AT or BELOW shoulder level.
-           A draped/resting arm hovers a few percent ABOVE the shoulder and
-           bobs in and out of any above-shoulder tolerance band, re-arming
-           the gate every few minutes (live data 2026-07-12).
-
-           Reclined/unknown — the wrist may be within arm_rising_threshold
-           ABOVE the shoulder: a resting wrist on a horizontal body sits at
-           almost the same image height as the shoulder, so demanding
-           strictly-below would leave a lying person with no evidence.
-
-        Unknown history (buffer doesn't span the window yet — person only
-        just acquired) counts as True: only assert "did not rise" when
-        there is enough history to actually know. A static pose that
-        persists longer than the window loses the benefit of the doubt.
+        A buffer that does not yet span the window (person just acquired)
+        returns True: only assert "did not rise" once there is enough
+        history to know. A pose that persists longer than the window loses
+        the benefit of the doubt.
         """
         window = self.c.raise_travel_window_s
-        down_line = 0.0 if upright is True else self.c.arm_rising_threshold * factor
-        travel_min = self.c.raise_travel_min * factor
-        below_seen = False
-        travel = 0.0
-        for s in self._hist:
-            if now - s.t > window:
-                continue
-            if side is Side.LEFT:
-                wy, wok, shy, shok = s.lw_y, s.lw_ok, s.ls_y, s.ls_ok
-            else:
-                wy, wok, shy, shok = s.rw_y, s.rw_ok, s.rs_y, s.rs_ok
-            if not wok:
-                continue
-            if shok and wy >= shy - down_line:
-                below_seen = True
-            # y grows downward, so a larger past y means the wrist has risen.
-            travel = max(travel, wy - wy_now)
-        if below_seen or travel >= travel_min:
-            return True, travel
+        lowest = None
+        for sample in self._side_hist(side, now, window):
+            if lowest is None or sample.elevation < lowest:
+                lowest = sample.elevation
+        if lowest is None:
+            return True, 0.0
+        delta = elevation - lowest
+        if lowest <= self.c.rise_start_elevation_max or delta >= self.c.rise_elevation_delta:
+            return True, delta
         covered = bool(self._hist) and (now - self._hist[0].t) >= window * 0.9
-        return (not covered), travel
+        return (not covered), delta
 
-    def _wrist_still(self, side: Side, wx: float, wy: float,
-                     now: float, factor: float) -> bool:
-        """Has this side's wrist stayed put over the stillness window?
+    def _wrist_still(self, side: Side, x: float, y: float,
+                     now: float, arm_len: float) -> bool:
+        """Has this wrist held position, relative to its own arm length?
         A sparse/young buffer is permissive — during a real raise the buffer
-        fills at frame rate, so motion is always observed when it exists.
+        fills at frame rate, so motion is observed whenever it exists.
         """
-        window = self.c.wrist_still_window_s
-        max_travel = self.c.wrist_still_max_travel * factor
-        for s in self._hist:
-            if now - s.t > window:
-                continue
-            if side is Side.LEFT:
-                sx, sy, ok = s.lw_x, s.lw_y, s.lw_ok
-            else:
-                sx, sy, ok = s.rw_x, s.rw_y, s.rw_ok
-            if not ok:
-                continue
-            if ((wx - sx) ** 2 + (wy - sy) ** 2) ** 0.5 > max_travel:
+        if arm_len <= 1e-6:
+            return True
+        max_travel = self.c.wrist_still_max_travel * arm_len
+        for sample in self._side_hist(side, now, self.c.wrist_still_window_s):
+            if _dist((x, y), (sample.x, sample.y)) > max_travel:
                 return False
         return True
+
+    # ── Public API ────────────────────────────────────────────────────────
 
     def classify(
         self,
@@ -418,8 +386,6 @@ class ArmTracker:
         seconds before being accepted; a stable state requires state_release_s
         seconds of contradictory frames before being released.
         """
-        if landmarks is not None:
-            self._record_history(landmarks, now)
         raw = self._classify_raw(landmarks, frame_w, frame_h, now)
         raw_state = raw.state if raw is not None else ArmState.DOWN
 
@@ -459,11 +425,13 @@ class ArmTracker:
 
         return self._stable_reading
 
+    # ── Classification ────────────────────────────────────────────────────
+
     def _classify_raw(self, landmarks: Optional[_Landmarks],
                       frame_w: int, frame_h: int,
                       now: Optional[float] = None) -> Optional[ArmReading]:
-        """
-        Classify pose landmarks into an ArmReading.
+        """Classify pose landmarks into an ArmReading.
+
         Returns None if landmarks are missing or visibility is too low.
         now=None (direct/unit-test calls) skips the trajectory checks —
         rose_recently/wrist_still stay at their permissive defaults.
@@ -471,222 +439,163 @@ class ArmTracker:
         if landmarks is None:
             return None
 
-        ls, rs = landmarks[LEFT_SHOULDER], landmarks[RIGHT_SHOULDER]
-        lh, rh = landmarks[LEFT_HIP], landmarks[RIGHT_HIP]
-        le, re = landmarks[LEFT_ELBOW], landmarks[RIGHT_ELBOW]
-        lw, rw = landmarks[LEFT_WRIST],  landmarks[RIGHT_WRIST]
-        nose = landmarks[NOSE]
-
         KV = self.c.keypoint_visibility_min
 
+        def px(idx: int) -> _Pt:
+            p = landmarks[idx]
+            return (p.x * frame_w, p.y * frame_h)
+
+        def vis(idx: int) -> float:
+            return landmarks[idx].visibility
+
         # Furniture/ghost rejection — require at least ONE confident shoulder.
-        # Using max (not average) so a real person with one shoulder hidden by a
-        # blanket, cushion, or side-on pose is not rejected outright.  The
-        # analyser's >=6-visible-keypoints filter already removes most ghosts
-        # before this point.
-        if max(ls.visibility, rs.visibility) < self.c.pose_visibility_min:
+        if max(vis(LEFT_SHOULDER), vis(RIGHT_SHOULDER)) < self.c.pose_visibility_min:
             return None
 
-        ls_ok = ls.visibility >= KV
-        rs_ok = rs.visibility >= KV
+        ls_ok, rs_ok = vis(LEFT_SHOULDER) >= KV, vis(RIGHT_SHOULDER) >= KV
+        ls, rs = px(LEFT_SHOULDER), px(RIGHT_SHOULDER)
+        le, re = px(LEFT_ELBOW), px(RIGHT_ELBOW)
+        lw, rw = px(LEFT_WRIST), px(RIGHT_WRIST)
+        lh, rh = px(LEFT_HIP), px(RIGHT_HIP)
 
         # Body reference from whichever shoulder(s) are actually visible.
         if ls_ok and rs_ok:
-            avg_sh_y, avg_sh_x = (ls.y + rs.y) / 2.0, (ls.x + rs.x) / 2.0
+            sh_mid = ((ls[0] + rs[0]) / 2.0, (ls[1] + rs[1]) / 2.0)
+            shoulder_w = _dist(ls, rs)
         elif ls_ok:
-            avg_sh_y, avg_sh_x = ls.y, ls.x
+            sh_mid, shoulder_w = ls, 0.0
         else:
-            avg_sh_y, avg_sh_x = rs.y, rs.x
+            sh_mid, shoulder_w = rs, 0.0
 
-        # Upright check: only trust when hips are confidently detected.
-        # When hips are hidden (blanket, crop) we cannot tell sitting from
-        # lying, so upright is set to None and the per-side raise logic below
-        # demands a forearm-pointing-up confirmation as a precaution.
-        hip_vis = (lh.visibility + rh.visibility) / 2.0
-        torso_len: Optional[float] = None
+        # Torso, and the upright flag — reported for diagnostics only now;
+        # no gesture threshold depends on posture any more.
+        hip_vis = (vis(LEFT_HIP) + vis(RIGHT_HIP)) / 2.0
+        torso_len = 0.0
+        upright: Optional[bool] = None
+        hip_mid: Optional[_Pt] = None
         if hip_vis >= 0.20:
-            avg_hp_y = (lh.y + rh.y) / 2.0
-            avg_hp_x = (lh.x + rh.x) / 2.0
-            torso_dy = avg_hp_y - avg_sh_y  # positive when hips below shoulders
-            torso_dx = avg_hp_x - avg_sh_x  # non-zero when body is horizontal
-            torso_len = (torso_dx ** 2 + torso_dy ** 2) ** 0.5
-            # Body is reclined when horizontal extent exceeds vertical extent —
-            # catches lying-on-couch even when hips appear "below" shoulders due
-            # to camera perspective (which would otherwise pass the y-only check).
-            body_horizontal = abs(torso_dx) > abs(torso_dy)
-            upright: bool | None = (
-                not body_horizontal and torso_dy >= self.c.body_upright_min
+            hip_mid = ((lh[0] + rh[0]) / 2.0, (lh[1] + rh[1]) / 2.0)
+            torso_len = _dist(sh_mid, hip_mid)
+            torso_dy = hip_mid[1] - sh_mid[1]
+            torso_dx = hip_mid[0] - sh_mid[0]
+            upright = abs(torso_dy) >= abs(torso_dx) and torso_dy > 0
+
+        # Reference length for the foreshortening guard and the cross-arms
+        # geometry. Both candidates are now in pixels, so comparing them is
+        # meaningful (in normalised coords it was not — see module docstring).
+        body_size = max(shoulder_w, torso_len)
+
+        # Leg-raise guard: both knees above shoulder level means legs in the
+        # air, not arms. Deliberately still frame-relative — a coarse
+        # whole-body sanity check rather than a gesture measurement.
+        lk, rk = px(LEFT_KNEE), px(RIGHT_KNEE)
+        if (vis(LEFT_KNEE) + vis(RIGHT_KNEE)) / 2.0 >= 0.20:
+            if (lk[1] + rk[1]) / 2.0 < sh_mid[1] - self.c.leg_raise_margin * frame_h:
+                return ArmReading(state=ArmState.DOWN, upright=bool(upright))
+
+        # ── Per-arm metrics ───────────────────────────────────────────────
+        l_ok = ls_ok and vis(LEFT_WRIST) >= KV and vis(LEFT_ELBOW) >= KV
+        r_ok = rs_ok and vis(RIGHT_WRIST) >= KV and vis(RIGHT_ELBOW) >= KV
+
+        l_elev, l_ext, l_len = _arm_metrics(ls, le, lw) if l_ok else (0.0, 0.0, 0.0)
+        r_elev, r_ext, r_len = _arm_metrics(rs, re, rw) if r_ok else (0.0, 0.0, 0.0)
+
+        if now is not None:
+            self._record(
+                now,
+                _SideSample(ok=l_ok, x=lw[0], y=lw[1], elevation=l_elev),
+                _SideSample(ok=r_ok, x=rw[0], y=rw[1], elevation=r_elev),
             )
-        else:
-            avg_hp_y = avg_sh_y   # fallback for leg-raise guard below
-            upright = None  # unknown — hips not visible
 
-        # Body-scale factor: all distance thresholds below are tuned at
-        # body_scale_reference and scale with this person's apparent size, so
-        # a body lying far from the camera isn't asked to clear margins sized
-        # for one standing right in front of it (and vice versa). The size
-        # estimate is the LARGER of torso length and shoulder-width×ratio:
-        # each collapses under a different projection — reclining feet-toward-
-        # the-camera foreshortens the torso to a sliver while the shoulders
-        # stay lateral (live data showed torso-only estimates of 0.5–0.65×
-        # for a normal-sized person on the couch, silently shrinking every
-        # margin), and a side-on pose collapses shoulder width while the
-        # torso stays long. Clamped so whatever survives a degenerate
-        # detection can't zero the margins or push them out of reach.
-        size_estimates = []
-        if torso_len is not None and torso_len > 1e-6:
-            size_estimates.append(torso_len)
-        if ls_ok and rs_ok:
-            shoulder_w = ((ls.x - rs.x) ** 2 + (ls.y - rs.y) ** 2) ** 0.5
-            if shoulder_w > 1e-6:
-                size_estimates.append(shoulder_w * _TORSO_PER_SHOULDER_WIDTH)
-        if size_estimates and self.c.body_scale_reference > 1e-6:
-            f = max(size_estimates) / self.c.body_scale_reference
-            f = min(max(f, _SCALE_FACTOR_MIN), _SCALE_FACTOR_MAX)
-        else:
-            f = 1.0
+        def _judgeable(arm_len: float) -> bool:
+            """Is this arm's projection long enough to trust its direction?"""
+            if body_size <= 1e-6:
+                return True   # nothing to compare against; stay permissive
+            return arm_len >= self.c.min_arm_len_frac * body_size
 
-        # Leg-raise guard: if both knees are above shoulder level, the person
-        # is raising their legs (upside-down V on couch etc.) — suppress to
-        # avoid false positives from leg movement being mistaken for arms.
-        lk, rk = landmarks[LEFT_KNEE], landmarks[RIGHT_KNEE]
-        knee_vis = (lk.visibility + rk.visibility) / 2.0
-        if knee_vis >= 0.20:
-            avg_knee_y = (lk.y + rk.y) / 2.0
-            if avg_knee_y < avg_sh_y - self.c.leg_raise_margin * f:
-                return ArmReading(state=ArmState.DOWN, upright=bool(upright),
-                                  scale_factor=f)
+        def _raised(elev: float, ext: float, arm_len: float, ok: bool) -> bool:
+            return (ok
+                    and _judgeable(arm_len)
+                    and elev >= self.c.raise_elevation_min
+                    and ext >= self.c.arm_extension_min)
 
-        mid_x = avg_sh_x
+        l_raised = _raised(l_elev, l_ext, l_len, l_ok)
+        r_raised = _raised(r_elev, r_ext, r_len, r_ok)
+
         both_sh_ok = ls_ok and rs_ok
 
         # ── Two-handed gestures (need BOTH shoulders confidently visible) ──
-        if both_sh_ok:
-            # CROSS_ARMS: wrists crossed past midline, at chest height, close together.
-            min_cross = self.c.cross_arms_min_crossing * f
-            rw_on_left  = rw.x < mid_x - min_cross
-            lw_on_right = lw.x > mid_x + min_cross
-            chest_top    = avg_sh_y - 0.02
-            chest_bottom = avg_hp_y + 0.02
-            rw_at_chest  = chest_top < rw.y < chest_bottom
-            lw_at_chest  = chest_top < lw.y < chest_bottom
-            wrist_dist = ((rw.x - lw.x) ** 2 + (rw.y - lw.y) ** 2) ** 0.5
-            wrists_close = wrist_dist < self.c.cross_arms_wrist_proximity * f
-            if (rw_on_left and lw_on_right
-                    and rw_at_chest and lw_at_chest and wrists_close):
-                return ArmReading(state=ArmState.CROSS_ARMS, upright=bool(upright),
-                                  scale_factor=f)
+        if both_sh_ok and l_ok and r_ok:
+            # CROSS_ARMS: each wrist past the body midline, at chest height,
+            # wrists close together. Distances are multiples of shoulder
+            # width so this holds at any camera distance.
+            if shoulder_w > 1e-6:
+                cross = self.c.cross_arms_min_crossing * shoulder_w
+                rw_crossed = rw[0] < sh_mid[0] - cross
+                lw_crossed = lw[0] > sh_mid[0] + cross
+                pad = self.c.cross_arms_chest_pad * (torso_len or shoulder_w)
+                chest_top = sh_mid[1] - pad
+                chest_bottom = (hip_mid[1] if hip_mid is not None
+                                else sh_mid[1] + 1.2 * shoulder_w) + pad
+                at_chest = (chest_top < rw[1] < chest_bottom
+                            and chest_top < lw[1] < chest_bottom)
+                close = _dist(lw, rw) < self.c.cross_arms_wrist_proximity * shoulder_w
+                if rw_crossed and lw_crossed and at_chest and close:
+                    return ArmReading(state=ArmState.CROSS_ARMS, upright=bool(upright))
 
-            # T_POSE: both wrists at shoulder height AND clearly lateral.
-            band = self.c.tpose_wrist_y_band * f
-            lat  = self.c.tpose_lateral_min * f
-            lw_at_sh_y = abs(lw.y - ls.y) < band
-            rw_at_sh_y = abs(rw.y - rs.y) < band
-            lw_lateral = abs(lw.x - mid_x) > lat
-            rw_lateral = abs(rw.x - mid_x) > lat
-            lw_is_left = lw.x < mid_x
-            rw_is_right = rw.x > mid_x
-            if (lw_at_sh_y and rw_at_sh_y and lw_lateral and rw_lateral
-                    and lw_is_left and rw_is_right):
-                return ArmReading(state=ArmState.T_POSE, upright=bool(upright),
-                                  scale_factor=f)
+            # T_POSE: both arms straight, level, and reaching to their own sides.
+            band = self.c.tpose_elevation_band
+            lat = self.c.tpose_lateral_min
+            if (abs(l_elev) <= band and abs(r_elev) <= band
+                    and l_ext >= self.c.arm_extension_min
+                    and r_ext >= self.c.arm_extension_min
+                    and _judgeable(l_len) and _judgeable(r_len)
+                    and (sh_mid[0] - lw[0]) >= lat * l_len
+                    and (rw[0] - sh_mid[0]) >= lat * r_len):
+                return ArmReading(state=ArmState.T_POSE, upright=bool(upright))
 
-            # BOTH_UP: both wrists clearly above their shoulders.
-            both_m = max(self.c.arm_above_head_tolerance,
-                         self.c.both_arms_margin) * f
-            if upright is None:
-                lw_high = lw.y < (ls.y - both_m) and (le.y - lw.y) > 0
-                rw_high = rw.y < (rs.y - both_m) and (re.y - rw.y) > 0
+            # BOTH_UP: both arms raised.
+            if l_raised and r_raised:
+                return ArmReading(state=ArmState.BOTH_UP, upright=bool(upright))
+
+        # ── SINGLE_UP — per side, works with only one visible shoulder ─────
+        if r_raised or l_raised:
+            if r_raised:
+                side, wrist, elbow = Side.RIGHT, rw, re
+                elev, ext, arm_len = r_elev, r_ext, r_len
             else:
-                lw_high = lw.y < (ls.y - both_m)
-                rw_high = rw.y < (rs.y - both_m)
-            if lw_high and rw_high:
-                return ArmReading(state=ArmState.BOTH_UP, upright=bool(upright),
-                                  scale_factor=f)
+                side, wrist, elbow = Side.LEFT, lw, le
+                elev, ext, arm_len = l_elev, l_ext, l_len
 
-        # ── SINGLE_UP — evaluated per side, works with one visible shoulder ──
-        m          = self.c.arm_above_head_tolerance * f
-        m_reclined = self.c.arm_above_head_tolerance_reclined * f
-        fv_min     = self.c.forearm_vertical_min * f
-        fr_margin  = self.c.forearm_route_min_margin * f
-        whd        = self.c.wrist_head_exclude_dist * f
-        nose_ok    = nose.visibility >= KV
-
-        def _side_raised(wrist, shoulder, elbow) -> bool:
-            """Is this arm raised?  Two routes, depending on body posture.
-
-            Primary route — wrist clears the shoulder by the height margin.
-            Secondary route — forearm is clearly vertical (wrist well above
-            elbow) and the wrist is at/above shoulder height: catches raises
-            seen from camera angles where the wrist doesn't travel far above
-            the shoulder in image space.  Disabled when confirmed reclined.
-            """
-            forearm_dy = elbow.y - wrist.y
-            forearm_visible = elbow.visibility >= KV
-            forearm_vertical = forearm_visible and forearm_dy >= fv_min
-            if upright is True:
-                # Secondary route demands the wrist actually clear the
-                # shoulder by fr_margin — wrist merely AT shoulder level with
-                # a vertical-ish forearm is the resting-arm/phone posture,
-                # not a raise (see forearm_route_min_margin).
-                raised = (wrist.y < (shoulder.y - m)
-                          or (forearm_vertical
-                              and wrist.y <= shoulder.y - fr_margin))
-            elif upright is False:
-                # Lying down — demand a deliberate straight-up arm; no shortcut.
-                raised = wrist.y < (shoulder.y - m_reclined)
-            else:
-                # upright is None (hips hidden): lenient margin requires the
-                # forearm to point up; if the elbow isn't visible to confirm
-                # that, fall back to the strict reclined margin instead.
-                if forearm_visible:
-                    raised = wrist.y < (shoulder.y - m) and forearm_dy > 0
-                else:
-                    raised = wrist.y < (shoulder.y - m_reclined)
-            if not raised:
-                return False
-            # Wrist resting against the face (adjusting glasses, holding a
-            # phone, scratching, chin-on-hand) satisfies the height/verticality
-            # checks above but is not a deliberate raise — only reject when
-            # the nose is confidently visible, so an occluded face can't
-            # block a real gesture.
-            if nose_ok:
-                head_dist = ((wrist.x - nose.x) ** 2 + (wrist.y - nose.y) ** 2) ** 0.5
-                if head_dist < whd:
-                    return False
-            return True
-
-        rw_raised = rs_ok and rw.visibility >= KV and _side_raised(rw, rs, re)
-        lw_raised = ls_ok and lw.visibility >= KV and _side_raised(lw, ls, le)
-
-        if rw_raised or lw_raised:
-            side = Side.RIGHT if rw_raised else Side.LEFT
-            wrist, elbow, shoulder = (rw, re, rs) if rw_raised else (lw, le, ls)
             if now is not None:
-                rose, travel = self._rose_recently(side, wrist.y, now, f, upright)
-                still = self._wrist_still(side, wrist.x, wrist.y, now, f)
+                rose, rise_delta = self._rose_recently(side, elev, now)
+                still = self._wrist_still(side, wrist[0], wrist[1], now, arm_len)
             else:
-                rose = still = True
-                travel = 0.0
+                rose, still, rise_delta = True, True, 0.0
+
             return ArmReading(
                 state=ArmState.SINGLE_UP,
                 raised_side=side,
-                wrist_x=wrist.x * frame_w,
-                wrist_y=wrist.y * frame_h,
-                forearm_dy=elbow.y - wrist.y,
+                wrist_x=wrist[0],
+                wrist_y=wrist[1],
+                elevation=elev,
+                extension=ext,
+                arm_len_px=arm_len,
+                forearm_dy=(elbow[1] - wrist[1]) / frame_h,
                 upright=bool(upright),
-                scale_factor=f,
                 rose_recently=rose,
                 wrist_still=still,
-                rise_travel=travel,
-                raise_margin=shoulder.y - wrist.y,
+                rise_delta=rise_delta,
             )
 
-        # Detect wrist approaching shoulder — fires chime early to compensate
-        # for speaker network latency (e.g. Alexa ~2s delay).
-        rise_thresh = self.c.arm_rising_threshold * f
-        lw_rising = ls_ok and lw.visibility >= KV and lw.y < (ls.y + rise_thresh)
-        rw_rising = rs_ok and rw.visibility >= KV and rw.y < (rs.y + rise_thresh)
+        # Nothing raised — report the better arm's geometry for the overlay,
+        # and whether either arm is on its way up (drives the early chime).
+        if l_ok and (not r_ok or l_elev >= r_elev):
+            best_elev, best_ext, best_len = l_elev, l_ext, l_len
+        else:
+            best_elev, best_ext, best_len = r_elev, r_ext, r_len
+        rising = max(l_elev if l_ok else -1.0,
+                     r_elev if r_ok else -1.0) >= self.c.arm_rising_elevation
         return ArmReading(state=ArmState.DOWN, upright=bool(upright),
-                          arm_rising=(lw_rising or rw_rising),
-                          scale_factor=f)
+                          elevation=best_elev, extension=best_ext,
+                          arm_len_px=best_len, arm_rising=rising)

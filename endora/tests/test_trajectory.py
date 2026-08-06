@@ -141,16 +141,16 @@ def test_raise_starting_above_shoulder_counts_as_rise():
     assert ups, "raise from an armrest should classify as SINGLE_UP"
     assert all(r.rose_recently for r in ups), \
         "travel must supply rise evidence when the arm starts above the shoulder"
-    assert ups[-1].rise_travel >= 0.08
+    assert ups[-1].rise_delta >= 0.35
 
 
-def test_rise_travel_is_reported_on_readings():
+def test_rise_delta_is_reported_on_readings():
     tr = _tracker()
     sched = [(round(0.1 * i, 1), arm_down()) for i in range(5)]
     sched += [(round(0.5 + 0.1 * i, 1), right_arm_up_vertical()) for i in range(11)]
     ups = [r for _, r in _feed(tr, sched)
            if r is not None and r.state == ArmState.SINGLE_UP]
-    assert ups and ups[-1].rise_travel > 0.0
+    assert ups and ups[-1].rise_delta > 0.0
 
 
 def test_reclined_resting_wrist_still_counts_as_rise_evidence():
@@ -203,14 +203,14 @@ def test_reclined_resting_wrist_still_counts_as_rise_evidence():
 # defaults, which are stricter.
 
 def _machine(**overrides) -> GestureStateMachine:
-    cfg = dict(snap_sustain_s=0.2, snap_forearm_min=0.06)
+    cfg = dict(snap_sustain_s=0.2, snap_elevation_min=0.70)
     cfg.update(overrides)
     return GestureStateMachine(StateMachineConfig(**cfg))
 
 
 def _up_reading(**kw) -> ArmReading:
     defaults = dict(state=ArmState.SINGLE_UP, raised_side=Side.RIGHT,
-                    wrist_x=800, wrist_y=100, forearm_dy=0.15)
+                    wrist_x=800, wrist_y=100, elevation=0.92, extension=0.95)
     defaults.update(kw)
     return ArmReading(**defaults)
 
@@ -236,18 +236,20 @@ def test_gates_can_be_disabled():
     assert Gesture.SNAP in fired, "disabled gates must not block SNAP"
 
 
-def test_snap_forearm_min_scales_with_body():
-    # forearm_dy 0.04 is under the unscaled snap_forearm_min (0.06) but over
-    # the threshold scaled for a half-size body (0.03).
-    m_ref = _machine()
-    fired_ref = [m_ref.tick(_up_reading(forearm_dy=0.04, scale_factor=1.0), t / 10)
-                 for t in range(5)]
-    assert not any(fired_ref), "full-size body: 0.04 forearm must not snap"
+def test_snap_threshold_needs_no_body_scaling():
+    # elevation is the sine of the arm's angle, so it is already
+    # dimensionless — the same reading fires regardless of how large the
+    # person appears. This is what removed body_scale_reference.
+    for arm_len in (40.0, 400.0):
+        m = _machine()
+        fired = [m.tick(_up_reading(arm_len_px=arm_len), t / 10) for t in range(5)]
+        assert Gesture.SNAP in fired, f"arm_len_px={arm_len} failed to snap"
 
-    m_small = _machine()
-    fired_small = [m_small.tick(_up_reading(forearm_dy=0.04, scale_factor=0.5), t / 10)
-                   for t in range(5)]
-    assert Gesture.SNAP in fired_small, "half-size body: 0.04 forearm should snap"
+
+def test_shallow_arm_does_not_snap():
+    m = _machine()
+    fired = [m.tick(_up_reading(elevation=0.45), t / 10) for t in range(5)]
+    assert not any(fired), "an arm well below the snap angle must not fire"
 
 
 if __name__ == "__main__":

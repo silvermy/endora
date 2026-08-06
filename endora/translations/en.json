@@ -8,24 +8,77 @@
       "name": "Camera B — RTSP URL",
       "description": "e.g. rtsp://admin:pass@192.168.1.101:554/stream1"
     },
-    "rtsp_transport": { "name": "RTSP transport", "description": "tcp (reliable) or udp (lower latency)" },
-    "ha_event_name": { "name": "HA event name", "description": "Event fired in Home Assistant" },
-    "log_level": { "name": "Log level", "description": "debug|info|warning|error" },
-    "yolo_pose_model": { "name": "Pose model", "description": "yolo11s-pose.onnx (accurate, default) or yolo11n-pose.onnx (fast/nano)" },
-    "yolo_imgsz": { "name": "Pose inference resolution", "description": "480 (default) balances accuracy and CPU; 320 is fastest, 640 most detailed" },
-    "body_upright_min": { "name": "Body upright threshold", "description": "Hips must be this far below shoulders (negative = fisheye OK)" },
-    "body_scale_reference": { "name": "Body scale reference", "description": "Torso size (frame fraction) the thresholds are tuned at — should read scale ≈ 1.0 on the debug page at your usual spot (default 0.18)" },
-    "arm_above_head_tolerance": { "name": "Arm raise margin", "description": "Wrist must clear the shoulder by this much (body-scaled) to count as raised" },
-    "arm_above_head_tolerance_reclined": { "name": "Arm raise margin (reclined)", "description": "Stricter raise margin used while lying down or when posture is unknown" },
-    "forearm_route_min_margin": { "name": "Forearm-route shoulder clearance", "description": "Vertical-forearm raises must still clear the shoulder by this much — blocks resting-arm/phone postures (default 0.06)" },
-    "leg_raise_margin": { "name": "Leg-raise suppression margin", "description": "Suppress gestures when ankle/knee rises this far above hip (0=disable)" },
-    "snap_forearm_min": { "name": "Snap forearm threshold", "description": "Forearm verticality needed for SNAP (default 0.05; raise toward 0.10 if sideways arm sweeps misfire)" },
-    "snap_sustain_s": { "name": "Snap hold time (s)", "description": "Arm must stay up this long before SNAP fires (default 0.20)" },
-    "snap_require_rise": { "name": "SNAP requires a rise", "description": "Only fire if the wrist rose from shoulder level recently — blocks long-static poses (default on)" },
-    "snap_require_still": { "name": "SNAP requires stillness", "description": "Only fire while the raised wrist holds still — blocks pass-through reaches (default on)" },
-    "wrist_still_max_travel": { "name": "Stillness tolerance", "description": "Max wrist travel (body-scaled) that still counts as holding still (default 0.05)" },
-    "raise_travel_min": { "name": "Minimum raise travel", "description": "How far the wrist must rise to count as a raise when the arm starts above shoulder level, e.g. from an armrest (default 0.08)" },
-    "sustained_rearm_s": { "name": "Pose re-arm time (s)", "description": "CROSS_ARMS/T_POSE/RAISE_BOTH fire once per pose; the pose must be released this long to fire again (default 2.0)" },
-    "hand_crop_enable": { "name": "Hand detection crop", "description": "Run hand detection on a crop around the raised wrist — much better at couch distance (default on)" }
+    "rtsp_transport": {
+      "name": "RTSP transport",
+      "description": "tcp (reliable) or udp (lower latency)"
+    },
+    "ha_event_name": {
+      "name": "HA event name",
+      "description": "Event fired in Home Assistant"
+    },
+    "log_level": {
+      "name": "Log level",
+      "description": "debug|info|warning|error"
+    },
+    "yolo_pose_model": {
+      "name": "Pose model",
+      "description": "yolo11s-pose.onnx (accurate, default) or yolo11n-pose.onnx (fast/nano)"
+    },
+    "yolo_imgsz": {
+      "name": "Pose inference resolution",
+      "description": "480 (default) balances accuracy and CPU; 320 is fastest, 640 most detailed"
+    },
+    "leg_raise_margin": {
+      "name": "Leg-raise suppression margin",
+      "description": "Suppress gestures when ankle/knee rises this far above hip (0=disable)"
+    },
+    "snap_sustain_s": {
+      "name": "Snap hold time (s)",
+      "description": "Arm must stay up this long before SNAP fires (default 0.20)"
+    },
+    "snap_require_rise": {
+      "name": "SNAP requires a rise",
+      "description": "Only fire if the wrist rose from shoulder level recently — blocks long-static poses (default on)"
+    },
+    "snap_require_still": {
+      "name": "SNAP requires stillness",
+      "description": "Only fire while the raised wrist holds still — blocks pass-through reaches (default on)"
+    },
+    "sustained_rearm_s": {
+      "name": "Pose re-arm time (s)",
+      "description": "CROSS_ARMS/T_POSE/RAISE_BOTH fire once per pose; the pose must be released this long to fire again (default 2.0)"
+    },
+    "hand_crop_enable": {
+      "name": "Hand detection crop",
+      "description": "Run hand detection on a crop around the raised wrist — much better at couch distance (default on)"
+    },
+    "raise_elevation_min": {
+      "name": "Arm raise angle",
+      "description": "How far above horizontal an arm must point to count as raised (1.0 = straight up, 0.70 ~ 45 degrees). Works the same standing, sitting or lying down"
+    },
+    "arm_extension_min": {
+      "name": "Arm straightness",
+      "description": "How straight the arm must be (1.0 = fully extended, 0.71 = elbow at 90 degrees) — rejects a hand held at your face"
+    },
+    "snap_elevation_min": {
+      "name": "Snap angle",
+      "description": "Minimum arm elevation for SNAP to fire. Raise above the arm raise angle to demand a straighter-up arm for firing (default 0.70)"
+    },
+    "min_arm_len_frac": {
+      "name": "Foreshortening guard",
+      "description": "Refuse to judge an arm pointing nearly at the camera, where its projection is too short to read (default 0.55)"
+    },
+    "rise_elevation_delta": {
+      "name": "Minimum lift",
+      "description": "How much the arm must climb to count as a deliberate lift when it starts already raised, e.g. from an armrest (default 0.35)"
+    },
+    "rise_start_elevation_max": {
+      "name": "Lowered-arm threshold",
+      "description": "An arm seen at or below this elevation counts as having started from a lowered position (default 0.35)"
+    },
+    "wrist_still_max_travel_arm": {
+      "name": "Stillness tolerance",
+      "description": "How far the wrist may drift and still count as held, as a fraction of the arm's own length (default 0.15)"
+    }
   }
 }
