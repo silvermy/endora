@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.125
+
+### Fixed — chimes with no gesture behind them
+
+The sweep-onset chime added in 1.9.123 tested `sweep_rate` **alone**. Rate is climb divided by elapsed time, so a hand's worth of keypoint jitter between two adjacent frames divides a tiny climb by a tiny interval and produces a large rate. An arm resting near horizontal — an armrest, a lap — is where elevation is most sensitive to wrist noise, and it chimed repeatedly with no gesture behind it. Reproduced at 1280×640 with realistic per-keypoint noise: **11 phantom chimes in a single 15-second window** at 4 px, zero gestures. (At `yolo_imgsz: 320` upscaled to a 1280-wide frame, every inference pixel becomes four, so 2–4 px is conservative.)
+
+- The chime now requires **both** climb and rate, exactly the bar the gesture gate uses. Phantom chimes across every resting posture and noise level: **0**.
+- **The chime also fires when a gesture actually fires**, so a sound never happens without one. The sweep-onset chime is now only a head start on speaker latency; `chime_debounce_s` dedupes the pair. This also gives sustained poses (CROSS_ARMS, T_POSE, RAISE_BOTH) a chime, which they never had — they have no sweep.
+- The condition is extracted as `_sweep_meets_flourish()` and covered by regression tests.
+
+Detection itself was verified unaffected: a deliberate flourish fires 12/12 at three body sizes and four noise levels, and the gesture path (tracker → state machine → fusion → HA) tested clean end-to-end.
+
 ## 1.9.124
 
 ### Fixed

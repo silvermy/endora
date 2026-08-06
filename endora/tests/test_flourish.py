@@ -137,3 +137,40 @@ if __name__ == "__main__":
             print(f"  ERROR {t.__name__}")
             traceback.print_exc()
     sys.exit(failed)
+
+
+# ── Chime gating ──────────────────────────────────────────────────────────────
+
+def test_chime_requires_climb_not_just_rate():
+    """Regression: the chime once triggered on sweep_rate alone.
+
+    Rate is climb divided by elapsed time, so a hand's worth of keypoint
+    jitter between two adjacent frames divides a tiny climb by a tiny
+    interval and yields a large rate. An arm resting near horizontal — where
+    elevation is most sensitive to wrist noise — chimed several times a
+    minute with no gesture behind it, which is exactly what a user hears as
+    "sound effects for no reason".
+    """
+    from cameras.analyser import _sweep_meets_flourish
+    from cameras.arm_tracker import ArmReading, ArmState
+
+    def r(climb, rate):
+        return ArmReading(state=ArmState.DOWN, sweep_climb=climb, sweep_rate=rate)
+
+    # Jitter: negligible travel, but a huge rate because the interval is tiny.
+    assert not _sweep_meets_flourish(r(0.08, 4.0), 0.60, 0.80)
+    assert not _sweep_meets_flourish(r(0.20, 2.0), 0.60, 0.80)
+    # A real sweep clears both bars.
+    assert _sweep_meets_flourish(r(1.60, 2.40), 0.60, 0.80)
+    # A slow drift clears the climb but not the rate.
+    assert not _sweep_meets_flourish(r(1.20, 0.30), 0.60, 0.80)
+    assert not _sweep_meets_flourish(None, 0.60, 0.80)
+
+
+def test_resting_arm_never_meets_the_chime_bar():
+    """Play a resting arm through the tracker and confirm no frame would chime."""
+    from cameras.analyser import _sweep_meets_flourish
+    tr = ArmTracker(ArmTrackerConfig())
+    for i in range(150):                       # 15 s at rest, arm out horizontal
+        r = tr.classify(_pose(90), W, H, None, now=i / 10.0)
+        assert not _sweep_meets_flourish(r, 0.60, 0.80), f"would chime at frame {i}"

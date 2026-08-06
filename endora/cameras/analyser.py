@@ -379,6 +379,22 @@ def _crop_around_wrist(frame: np.ndarray, reading, lm) -> Optional[np.ndarray]:
     return crop
 
 
+def _sweep_meets_flourish(reading, climb_min: float, rate_min: float) -> bool:
+    """Does this reading show a sweep good enough to chime for?
+
+    Deliberately the SAME bar the gesture gate uses, both terms required.
+    Rate alone is not usable: it is climb divided by elapsed time, so a
+    hand's worth of keypoint jitter between two adjacent frames divides a
+    tiny climb by a tiny interval and produces a large rate. An arm resting
+    near horizontal — where elevation is most sensitive to wrist noise —
+    chimed several times a minute that way with no gesture behind it.
+    """
+    if reading is None:
+        return False
+    return (float(getattr(reading, 'sweep_climb', 0.0)) >= climb_min
+            and float(getattr(reading, 'sweep_rate', 0.0)) >= rate_min)
+
+
 class CameraAnalyser(threading.Thread):
     def __init__(
         self,
@@ -821,16 +837,22 @@ class CameraAnalyser(threading.Thread):
                         log.debug("[%s] pid=%d SINGLE_UP elev=%.2f ext=%.2f snap_roll=%.3f",
                                   self.label, pid, reading.elevation,
                                   reading.extension, reading.snap_roll)
-                    # Chime on sweep ONSET — while the arm is still on its
-                    # way up. This is the Bewitched beat: speaker latency
-                    # (an Echo is ~1-2s) then lands the sound as the
-                    # flourish completes, instead of well after it. Uses the
-                    # same sweep rate the gesture gate uses, so a resting
-                    # arm can never trigger it; chime_debounce_s guards
-                    # against repeats.
-                    _rate = float(getattr(reading, 'sweep_rate', 0.0))
-                    _sweeping = _rate >= float(
-                        getattr(self.s, 'flourish_min_rate', 0.80))
+                    # Chime as soon as a sweep meets the FULL flourish bar —
+                    # a head start on speaker latency (an Echo is ~1-2s), so
+                    # the sound lands with the gesture rather than after it.
+                    #
+                    # Both climb AND rate are required, exactly as the
+                    # gesture gate requires them. Rate alone is not a usable
+                    # trigger: it is climb/elapsed, so a hand's worth of
+                    # keypoint jitter between two adjacent frames divides a
+                    # tiny climb by a tiny interval and yields a large rate.
+                    # An arm resting near horizontal — where elevation is
+                    # most sensitive to wrist noise — chimed several times a
+                    # minute that way, with no gesture behind it.
+                    _sweeping = _sweep_meets_flourish(
+                        reading,
+                        float(getattr(self.s, 'flourish_min_climb', 0.60)),
+                        float(getattr(self.s, 'flourish_min_rate', 0.80)))
                     if self._sonos is not None:
                         if _sweeping and not entry.chimed_this_sweep:
                             entry.chimed_this_sweep = True
@@ -844,6 +866,13 @@ class CameraAnalyser(threading.Thread):
                 gesture = entry.state_machine.tick(reading, now)
                 if gesture is not None:
                     log.debug("[%s] pid=%d gesture: %s", self.label, pid, gesture)
+                    # Guarantee the sound accompanies a real gesture. The
+                    # sweep-onset chime above is only a head start on speaker
+                    # latency and may not have fired (a sustained pose has no
+                    # sweep at all); chime_debounce_s dedupes when it did.
+                    if self._sonos is not None:
+                        entry.chimed_this_sweep = True
+                        self._sonos.notify()
                     self.on_candidate(gesture, 1.0, self.label)
                     if self._recorder is not None:
                         self._recorder.on_gesture(gesture, self.label)
