@@ -237,6 +237,10 @@ _GESTURE_CRITICAL = [
     "yolo_pose_model", "yolo_imgsz", "yolo_conf",
     "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
     "snap_elevation_min", "snap_sustain_s",
+    "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
+    "gesture_snap_enable", "gesture_cross_arms_enable",
+    "gesture_t_pose_enable", "gesture_raise_both_enable",
+    "cross_gesture_cooldown_s",
     "snap_require_rise", "snap_require_still",
     "rise_elevation_delta", "rise_start_elevation_max",
     "wrist_still_max_travel_arm",
@@ -1168,6 +1172,15 @@ class _Handler(BaseHTTPRequestHandler):
 
         elif parsed.path == "/settings":
             body = json.dumps(_current_values()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path == "/version":
+            from version import __version__
+            body = json.dumps({"version": __version__}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))

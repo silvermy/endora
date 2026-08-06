@@ -691,6 +691,7 @@ class CameraAnalyser(threading.Thread):
         _prev_small: Optional[np.ndarray] = None   # for motion gate
         _frames_since_yolo: int = 999              # force run on first frame
         _prev_primary_state: ArmState = ArmState.DOWN
+        _last_person_count: int = -1
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -822,7 +823,12 @@ class CameraAnalyser(threading.Thread):
                         if _NoHandDetected is None or not isinstance(e, _NoHandDetected):
                             log.debug("[%s] grlib hand error: %s", self.label, e)
 
-            log.debug("[%s] %d person(s) tracked", self.label, len(self._persons))
+            # Only on change. Logged every frame, this flooded the debug
+            # ring buffer down to under a minute of history — useless for
+            # diagnosing a gesture that happened 90 seconds ago.
+            if len(self._persons) != _last_person_count:
+                _last_person_count = len(self._persons)
+                log.debug("[%s] %d person(s) tracked", self.label, _last_person_count)
 
             # ── Per-person gesture processing ──────────────────────────────
             _primary_reading: Optional[object] = None

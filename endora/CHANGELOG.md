@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.133
+
+### Fixed / Added — the live diagnostics were nearly unusable
+
+Pulled from a running install, the debug endpoints turned out to hide the things that matter most:
+
+- **The log ring buffer held under a minute.** `"N person(s) tracked"` was logged every single frame, so 300 entries covered 57 seconds — by the time you look, the gesture has scrolled away. It now logs only when the count changes.
+- **The "What's actually running?" panel omitted the flourish settings** — `snap_require_flourish`, `flourish_min_climb`, `flourish_min_rate` — which are the settings that now decide whether a gesture fires at all, plus the per-gesture enables and `cross_gesture_cooldown_s`. All are listed now, in the panel and in the startup log.
+- **Added `/version`**, because "which build is actually deployed" has been guesswork more than once, and a feedback log records no version at all.
+
+Measured on the live install for reference: the analyser loop runs at **4.8 fps** at `yolo_imgsz: 320` with `yolo11s-pose.onnx` on this hardware — lower than most of the frame rates the flourish logic had been validated against.
+
 ## 1.9.132
 
 ### Fixed — a switched-off gesture still shadowed the raise
