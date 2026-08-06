@@ -700,6 +700,7 @@ class CameraAnalyser(threading.Thread):
         _frames_since_yolo: int = 999              # force run on first frame
         _prev_primary_state: ArmState = ArmState.DOWN
         _last_person_count: int = -1
+        _logged_frame_geometry: bool = False
 
         while not self._stop_evt.is_set():
             frame = self.camera.get_frame()
@@ -710,6 +711,24 @@ class CameraAnalyser(threading.Thread):
             now = time.monotonic()
 
             proc_frame, pw, ph = self._preprocess(frame)
+
+            # Report the real pixel budget once. Everything downstream is
+            # limited by it, and it is not otherwise visible anywhere: an
+            # RTSP *sub* stream dewarped up to a larger canvas looks the
+            # same in the debug view as a main stream, while carrying a
+            # fraction of the detail the pose model needs.
+            if not _logged_frame_geometry:
+                _logged_frame_geometry = True
+                fh_, fw_ = frame.shape[:2]
+                eff = min(yolo_imgsz / max(pw, ph), 1.0)
+                log.info("[%s] frame geometry: camera %dx%d -> analysed %dx%d "
+                         "-> model sees %dx%d of a %dx%d canvas",
+                         self.label, fw_, fh_, pw, ph,
+                         int(pw * eff), int(ph * eff), yolo_imgsz, yolo_imgsz)
+                if fw_ * fh_ < 640 * 480:
+                    log.warning("[%s] camera stream is only %dx%d — if this is an "
+                                "RTSP 'sub' stream, the main stream would give the "
+                                "pose model far more to work with", self.label, fw_, fh_)
 
             # Fed every frame (not just motion-gated ones) so the model keeps
             # tracking gradual lighting drift even when nothing is moving.

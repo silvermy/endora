@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.135
+
+### Added — report the real pixel budget
+
+The analyser now logs, once at startup, the camera's actual frame size, the size after dewarp/crop, and the region the pose model really receives inside its square canvas. It warns if the incoming stream is small enough to look like an RTSP *sub* stream.
+
+This was invisible everywhere. A low-resolution sub stream dewarped up to a larger canvas looks identical to a main stream in the debug view, while carrying a fraction of the detail wrist and elbow keypoints need — and every threshold downstream is limited by it. Worth knowing before tuning anything else.
+
 ## 1.9.134
 
 ### Fixed — chiming for a sweep that never became a raise
