@@ -269,14 +269,17 @@ REGISTRY: list[SettingField] = [
                   "Total lens FOV in degrees", group="Dewarp", user_facing=True),
     SettingField("dewarp_pan", float, 0.0,
                   "Virtual camera pan (+ = right, - = left)", group="Dewarp", user_facing=True,
-                  ui=UIMeta("Pan", "joystick_x", -30, 30, 1, order=0)),
+                  # +/-90 covers real aiming into a 180-degree fisheye. At
+                  # +/-30 a perfectly ordinary saved value like -35 fell
+                  # outside the pad, so after a reload the knob rendered off
+                  # its left edge instead of at the aimed position.
+                  ui=UIMeta("Pan", "joystick_x", -90, 90, 1, order=0)),
     SettingField("dewarp_tilt", float, 30.0,
                   "Virtual camera tilt (+ = down toward floor)", group="Dewarp", user_facing=True,
-                  # Range is symmetric about the default (30) so the knob
-                  # starts ON the pad's crosshair. With -10..80 the midpoint
-                  # was 35, leaving the joystick's home position visibly off
-                  # centre while pan sat exactly on it.
-                  ui=UIMeta("Tilt", "joystick_y", -20, 80, 1, order=1)),
+                  # Symmetric about the default (30) so the knob starts on
+                  # the pad's crosshair, and wide enough that a saved value
+                  # cannot fall outside the pad (see Pan).
+                  ui=UIMeta("Tilt", "joystick_y", -30, 90, 1, order=1)),
     SettingField("dewarp_roll", float, 0.0,
                   "Roll to level a tilted horizon", group="Dewarp", user_facing=True),
     SettingField("dewarp_vfov", float, 75.0,

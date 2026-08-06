@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.127
+
+### Fixed — joystick knob rendered off the pad after Reset
+
+The dewarp pan slider ran `-30…30`, but a perfectly ordinary saved value like `-35` sits outside that. Reset reloads the page and re-renders the joystick from the restored settings, so the knob was placed at **−8.3%** — off the pad's left edge rather than at the aimed position.
+
+- Pan is now `-90…90` and tilt `-30…90`, which covers real aiming into a 180° fisheye; both stay symmetric about their defaults, so the knob starts on the crosshair.
+- The rendered knob position is clamped to the pad regardless, so no saved value can put it outside again.
+
+Your own pan/tilt values are untouched — only the pad they are drawn on changed.
+
 ## 1.9.126
 
 ### Fixed — CROSS_ARMS stealing an obvious snap

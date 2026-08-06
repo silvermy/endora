@@ -686,9 +686,12 @@ function buildJoystick(vals) {
   const pv = vals[panKey]  !== undefined ? +vals[panKey]  : 0;
   const tv = vals[tiltKey] !== undefined ? +vals[tiltKey] : 20;
 
-  // Percentage position so it works before layout
-  const px = ((pv  - panMin)  / (panMax  - panMin)  * 100).toFixed(1) + '%';
-  const py = ((1 - (tv - tiltMin) / (tiltMax - tiltMin)) * 100).toFixed(1) + '%';
+  // Percentage position so it works before layout. Clamped to the pad:
+  // a saved value outside the declared range would otherwise place the knob
+  // off the edge entirely, which is what a reload showed after Reset.
+  const clamp = function(n){ return Math.max(0, Math.min(100, n)); };
+  const px = clamp((pv  - panMin)  / (panMax  - panMin)  * 100).toFixed(1) + '%';
+  const py = clamp((1 - (tv - tiltMin) / (tiltMax - tiltMin)) * 100).toFixed(1) + '%';
 
   const wrap = document.createElement('div');
   wrap.className = 'joy-wrap';
