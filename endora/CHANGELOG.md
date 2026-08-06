@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.132
+
+### Fixed — a switched-off gesture still shadowed the raise
+
+The per-gesture flags added in 1.9.131 acted only at the firing stage, which silenced the unwanted Home Assistant event but did not help recognition. The two-handed poses are tested **before** the single-arm raise and return early, so a frame misread as CROSS_ARMS is consumed there and SINGLE_UP is never evaluated at all — the raise was still lost, just silently.
+
+Disabling a pose now skips its detection outright, so it cannot shadow a frame. That is what makes the switches genuinely improve raise recognition rather than only reducing noise.
+
 ## 1.9.131
 
 ### Added — per-gesture on/off switches

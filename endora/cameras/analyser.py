@@ -453,6 +453,11 @@ class CameraAnalyser(threading.Thread):
             pose_visibility_min=float(getattr(s, 'pose_visibility_min', 0.45)),
             keypoint_visibility_min=float(getattr(s, 'keypoint_visibility_min', 0.30)),
             leg_raise_margin=float(getattr(s, 'leg_raise_margin', 0.05)),
+            # Skip poses that are switched off entirely — they are tested
+            # before the single-arm raise and would otherwise shadow it.
+            detect_cross_arms=bool(getattr(s, 'gesture_cross_arms_enable', True)),
+            detect_t_pose=bool(getattr(s, 'gesture_t_pose_enable', True)),
+            detect_both_up=bool(getattr(s, 'gesture_raise_both_enable', True)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),
             rise_elevation_delta=float(getattr(s, 'rise_elevation_delta', 0.35)),

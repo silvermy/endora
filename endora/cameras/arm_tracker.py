@@ -279,6 +279,16 @@ class ArmTrackerConfig:
     # everything. Catches legs-in-a-V while lying on the couch.
     leg_raise_margin: float = 0.05
 
+    # ── Which poses to look for ───────────────────────────────────────────
+    # Two-handed poses are tested BEFORE the single-arm raise and return
+    # early, so one that misreads shadows the raise entirely — the frame is
+    # consumed and SINGLE_UP is never evaluated. Switching an unused pose
+    # off here (not merely at the firing stage) is therefore what actually
+    # improves raise recognition, rather than just silencing an event.
+    detect_cross_arms: bool = True
+    detect_t_pose: bool = True
+    detect_both_up: bool = True
+
     # ── Detection quality ─────────────────────────────────────────────────
     # At least ONE shoulder must exceed this confidence. Uses max (not
     # average) so a real person with one shoulder hidden by a blanket,
@@ -665,7 +675,7 @@ class ArmTracker:
             # CROSS_ARMS: each wrist past the body midline onto the OTHER
             # side, at chest height, wrists close together. Distances are
             # multiples of shoulder width so this holds at any camera distance.
-            if shoulder_w > 1e-6:
+            if self.c.detect_cross_arms and shoulder_w > 1e-6:
                 cross = self.c.cross_arms_min_crossing * shoulder_w
                 rw_crossed = _toward_left(rw) >= cross      # right hand gone left
                 lw_crossed = _toward_left(lw) <= -cross     # left hand gone right
@@ -682,7 +692,8 @@ class ArmTracker:
             # T_POSE: both arms straight, level, and reaching to their own sides.
             band = self.c.tpose_elevation_band
             lat = self.c.tpose_lateral_min
-            if (abs(l_elev) <= band and abs(r_elev) <= band
+            if (self.c.detect_t_pose
+                    and abs(l_elev) <= band and abs(r_elev) <= band
                     and l_ext >= self.c.arm_extension_min
                     and r_ext >= self.c.arm_extension_min
                     and _judgeable(l_len) and _judgeable(r_len)
@@ -694,7 +705,7 @@ class ArmTracker:
                 return ArmReading(state=ArmState.T_POSE, upright=bool(upright))
 
             # BOTH_UP: both arms raised.
-            if l_raised and r_raised:
+            if self.c.detect_both_up and l_raised and r_raised:
                 return ArmReading(state=ArmState.BOTH_UP, upright=bool(upright))
 
         # ── SINGLE_UP — per side, works with only one visible shoulder ─────
