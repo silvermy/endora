@@ -320,6 +320,13 @@ class Settings:
     @classmethod
     def load(cls) -> "Settings":
         data: dict = {}
+        # Where each key's winning value came from. Attached to the instance
+        # as `_sources` (deliberately NOT a dataclass field — the registry
+        # sync test compares dataclass fields against the registry). Three
+        # separate debugging dead-ends have been caused by a stale value in
+        # one of these files silently outranking a shipped default with
+        # nothing anywhere reporting it, so record it as we merge.
+        sources: dict = {}
 
         yaml_path = Path("/data/settings.yaml")
         if yaml_path.exists():
@@ -327,6 +334,7 @@ class Settings:
                 import yaml
                 with open(yaml_path) as f:
                     data = yaml.safe_load(f) or {}
+                sources.update({k: "settings.yaml" for k in data})
                 log.info("Loaded settings from %s", yaml_path)
             except Exception as e:
                 log.warning("Could not parse %s: %s", yaml_path, e)
@@ -336,6 +344,7 @@ class Settings:
                 with open(HA_OPTIONS_PATH) as f:
                     options = json.load(f)
                 data.update(options)
+                sources.update({k: "options.json" for k in options})
                 log.info("Loaded add-on options from %s", HA_OPTIONS_PATH)
             except Exception as e:
                 log.warning("Could not parse %s: %s", HA_OPTIONS_PATH, e)
@@ -351,6 +360,7 @@ class Settings:
                 with open(runtime_path) as f:
                     overrides = yaml.safe_load(f) or {}
                 data.update(overrides)
+                sources.update({k: "runtime_overrides.yaml" for k in overrides})
                 log.info(
                     "Loaded runtime overrides from %s (%d keys)",
                     runtime_path, len(overrides),
@@ -382,6 +392,9 @@ class Settings:
             coerced[k] = v
 
         instance = cls(**coerced)
+        # Keys that were present in a file but never made it into the
+        # dataclass (unknown or uncoercible) must not claim a source.
+        instance._sources = {k: v for k, v in sources.items() if k in coerced}
 
         for var, field, cast in [
             ("RTSP_URL_A",  "rtsp_url_a",  str),
@@ -394,7 +407,26 @@ class Settings:
             if val:
                 try:
                     setattr(instance, field, cast(val))
+                    instance._sources[field] = f"env:{var}"
                 except (ValueError, TypeError):
                     pass
 
         return instance
+
+    # ── Effective-value reporting ─────────────────────────────────────────
+
+    def source_of(self, key: str) -> str:
+        """Where this setting's live value came from: a filename, an env var,
+        or "default" when nothing overrode the shipped value.
+        """
+        return getattr(self, "_sources", {}).get(key, "default")
+
+    def effective(self, keys=None) -> dict:
+        """{key: (value, source)} for *keys* (all registry keys by default).
+
+        This is the answer to "what is this thing actually running?" — a
+        question that previously required reading three files by hand.
+        """
+        if keys is None:
+            keys = [f.key for f in REGISTRY_BY_KEY.values()]
+        return {k: (getattr(self, k, None), self.source_of(k)) for k in keys}

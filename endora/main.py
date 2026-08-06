@@ -43,12 +43,43 @@ def setup_logging(level_str: str):
         logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 
+# Settings that decide whether a gesture fires. Logged at startup with the
+# file each value came from: a stale entry in settings.yaml or
+# runtime_overrides.yaml silently outranks a shipped default, and with
+# nothing reporting that, three separate debugging sessions were spent
+# chasing behaviour that no longer matched the code.
+_GESTURE_CRITICAL = [
+    "yolo_pose_model", "yolo_imgsz", "yolo_conf",
+    "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
+    "snap_elevation_min", "snap_sustain_s",
+    "snap_require_rise", "snap_require_still",
+    "rise_elevation_delta", "rise_start_elevation_max",
+    "wrist_still_max_travel_arm",
+    "state_confirm_s", "state_release_s", "cooldown_s", "sustained_rearm_s",
+    "pose_visibility_min", "keypoint_visibility_min",
+]
+
+
+def _log_effective_gesture_settings(log, settings) -> None:
+    eff = settings.effective(_GESTURE_CRITICAL)
+    overridden = {k: v for k, v in eff.items() if v[1] != "default"}
+    log.info("Effective gesture settings (%d of %d overridden):",
+             len(overridden), len(eff))
+    for key, (value, source) in eff.items():
+        marker = "  " if source == "default" else "* "
+        log.info("  %s%-28s %-22s [%s]", marker, key, value, source)
+    if overridden:
+        log.info("  * = not the shipped default. To clear file-based "
+                 "overrides use the debug page's Reset button.")
+
+
 def main():
     settings = Settings.load()
     setup_logging(settings.log_level)
 
     log = logging.getLogger("main")
     log.info("Endora v%s starting (HA add-on mode)", __version__)
+    _log_effective_gesture_settings(log, settings)
     log.info("RTSP A: %s", _mask(settings.rtsp_url_a))
     log.info("RTSP B: %s", _mask(settings.rtsp_url_b))
     log.info("HA event: %s → %s/events/%s",

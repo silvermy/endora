@@ -107,3 +107,58 @@ def test_reset_overrides_ok_when_no_file(tmp_path, monkeypatch):
     _redirect_data_dir(monkeypatch, tmp_path)
     ok, err = ds._reset_overrides()
     assert ok, err
+
+
+def test_reset_also_strips_debug_page_keys_from_settings_yaml(tmp_path, monkeypatch):
+    # Save writes BOTH files, so clearing only runtime_overrides.yaml left a
+    # lower-priority copy behind that still won for any key the HA
+    # Configuration tab did not supply.
+    _redirect_data_dir(monkeypatch, tmp_path)
+    data = tmp_path / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "runtime_overrides.yaml").write_text("cooldown_s: 7\n")
+    (data / "settings.yaml").write_text(
+        "# hand-written notes\n"
+        "cooldown_s: 7\n"
+        "rtsp_url_a: rtsp://example/stream\n"
+    )
+
+    ok, err = ds._reset_overrides()
+    assert ok, err
+    left = (data / "settings.yaml").read_text()
+    assert "cooldown_s" not in left, "debug-page key should be stripped"
+    # Anything we never wrote — hand-authored keys and comments — survives.
+    assert "rtsp_url_a: rtsp://example/stream" in left
+    assert "# hand-written notes" in left
+
+
+def test_reset_leaves_settings_yaml_alone_when_it_has_no_managed_keys(tmp_path, monkeypatch):
+    _redirect_data_dir(monkeypatch, tmp_path)
+    data = tmp_path / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    original = "# only hand-written config here\nrtsp_url_b: rtsp://example/b\n"
+    (data / "settings.yaml").write_text(original)
+
+    ok, err = ds._reset_overrides()
+    assert ok, err
+    assert (data / "settings.yaml").read_text() == original
+
+
+def test_effective_settings_reports_source_per_key(tmp_path, monkeypatch):
+    _redirect_data_dir(monkeypatch, tmp_path)
+    data = tmp_path / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "runtime_overrides.yaml").write_text("snap_sustain_s: 0.9\n")
+
+    monkeypatch.setattr(Settings, "HA_OPTIONS_PATH", Path("/nonexistent"), raising=False)
+    import config.settings as cs
+    monkeypatch.setattr(cs, "Path", lambda p, *a, **k: (
+        Path(tmp_path, str(p).lstrip("/")) if str(p).startswith("/data") else Path(p)))
+    monkeypatch.setattr(cs, "HA_OPTIONS_PATH", Path("/nonexistent"))
+
+    ds._settings = Settings.load()
+    rows = {r["key"]: r for r in ds._effective_settings()}
+    assert rows["snap_sustain_s"]["source"] == "runtime_overrides.yaml"
+    assert rows["snap_sustain_s"]["value"] == 0.9
+    # Something untouched must report as a shipped default.
+    assert rows["raise_elevation_min"]["source"] == "default"

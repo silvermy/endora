@@ -230,6 +230,38 @@ def _current_values() -> dict:
     return result
 
 
+# Settings that decide whether a gesture fires — shown on the debug page
+# with the file each value came from, so "what is actually running?" is
+# answerable at a glance instead of by reading three files by hand.
+_GESTURE_CRITICAL = [
+    "yolo_pose_model", "yolo_imgsz", "yolo_conf",
+    "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
+    "snap_elevation_min", "snap_sustain_s",
+    "snap_require_rise", "snap_require_still",
+    "rise_elevation_delta", "rise_start_elevation_max",
+    "wrist_still_max_travel_arm",
+    "state_confirm_s", "state_release_s", "cooldown_s", "sustained_rearm_s",
+    "pose_visibility_min", "keypoint_visibility_min",
+]
+
+
+def _effective_settings() -> list:
+    """[{key, value, source}] for the gesture-critical settings, in the
+    order declared above. `source` is the file the live value came from, or
+    "default" when nothing overrode the shipped value.
+    """
+    if _settings is None:
+        return []
+    out = []
+    for key in _GESTURE_CRITICAL:
+        if not hasattr(_settings, key):
+            continue
+        src = (_settings.source_of(key)
+               if hasattr(_settings, "source_of") else "unknown")
+        out.append({"key": key, "value": getattr(_settings, key), "source": src})
+    return out
+
+
 def _apply_setting(key: str, raw: str) -> bool:
     if _settings is None:
         return False
@@ -371,6 +403,29 @@ def _reset_overrides() -> tuple[bool, str]:
             path.unlink()
     except Exception as e:
         return False, f"could not delete runtime_overrides.yaml: {e}"
+
+    # Save writes to settings.yaml as well, so clearing only the overrides
+    # file leaves a second, lower-priority copy behind — which still wins
+    # for any key the HA Configuration tab doesn't supply. Strip just the
+    # keys this page manages; anything hand-authored in that file (and its
+    # comments) is left untouched, since we never wrote it.
+    managed = set(_current_values().keys())
+    settings_yaml = Path("/data/settings.yaml")
+    try:
+        if settings_yaml.exists() and managed:
+            kept, removed = [], 0
+            for line in settings_yaml.read_text().splitlines(keepends=True):
+                key = line.split(":", 1)[0].strip()
+                if key in managed and not line.lstrip().startswith("#"):
+                    removed += 1
+                    continue
+                kept.append(line)
+            if removed:
+                settings_yaml.write_text("".join(kept))
+                log.info("Reset: removed %d debug-page key(s) from settings.yaml",
+                         removed)
+    except Exception as e:
+        return False, f"cleared overrides, but settings.yaml edit failed: {e}"
     if _settings is not None:
         try:
             import dataclasses as _dc
@@ -502,6 +557,17 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 }
 #resetbtn:hover{background:#3a1818}
 #resetbtn:disabled{opacity:.45;cursor:default}
+#effbox{margin-top:8px;font-size:11px;border-top:1px solid #222;padding-top:6px}
+#effbox summary{cursor:pointer;color:#888;user-select:none;padding:2px 0}
+#effbox summary:hover{color:#bbb}
+#efftable{margin-top:6px}
+.effrow{display:flex;justify-content:space-between;gap:6px;padding:1px 0}
+.effkey{color:#9a9a9a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.effval{color:#ddd;font-family:ui-monospace,Menlo,monospace;white-space:nowrap}
+.effsrc{font-size:10px;padding:0 4px;border-radius:3px;white-space:nowrap}
+.src-default{color:#666}
+.src-file{color:#e8c040;background:#2a2410}
+.effnote{color:#777;margin:4px 0 2px;line-height:1.35}
 @media(max-width:860px){
   #wrap{flex-direction:column}
   #panel{flex:none;width:100%;max-height:none}
@@ -585,6 +651,10 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
     <button id="savebtn" onclick="doSave()">&#128190;&nbsp; Save to settings.yaml</button>
     <button id="resetbtn" onclick="doReset()">&#8634;&nbsp; Reset overrides to config defaults</button>
     <div id="savemsg"></div>
+    <details id="effbox">
+      <summary>What's actually running?</summary>
+      <div id="efftable">loading&hellip;</div>
+    </details>
     <button id="capturebtn" onclick="doCapture()" style="display:none">&#128249;&nbsp; Capture test case</button>
     <div id="capturemsg" style="font-size:12px;min-height:16px;text-align:center;padding-top:3px"></div>
   </div>
@@ -780,6 +850,35 @@ function doReset() {
     .catch(() => { msg.style.color='#c55'; msg.textContent='\u2717 request failed'; })
     .finally(() => { btn.disabled = false; });
 }
+
+function loadEffective() {
+  fetch('effective').then(r=>r.json()).then(function(rows){
+    const box = document.getElementById('efftable');
+    if (!rows.length) { box.textContent = 'unavailable'; return; }
+    const over = rows.filter(r => r.source !== 'default');
+    let html = '';
+    html += '<div class="effnote">' + (over.length
+        ? '<b>' + over.length + '</b> of ' + rows.length + ' overridden by a file — '
+          + 'these beat the shipped defaults. Reset clears the file-based ones.'
+        : 'All ' + rows.length + ' gesture settings are at their shipped defaults.')
+      + '</div>';
+    rows.forEach(function(r){
+      const isDef = r.source === 'default';
+      html += '<div class="effrow">'
+        + '<span class="effkey">' + r.key + '</span>'
+        + '<span><span class="effval">' + r.value + '</span> '
+        + '<span class="effsrc ' + (isDef ? 'src-default' : 'src-file') + '">'
+        + r.source + '</span></span></div>';
+    });
+    box.innerHTML = html;
+  }).catch(function(){
+    document.getElementById('efftable').textContent = 'unavailable';
+  });
+}
+
+document.getElementById('effbox').addEventListener('toggle', function(){
+  if (this.open) loadEffective();
+});
 
 fetch('settings').then(r=>r.json()).then(build).catch(()=>build({}));
 
@@ -1066,6 +1165,14 @@ class _Handler(BaseHTTPRequestHandler):
 
         elif parsed.path == "/settings":
             body = json.dumps(_current_values()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path == "/effective":
+            body = json.dumps(_effective_settings()).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))

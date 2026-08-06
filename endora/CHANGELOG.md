@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.122
+
+### Added — you can finally see what is actually running
+
+Three separate debugging dead-ends this month traced to the same root cause: a stale value in one config file silently outranked a shipped default, and nothing anywhere reported it. Two fixes:
+
+- **Startup log lists every gesture-critical setting with the file its value came from** — `default`, `options.json`, `settings.yaml`, `runtime_overrides.yaml` or an env var — with overridden ones marked `*`. If behaviour does not match the code, this is now the first line of the log to check.
+- **"What's actually running?" panel on the debug page** (under the Save/Reset buttons). Same information live, with file-sourced values highlighted, plus a count of how many settings are overridden.
+
+### Fixed
+
+- **Reset now clears `settings.yaml` too.** Save writes to both files, so clearing only `runtime_overrides.yaml` left a lower-priority copy behind that still won for any key the HA Configuration tab does not supply. Reset strips only the keys the debug page manages — hand-authored keys and comments in that file are preserved, since we never wrote them.
+
 ## 1.9.121
 
 ### Changed — gesture geometry rewritten around two dimensionless numbers
