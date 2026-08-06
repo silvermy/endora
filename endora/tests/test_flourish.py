@@ -174,3 +174,36 @@ def test_resting_arm_never_meets_the_chime_bar():
     for i in range(150):                       # 15 s at rest, arm out horizontal
         r = tr.classify(_pose(90), W, H, None, now=i / 10.0)
         assert not _sweep_meets_flourish(r, 0.60, 0.80), f"would chime at frame {i}"
+
+
+def test_a_raise_that_is_held_up_still_fires():
+    """Regression from live feedback (2026-08-06).
+
+    Seven near-misses logged `rise_delta` of 1.15-1.94 — a full arm sweep,
+    unmistakable — alongside `sweep_climb: 0.000`, and were rejected as "did
+    not sweep". The sweep window was 0.8 s and the climb was measured from
+    the lowest point *in that window* to now, so once the arm had been up
+    for longer than the window every sample in it was the top: the minimum
+    equalled the current value and the evidence of the user's own lift
+    vanished. The chime had already fired mid-ascent, which is why the
+    symptom was "sound effects but no gestures".
+    """
+    for hold_frames in (10, 20, 30, 50, 100):     # 1 s to 10 s held up
+        fired = _run(SWEEP_UP + [178] * hold_frames)
+        assert Gesture.SNAP in fired, f"held {hold_frames/10:.0f}s fired {fired}"
+
+
+def test_holding_the_arm_up_does_not_dilute_the_rate():
+    """The lift's speed identifies a flourish, and it does not change
+    because the arm was kept there afterwards — so rate is measured over the
+    ascent only, not from the low point to the present moment.
+    """
+    tr = ArmTracker(ArmTrackerConfig())
+    rates = []
+    seq = SWEEP_UP + [178] * 20
+    for i, ang in enumerate(seq):
+        r = tr.classify(_pose(ang), W, H, None, now=i / 10.0)
+        if r is not None and r.state == ArmState.SINGLE_UP:
+            rates.append(r.sweep_rate)
+    assert rates, "raise never confirmed"
+    assert min(rates) >= 0.80, f"rate decayed while held: min={min(rates):.2f}"

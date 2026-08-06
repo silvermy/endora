@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.128
+
+### Fixed — "sounds but no gestures": the sweep evidence expired before it was used
+
+One bug produced both symptoms. Live feedback showed seven SNAP near-misses reporting `rise_delta` of **1.15–1.94** — a full arm sweep, unmistakable — alongside `sweep_climb: 0.000`, rejected as *"arm is up but did not sweep"*.
+
+The sweep window was 0.8 s, and the climb was measured from the lowest point **in that window to the present moment**. Once the arm had been up for longer than the window, every sample in it was the top: the minimum equalled the current value and the climb collapsed to zero. The evidence of the lift evaporated in the time it took to confirm the raise. The chime, meanwhile, had already fired mid-ascent while the climb was briefly non-zero — hence sound with no gesture behind it.
+
+- **The sweep is now measured over the ascent**: from the last time the arm was at its lowest, to the highest point reached after it. Holding the arm up afterwards no longer dilutes either the climb or the rate — the speed of the lift is what identifies a flourish, and that does not change because you kept your arm there.
+- **`flourish_window_s` 0.80 → 2.50**, so the whole lift plus the confirm/sustain delay fits comfortably inside it.
+
+Verified: a raise held for 1, 2, 3, 5 or 10 seconds now fires (all previously silent), a classic up-and-down flourish still fires, and each produces exactly one chime. An arm at rest for 20 seconds — hanging or horizontal — and a slow 9-second lift all remain silent.
+
 ## 1.9.127
 
 ### Fixed — joystick knob rendered off the pad after Reset

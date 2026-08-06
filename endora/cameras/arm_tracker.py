@@ -312,9 +312,11 @@ class ArmTrackerConfig:
     wrist_still_max_travel: float = 0.15
 
     # ── Flourish ──────────────────────────────────────────────────────────
-    # How far back to look for the bottom of the sweep. A theatrical arm
-    # flourish takes roughly half a second to a second.
-    flourish_window_s: float = 0.80
+    # How far back to look for the bottom of the sweep. Must comfortably
+    # outlast the whole lift PLUS the confirm/sustain delay before the raise
+    # is evaluated, or the ascent ages out of the window and the gesture is
+    # judged on an empty record. At 0.80 that is exactly what happened.
+    flourish_window_s: float = 2.50
     # A raise arriving on the end of a sweep at least this large skips the
     # state_confirm_s wait. That delay exists to reject single-frame
     # phantoms, and a coherent multi-frame climb of this size is already
@@ -370,23 +372,46 @@ class ArmTracker:
         a garbage one produces a large climb and a huge rate but is bimodal,
         and must not be read as a very fast gesture.
         """
-        low_elev = None
-        low_t = now
-        for t, sample in self._side_hist(side, now, self.c.flourish_window_s):
-            if low_elev is None or sample.elevation < low_elev:
-                low_elev, low_t = sample.elevation, t
-        if low_elev is None:
+        samples = [(ts, s.elevation)
+                   for ts, s in self._side_hist(side, now, self.c.flourish_window_s)]
+        if not samples:
             return 0.0, 0.0, False
-        climb = elevation - low_elev
-        dt = now - low_t
+
+        # The ASCENT: the lowest point in the window, then the highest point
+        # reached AFTER it. Measuring to "now" instead makes the sweep
+        # evaporate the moment the arm is held up — every sample in the
+        # window becomes the top, so the minimum equals the current value and
+        # the climb collapses to zero. Live feedback showed exactly that:
+        # raises with a full 1.9 of travel reported sweep_climb 0.00 and were
+        # rejected as "did not sweep", while the chime had already fired
+        # mid-ascent. One bug, both symptoms.
+        # The LAST time the arm was at its lowest, not the first: an arm
+        # that rested at its low point for a while before lifting would
+        # otherwise have all that resting time counted as part of the
+        # ascent, diluting the rate until a genuine flourish looked slow.
+        low_i = 0
+        for i in range(len(samples)):
+            if samples[i][1] <= samples[low_i][1]:
+                low_i = i
+        low_t, low_elev = samples[low_i]
+        peak_i = low_i
+        for i in range(low_i, len(samples)):
+            if samples[i][1] > samples[peak_i][1]:
+                peak_i = i
+        peak_t, peak_elev = samples[peak_i]
+
+        climb = peak_elev - low_elev
+        dt = peak_t - low_t
         if climb <= 0.0 or dt <= 1e-6:
             return max(climb, 0.0), 0.0, False
+
+        # Rate over the ascent alone, so holding the arm up afterwards cannot
+        # dilute it. The speed of the lift is what identifies a flourish, and
+        # that does not change because you kept your arm there.
         band_lo = low_elev + 0.25 * climb
-        band_hi = elevation - 0.25 * climb
-        progressive = any(
-            band_lo < sample.elevation < band_hi
-            for _t, sample in self._side_hist(side, now, self.c.flourish_window_s)
-        )
+        band_hi = peak_elev - 0.25 * climb
+        progressive = any(band_lo < e < band_hi
+                          for _ts, e in samples[low_i:peak_i + 1])
         return climb, climb / dt, progressive
 
     def _rose_recently(self, side: Side, elevation: float,
