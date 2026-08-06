@@ -60,6 +60,9 @@ class RtspCapture(threading.Thread):
 
         self.frames_captured: int = 0
         self._fps_actual: float = 0.0
+        # The stream's native size is invisible downstream — everything after
+        # this class only ever sees the resized frame — so report it once.
+        self._logged_native: bool = False
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -127,6 +130,24 @@ class RtspCapture(threading.Thread):
 
                 # Resize if camera native resolution differs from target
                 fh, fw = frame.shape[:2]
+                if not self._logged_native:
+                    self._logged_native = True
+                    log.info("[%s] stream is %dx%d native, resized to %dx%d",
+                             self.label, fw, fh, self.width, self.height)
+                    if fw * fh > 4 * self.width * self.height:
+                        log.warning(
+                            "[%s] %dx%d is being thrown away down to %dx%d on every "
+                            "frame. The decode is costing full price for detail that "
+                            "is discarded one step later — either raise frame_width/"
+                            "frame_height (and yolo_imgsz to use it) or point at a "
+                            "lower-resolution stream.",
+                            self.label, fw, fh, self.width, self.height)
+                    if abs((fw / fh) - (self.width / self.height)) > 0.15:
+                        log.warning(
+                            "[%s] aspect ratio changes from %.2f to %.2f in the resize, "
+                            "which distorts the image before dewarping — a fisheye "
+                            "circle becomes an ellipse and the dewarp maps no longer "
+                            "match it.", self.label, fw / fh, self.width / self.height)
                 if fw != self.width or fh != self.height:
                     frame = cv2.resize(
                         frame, (self.width, self.height), interpolation=cv2.INTER_LINEAR

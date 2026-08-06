@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.136
+
+### Added — report the camera's native resolution, and what the resize discards
+
+`RtspCapture` resizes every frame to `frame_width` x `frame_height` (default 640x640) before anything else sees it, so the stream's real resolution was invisible to every other diagnostic — including the frame-geometry line added in 1.9.135, which could only report the already-resized size.
+
+It now logs the native size once, and warns when:
+
+- the resize is discarding more than 4x the pixels it keeps — the decode costs full price for detail thrown away one step later, which is exactly what happens when you point a Pi at a main stream while `frame_width` stays at 640;
+- the resize changes the aspect ratio, which distorts the image *before* dewarping — a fisheye circle becomes an ellipse and the dewarp maps no longer match it.
+
 ## 1.9.135
 
 ### Added — report the real pixel budget
