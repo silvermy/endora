@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.131
+
+### Added — per-gesture on/off switches
+
+`gesture_snap_enable`, `gesture_hold_enable`, `gesture_double_snap_enable`, `gesture_cross_arms_enable`, `gesture_t_pose_enable`, `gesture_raise_both_enable` — all default on, all in the Configuration tab.
+
+A gesture you never perform is not free. It fires Home Assistant events you did not ask for, and until v1.9.130 an unwanted one could suppress a real gesture through the shared cooldown: a field log showed 16 spurious CROSS_ARMS fires interleaved with SNAP attempts that never reached HA, from a user who was only ever testing SNAP.
+
+Disabling DOUBLE_SNAP is handled properly — a second snap then registers as a plain SNAP rather than disappearing into the switched-off gesture.
+
 ## 1.9.130
 
 ### Fixed — a gesture could fire perfectly and never reach Home Assistant

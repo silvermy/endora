@@ -95,6 +95,30 @@
     "cross_gesture_cooldown_s": {
       "name": "Different-gesture cooldown (s)",
       "description": "Minimum seconds before a DIFFERENT gesture type may fire. Short on purpose — the full cooldown still applies per gesture (default 0.5)"
+    },
+    "gesture_snap_enable": {
+      "name": "Enable SNAP",
+      "description": "Fire the SNAP gesture. Turn off gestures you do not use — they still send HA events and can suppress ones you do use"
+    },
+    "gesture_hold_enable": {
+      "name": "Enable HOLD",
+      "description": "Fire the HOLD gesture. Turn off gestures you do not use — they still send HA events and can suppress ones you do use"
+    },
+    "gesture_double_snap_enable": {
+      "name": "Enable DOUBLE_SNAP",
+      "description": "Fire the DOUBLE_SNAP gesture. Turn off gestures you do not use — they still send HA events and can suppress ones you do use"
+    },
+    "gesture_cross_arms_enable": {
+      "name": "Enable CROSS_ARMS",
+      "description": "Fire the CROSS_ARMS gesture. Turn off gestures you do not use — they still send HA events and can suppress ones you do use"
+    },
+    "gesture_t_pose_enable": {
+      "name": "Enable T_POSE",
+      "description": "Fire the T_POSE gesture. Turn off gestures you do not use — they still send HA events and can suppress ones you do use"
+    },
+    "gesture_raise_both_enable": {
+      "name": "Enable RAISE_BOTH",
+      "description": "Fire the RAISE_BOTH gesture. Turn off gestures you do not use — they still send HA events and can suppress ones you do use"
     }
   }
 }

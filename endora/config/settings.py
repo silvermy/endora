@@ -264,6 +264,17 @@ class Settings:
     # in 20 minutes of TV-watching seen in live feedback before this).
     sustained_rearm_s: float = 2.0
 
+    # ── Per-gesture enable ────────────────────────────────────────────────
+    # A gesture you never perform is not free: it still fires HA events, and
+    # an unwanted one used to suppress a real gesture through the shared
+    # cooldown. Turn off whatever you don't use.
+    gesture_snap_enable: bool = True
+    gesture_hold_enable: bool = True
+    gesture_double_snap_enable: bool = True
+    gesture_cross_arms_enable: bool = True
+    gesture_t_pose_enable: bool = True
+    gesture_raise_both_enable: bool = True
+
     # ── Fusion ────────────────────────────────────────────────────────────
     # Advanced: override in settings.yaml if needed
     fusion_agreement_window_s: float = 1.0

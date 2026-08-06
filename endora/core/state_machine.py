@@ -106,6 +106,17 @@ class StateMachineConfig:
     # minutes of normal TV-watching in live feedback (2026-07-11).
     sustained_rearm_s: float = 2.0
 
+    # ── Per-gesture enable ────────────────────────────────────────────────
+    # A gesture you never perform is not free: it still fires HA events, and
+    # until v1.9.130 an unwanted one could suppress a real gesture through
+    # the shared cooldown. Turn off what you don't use.
+    enable_snap: bool = True
+    enable_hold: bool = True
+    enable_double_snap: bool = True
+    enable_cross_arms: bool = True
+    enable_t_pose: bool = True
+    enable_raise_both: bool = True
+
 
 # ── Internal per-arm-raise state ──────────────────────────────────────────────
 
@@ -324,17 +335,19 @@ class GestureStateMachine:
 
     # ── SNAP + DOUBLE_SNAP logic ──────────────────────────────────────────
 
-    def _fire_snap(self, now: float) -> Gesture:
+    def _fire_snap(self, now: float) -> Optional[Gesture]:
         r = self._raise
         r.snap_fired = True
         r.snap_fired_at = now
 
-        # DOUBLE_SNAP: prior SNAP within window?
+        # DOUBLE_SNAP: prior SNAP within window? Only when it is switched on
+        # — otherwise a second snap must still register as a plain SNAP
+        # rather than vanishing into a disabled gesture.
         self._snap_times[:] = [
             t for t in self._snap_times
             if now - t < self.c.double_snap_window_s
         ]
-        if self._snap_times:
+        if self._snap_times and self.is_enabled(Gesture.DOUBLE_SNAP):
             self._snap_times.clear()
             return self._fire(Gesture.DOUBLE_SNAP, now)
 
@@ -343,7 +356,28 @@ class GestureStateMachine:
 
     # ── Fire helper ───────────────────────────────────────────────────────
 
-    def _fire(self, gesture: Gesture, now: float) -> Gesture:
+    _ENABLE_ATTR = {
+        Gesture.SNAP:        "enable_snap",
+        Gesture.HOLD:        "enable_hold",
+        Gesture.DOUBLE_SNAP: "enable_double_snap",
+        Gesture.CROSS_ARMS:  "enable_cross_arms",
+        Gesture.T_POSE:      "enable_t_pose",
+        Gesture.RAISE_BOTH:  "enable_raise_both",
+    }
+
+    def is_enabled(self, gesture: Gesture) -> bool:
+        return bool(getattr(self.c, self._ENABLE_ATTR[gesture], True))
+
+    def _fire(self, gesture: Gesture, now: float) -> Optional[Gesture]:
+        """Emit *gesture*, or None when that gesture is switched off.
+
+        Returning None keeps the per-raise/per-pose bookkeeping of the
+        caller intact — a disabled gesture is treated as having happened
+        and been discarded, so it neither fires nor retries every frame.
+        """
+        if not self.is_enabled(gesture):
+            log.debug("Gesture %s detected but disabled in settings", gesture)
+            return None
         self._last_fired[gesture] = now
         self._last_fired_any = now
         self.total_emitted += 1

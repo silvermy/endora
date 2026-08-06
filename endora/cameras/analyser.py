@@ -473,6 +473,12 @@ class CameraAnalyser(threading.Thread):
             snap_require_rise=bool(getattr(s, 'snap_require_rise', True)),
             snap_require_still=bool(getattr(s, 'snap_require_still', False)),
             sustained_rearm_s=float(getattr(s, 'sustained_rearm_s', 2.0)),
+            enable_snap=bool(getattr(s, 'gesture_snap_enable', True)),
+            enable_hold=bool(getattr(s, 'gesture_hold_enable', True)),
+            enable_double_snap=bool(getattr(s, 'gesture_double_snap_enable', True)),
+            enable_cross_arms=bool(getattr(s, 'gesture_cross_arms_enable', True)),
+            enable_t_pose=bool(getattr(s, 'gesture_t_pose_enable', True)),
+            enable_raise_both=bool(getattr(s, 'gesture_raise_both_enable', True)),
         ), on_near_miss=self._near_miss_cb)
         # A brand-new pid can only be created from a candidate that didn't
         # match any existing tracked pid (see _match_persons) — and since
