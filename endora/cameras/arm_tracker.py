@@ -259,8 +259,15 @@ class ArmTrackerConfig:
     # Each wrist must cross the body midline by this multiple of shoulder
     # width, and the two wrists must be closer together than
     # cross_arms_wrist_proximity shoulder-widths.
+    #
+    # These two pull against each other: crossing further past the midline
+    # necessarily pushes the wrists apart, so a tight proximity leaves only
+    # a narrow band of poses that satisfy both. At 1.20 the band was
+    # 0.80-1.20 shoulder-widths of wrist separation, and folding your arms
+    # more tightly fell out of it. 2.00 keeps the crossing requirement doing
+    # the real work while accepting any reasonably folded pose.
     cross_arms_min_crossing: float = 0.40
-    cross_arms_wrist_proximity: float = 1.20
+    cross_arms_wrist_proximity: float = 2.00
     # Vertical band counting as "chest", as a multiple of torso length
     # beyond the shoulder line and the hip line respectively.
     cross_arms_chest_pad: float = 0.15

@@ -286,3 +286,23 @@ if __name__ == "__main__":
             traceback.print_exc()
     print(f"\n{'PASSED' if failed == 0 else f'{failed} FAILED'} ({len(tests) - failed}/{len(tests)})")
     sys.exit(failed)
+
+
+def test_cross_arms_fires_across_a_range_of_folds():
+    """A deeper fold must still count.
+
+    The crossing and proximity requirements pull against each other:
+    crossing further past the midline necessarily pushes the wrists apart.
+    With proximity at 1.20 shoulder-widths only a 0.80-1.20 band satisfied
+    both, so crossing your arms *more* stopped registering. The crossing
+    minimum stays strict — it is what keeps hands-in-front-while-typing out
+    — but the proximity ceiling no longer clips deep folds.
+    """
+    from tests.fake_landmarks import _build, Point
+    for gap in (0.20, 0.26, 0.32, 0.38):
+        lm = _build(
+            left_wrist=Point(0.50 + gap / 2, 0.50),
+            right_wrist=Point(0.50 - gap / 2, 0.50),
+        )
+        r = _tracker()._classify_raw(lm, 1280, 720)
+        assert r.state == ArmState.CROSS_ARMS, f"gap={gap} gave {r.state}"

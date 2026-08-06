@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.124
+
+### Fixed
+
+- **Crossing your arms more tightly stopped registering as CROSS_ARMS.** The two requirements pull against each other — crossing further past the body midline necessarily pushes the wrists apart — so with the proximity ceiling at 1.20 shoulder-widths only a narrow 0.80–1.20 band satisfied both. Raised to 2.00, which leaves the crossing minimum (the guard against hands-in-front-while-typing) doing the real work. Pre-existing, not introduced by the geometry rewrite.
+
+All six gestures are verified working end-to-end after the flourish change: SNAP (one flourish), DOUBLE_SNAP (two inside the window), HOLD (flourish then keep the arm up), RAISE_BOTH, T_POSE and CROSS_ARMS. Note that the sustained poses — RAISE_BOTH, T_POSE, CROSS_ARMS — still require holding for `sustain_s`, which is right for a pose; only the single-arm gesture is flourish-triggered. Sweeping both arms up and straight back down therefore fires nothing.
+
 ## 1.9.123
 
 ### Changed — detect the flourish, not a held pose
