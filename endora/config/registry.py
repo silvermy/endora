@@ -272,7 +272,11 @@ REGISTRY: list[SettingField] = [
                   ui=UIMeta("Pan", "joystick_x", -30, 30, 1, order=0)),
     SettingField("dewarp_tilt", float, 30.0,
                   "Virtual camera tilt (+ = down toward floor)", group="Dewarp", user_facing=True,
-                  ui=UIMeta("Tilt", "joystick_y", -10, 80, 1, order=1)),
+                  # Range is symmetric about the default (30) so the knob
+                  # starts ON the pad's crosshair. With -10..80 the midpoint
+                  # was 35, leaving the joystick's home position visibly off
+                  # centre while pan sat exactly on it.
+                  ui=UIMeta("Tilt", "joystick_y", -20, 80, 1, order=1)),
     SettingField("dewarp_roll", float, 0.0,
                   "Roll to level a tilted horizon", group="Dewarp", user_facing=True),
     SettingField("dewarp_vfov", float, 75.0,

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.126
+
+### Fixed — CROSS_ARMS stealing an obvious snap
+
+Both two-handed gestures measured sideways position in **raw image x**, which silently assumes which way the person faces. A person facing the camera is mirrored: their right shoulder appears on the image's *left*, so their right wrist sits left of the midline **just by hanging at their side** — which the crossing test read as "crossed past the midline onto the other side". With both arms down, all four CROSS_ARMS conditions were satisfied, and because two-handed gestures are checked before SINGLE_UP, it stole the raise. Loosening the wrist-proximity ceiling in 1.9.124 made it easier to reach.
+
+Sideways position is now projected onto the person's **own left-right axis** (right shoulder → left shoulder), so "toward my other shoulder" means the same thing whichever way they face. This fixes T_POSE identically — it had the same assumption, and would only have fired for someone facing one particular way.
+
+Verified in both orientations: arms at rest no longer classify as CROSS_ARMS, genuinely crossed arms still do, and a raise is unaffected. A `_mirror()` regression test covers it.
+
+### Changed
+
+- The dewarp joystick's tilt range is now symmetric about its default (`-20…80`, midpoint 30), so the knob starts **on** the pad's crosshair. Previously the range was `-10…80` with midpoint 35, leaving the home position visibly off centre while pan sat exactly on it.
+
 ## 1.9.125
 
 ### Fixed — chimes with no gesture behind them

@@ -216,3 +216,40 @@ if __name__ == "__main__":
             print(f"  ERROR {t.__name__}")
             traceback.print_exc()
     sys.exit(failed)
+
+
+# ── Left/right orientation ────────────────────────────────────────────────────
+
+def _mirror(lm: Landmarks) -> Landmarks:
+    """Flip a pose horizontally AND swap the left/right keypoint labels —
+    i.e. the same physical person seen from the other side, which is the
+    difference between facing the camera and facing away.
+    """
+    swap = {LEFT_SHOULDER: RIGHT_SHOULDER, RIGHT_SHOULDER: LEFT_SHOULDER,
+            LEFT_ELBOW: RIGHT_ELBOW, RIGHT_ELBOW: LEFT_ELBOW,
+            LEFT_WRIST: RIGHT_WRIST, RIGHT_WRIST: LEFT_WRIST,
+            LEFT_HIP: RIGHT_HIP, RIGHT_HIP: LEFT_HIP,
+            LEFT_KNEE: RIGHT_KNEE, RIGHT_KNEE: LEFT_KNEE}
+    out = {}
+    for idx, p in lm._points.items():
+        out[swap.get(idx, idx)] = Point(1.0 - p.x, p.y, p.visibility)
+    return Landmarks(out)
+
+
+def test_arms_at_rest_are_not_crossed_arms_in_either_orientation():
+    """Regression: the crossing test used raw image x, which assumes an
+    orientation. A person facing the camera is mirrored — their right wrist
+    sits left of the midline just by hanging at their side — so both arms at
+    rest classified as CROSS_ARMS and stole gestures from an obvious raise.
+    """
+    lm = _person(0.5, 0.5, 0.25, raised=False)
+    for label, pose in (("as-is", lm), ("mirrored", _mirror(lm))):
+        r = _tracker()._classify_raw(pose, 1280, 640)
+        assert r.state != ArmState.CROSS_ARMS, f"{label} gave {r.state}"
+
+
+def test_a_raise_survives_mirroring():
+    lm = _person(0.5, 0.5, 0.25, raised=True)
+    for label, pose in (("as-is", lm), ("mirrored", _mirror(lm))):
+        r = _tracker()._classify_raw(pose, 1280, 640)
+        assert r.state == ArmState.SINGLE_UP, f"{label} gave {r.state}"

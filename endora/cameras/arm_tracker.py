@@ -617,13 +617,33 @@ class ArmTracker:
 
         # ── Two-handed gestures (need BOTH shoulders confidently visible) ──
         if both_sh_ok and l_ok and r_ok:
-            # CROSS_ARMS: each wrist past the body midline, at chest height,
-            # wrists close together. Distances are multiples of shoulder
-            # width so this holds at any camera distance.
+            # Sideways position is measured along the person's OWN left-right
+            # axis (right shoulder -> left shoulder), not raw image x.
+            #
+            # Using image x silently assumes an orientation. A person facing
+            # the camera is mirrored: their right shoulder appears on the
+            # image's LEFT, so their right wrist sits left of the midline
+            # while simply hanging at their side — which the old test read as
+            # "crossed past the midline". Both arms resting down therefore
+            # classified as CROSS_ARMS, stealing gestures from an obvious
+            # raise. Projecting onto the shoulder axis makes "toward my other
+            # shoulder" mean the same thing whichever way the person faces.
+            axis = ((ls[0] - rs[0]) / shoulder_w,
+                    (ls[1] - rs[1]) / shoulder_w) if shoulder_w > 1e-6 else (1.0, 0.0)
+
+            def _toward_left(p: _Pt) -> float:
+                """Signed distance from the body midline along the shoulder
+                axis: positive = toward this person's left shoulder."""
+                return ((p[0] - sh_mid[0]) * axis[0]
+                        + (p[1] - sh_mid[1]) * axis[1])
+
+            # CROSS_ARMS: each wrist past the body midline onto the OTHER
+            # side, at chest height, wrists close together. Distances are
+            # multiples of shoulder width so this holds at any camera distance.
             if shoulder_w > 1e-6:
                 cross = self.c.cross_arms_min_crossing * shoulder_w
-                rw_crossed = rw[0] < sh_mid[0] - cross
-                lw_crossed = lw[0] > sh_mid[0] + cross
+                rw_crossed = _toward_left(rw) >= cross      # right hand gone left
+                lw_crossed = _toward_left(lw) <= -cross     # left hand gone right
                 pad = self.c.cross_arms_chest_pad * (torso_len or shoulder_w)
                 chest_top = sh_mid[1] - pad
                 chest_bottom = (hip_mid[1] if hip_mid is not None
@@ -641,8 +661,11 @@ class ArmTracker:
                     and l_ext >= self.c.arm_extension_min
                     and r_ext >= self.c.arm_extension_min
                     and _judgeable(l_len) and _judgeable(r_len)
-                    and (sh_mid[0] - lw[0]) >= lat * l_len
-                    and (rw[0] - sh_mid[0]) >= lat * r_len):
+                    # …each reaching out on its OWN side, measured along the
+                    # body's left-right axis rather than image x, so this
+                    # works whichever way the person faces (see _toward_left).
+                    and _toward_left(lw) >= lat * l_len
+                    and _toward_left(rw) <= -lat * r_len):
                 return ArmReading(state=ArmState.T_POSE, upright=bool(upright))
 
             # BOTH_UP: both arms raised.
