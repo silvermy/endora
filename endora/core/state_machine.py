@@ -117,6 +117,12 @@ class _RaiseState:
     snap_fired_at: float = 0.0
     up_frames:     int   = 0
     entered_at:    float = 0.0   # monotonic time of first SINGLE_UP frame
+    # Latched once a qualifying sweep is seen during THIS raise. The sweep
+    # only qualifies transiently — for the moments around the top of the
+    # arc — so requiring it to coincide with every other condition made
+    # firing a matter of timing luck. Remembering it makes the question
+    # "did this raise arrive on a flourish", which is what we actually mean.
+    flourish_seen: bool  = False
     # Trajectory-gate near-miss reasons already logged for this raise — these
     # gates can stay blocked for minutes (hand propped against head), and
     # logging them per-frame would flood feedback.jsonl.
@@ -228,13 +234,22 @@ class GestureStateMachine:
         # fast?", which is the gesture itself; the legacy path asks the
         # weaker "did it rise, and is it being held?".
         if self.c.snap_require_flourish:
-            gate_ok = (reading.sweep_climb >= self.c.flourish_min_climb
-                       and reading.sweep_rate >= self.c.flourish_min_rate)
+            if (reading.sweep_climb >= self.c.flourish_min_climb
+                    and reading.sweep_rate >= self.c.flourish_min_rate):
+                r.flourish_seen = True
+            gate_ok = r.flourish_seen
             rise_ok = still_ok = True
+            # The sweep IS the evidence that this was deliberate, which is
+            # the whole job snap_sustain_s used to do — so don't charge for
+            # it twice. Requiring both also meant the sustain window had to
+            # elapse while the sweep still qualified, and when it didn't the
+            # gesture fired seconds late or not at all.
+            sustain_needed = 0.0
         else:
             rise_ok  = (not self.c.snap_require_rise) or reading.rose_recently
             still_ok = (not self.c.snap_require_still) or reading.wrist_still
             gate_ok = rise_ok and still_ok
+            sustain_needed = self.c.snap_sustain_s
 
         # HOLD: arm still vertical, SNAP already fired, enough time passed
         if (r.snap_fired and not r.hold_fired and snap_condition
@@ -244,7 +259,7 @@ class GestureStateMachine:
 
         # SNAP: arm has been held up long enough (time-based, rate-independent)
         if (not r.snap_fired and snap_condition and gate_ok
-                and (now - r.entered_at) >= self.c.snap_sustain_s):
+                and (now - r.entered_at) >= sustain_needed):
             return self._fire_snap(now)
 
         # Near-miss: arm is up but snap condition not met — log for tuning.
@@ -279,7 +294,7 @@ class GestureStateMachine:
                     r.gates_logged.add("wrist_moving")
                     self._on_near_miss(
                         "SNAP", "wrist_moving: wrist not held still", reading)
-            elif (now - r.entered_at) < self.c.snap_sustain_s:
+            elif (now - r.entered_at) < sustain_needed:
                 held = now - r.entered_at
                 reason = f"sustain={held:.3f}s < {self.c.snap_sustain_s}s required"
                 self._on_near_miss("SNAP", reason, reading)

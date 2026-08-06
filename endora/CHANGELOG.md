@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.129
+
+### Fixed — SNAP arriving seconds late, or not at all
+
+Firing required three things **in the same frame**: a high enough arm, a sweep that qualified *at that instant*, and the sustain window already elapsed. But a sweep only qualifies transiently — for the moments around the top of the arc — so whether those coincided was a matter of timing. Miss the overlap and the gesture arrived seconds later, when the numbers happened to line up again, or never. Meanwhile the chime had already fired during the ascent, which is the remaining "sound with no gesture" case.
+
+- **The qualifying sweep is now latched for the duration of the raise.** The question it answers is "did this raise arrive on a flourish", which does not stop being true a moment later. The latch clears when the arm comes down, so one flourish cannot arm later fires.
+- **The sweep replaces `snap_sustain_s` rather than being charged on top of it.** Filtering accidental raises is exactly the job that setting existed for, and the flourish test does it better; requiring both meant the sustain window had to elapse while the sweep still qualified.
+
+Measured from the arm reaching the top of the arc, SNAP now fires between 0.07 s and 0.40 s **before** it — as soon as the sweep is unmistakable — at 5, 8, 10 and 15 fps, for both a brisk and a slow human lift. An arm at rest for 20 seconds, hanging or horizontal, still fires nothing and chimes not at all.
+
 ## 1.9.128
 
 ### Fixed — "sounds but no gestures": the sweep evidence expired before it was used

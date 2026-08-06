@@ -48,8 +48,11 @@ def _state(s: ArmState) -> ArmReading:
 # ── SNAP ──────────────────────────────────────────────────────────────────────
 
 def test_snap_fires_after_snap_sustain_frames():
+    # snap_sustain_s only applies on the legacy hold-style path; with the
+    # flourish test the sweep is the evidence and SNAP fires at the top of
+    # the arc (see test_flourish.py).
     # snap_sustain_s=0.05: first tick at 0.0 is too early, second at 0.1 fires
-    m = _machine(snap_sustain_s=0.05)
+    m = _machine(snap_sustain_s=0.05, snap_require_flourish=False)
     assert m.tick(_vertical_up(), now=0.0) is None
     assert m.tick(_vertical_up(), now=0.1) == Gesture.SNAP
 
@@ -67,7 +70,7 @@ def test_snap_does_not_fire_for_non_vertical_arm():
 
 
 def test_snap_resets_on_arm_down():
-    m = _machine(snap_sustain_frames=2)
+    m = _machine(snap_sustain_s=0.05, snap_require_flourish=False)
     m.tick(_vertical_up(), now=0.0)  # frame 1 of 2
     m.tick(_down(),        now=0.1)  # reset
     assert m.tick(_vertical_up(), now=0.2) is None  # must start over
@@ -76,7 +79,8 @@ def test_snap_resets_on_arm_down():
 # ── HOLD ──────────────────────────────────────────────────────────────────────
 
 def test_hold_fires_after_snap_then_arm_stays_up():
-    m = _machine(snap_sustain_s=0.05, hold_duration_s=1.0, cooldown_s=0.1)
+    m = _machine(snap_sustain_s=0.05, hold_duration_s=1.0, cooldown_s=0.1,
+                 snap_require_flourish=False)
     # Fire snap at t=0.1 (sustain elapsed)
     m.tick(_vertical_up(), now=0.0)
     assert m.tick(_vertical_up(), now=0.1) == Gesture.SNAP

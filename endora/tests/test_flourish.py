@@ -207,3 +207,48 @@ def test_holding_the_arm_up_does_not_dilute_the_rate():
             rates.append(r.sweep_rate)
     assert rates, "raise never confirmed"
     assert min(rates) >= 0.80, f"rate decayed while held: min={min(rates):.2f}"
+
+
+def test_snap_fires_promptly_not_seconds_later():
+    """Regression: the gesture used to arrive seconds late, or not at all.
+
+    Firing required elevation, a *currently* qualifying sweep, and the
+    sustain window to have elapsed, all in the same frame. The sweep only
+    qualifies transiently — around the top of the arc — so whether those
+    coincided was luck. The sweep is now latched for the raise, and it also
+    replaces snap_sustain_s rather than being charged on top of it.
+    """
+    for fps in (5.0, 8.0, 10.0, 15.0):
+        top_frame = len(SWEEP_UP) - 1
+        seq = SWEEP_UP + [178] * int(3 * fps)
+        tr = ArmTracker(ArmTrackerConfig())
+        sm = GestureStateMachine(StateMachineConfig(snap_sustain_s=0.3))
+        fire_i = None
+        for i, ang in enumerate(seq):
+            r = tr.classify(_pose(ang), W, H, None, now=i / fps)
+            g = sm.tick(r, i / fps) if r is not None else None
+            if g is Gesture.SNAP and fire_i is None:
+                fire_i = i
+        assert fire_i is not None, f"never fired at {fps} fps"
+        late_s = (fire_i - top_frame) / fps
+        assert late_s <= 0.5, f"at {fps} fps SNAP arrived {late_s:.2f}s after the top"
+
+
+def test_flourish_latch_clears_when_the_arm_comes_down():
+    """The latch is per-raise: lowering the arm must require a fresh sweep,
+    so a single flourish cannot arm an unlimited number of later fires.
+    """
+    m = GestureStateMachine(StateMachineConfig(snap_sustain_s=0.0,
+                                               cooldown_s=0.0))
+    from cameras.arm_tracker import ArmReading, ArmState as S, Side
+    up_swept = ArmReading(state=S.SINGLE_UP, raised_side=Side.RIGHT,
+                          elevation=0.95, extension=0.95,
+                          sweep_climb=1.6, sweep_rate=2.4)
+    up_static = ArmReading(state=S.SINGLE_UP, raised_side=Side.RIGHT,
+                           elevation=0.95, extension=0.95,
+                           sweep_climb=0.0, sweep_rate=0.0)
+    assert m.tick(up_swept, 0.0) is Gesture.SNAP
+    m.tick(ArmReading(state=S.DOWN), 1.0)          # arm comes down
+    # A raise with no sweep behind it must not inherit the earlier latch.
+    fired = [m.tick(up_static, 2.0 + i / 10) for i in range(20)]
+    assert not any(f for f in fired), f"stale latch fired {fired}"
