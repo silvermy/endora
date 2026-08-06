@@ -441,6 +441,7 @@ class CameraAnalyser(threading.Thread):
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),
             body_scale_reference=float(getattr(s, 'body_scale_reference', 0.18)),
             wrist_still_max_travel=float(getattr(s, 'wrist_still_max_travel', 0.05)),
+            raise_travel_min=float(getattr(s, 'raise_travel_min', 0.08)),
         ))
         state_machine = GestureStateMachine(StateMachineConfig(
             cooldown_s=float(getattr(s, 'cooldown_s', 2.0)),
@@ -814,10 +815,20 @@ class CameraAnalyser(threading.Thread):
                                  self.label, pid, reading.state.name)
                         entry.last_logged_state = reading.state
                         # Chime on rising edge — fire as early as possible so
-                        # speaker latency (e.g. Alexa ~2s) lands near gesture time.
+                        # speaker latency (e.g. Alexa ~2s) lands near gesture
+                        # time. Requires rise evidence: the chime used to
+                        # sound on ANY entry into SINGLE_UP, so a resting arm
+                        # that merely reads as raised chimed over and over
+                        # with no gesture behind it (live data 2026-08-05: 28
+                        # such blocked raises from one seat) — audibly
+                        # indistinguishable from a false positive, since the
+                        # chime is all the user hears. rose_recently is the
+                        # same evidence the SNAP gate uses, so the chime now
+                        # only promises a gesture that can actually fire.
                         if (self._sonos is not None and
                                 reading.state.name in ('SINGLE_UP', 'BOTH_UP') and
-                                prev_state == ArmState.DOWN):
+                                prev_state == ArmState.DOWN and
+                                getattr(reading, 'rose_recently', True)):
                             self._sonos.notify()
                     if reading.state.name == 'SINGLE_UP':
                         log.debug("[%s] pid=%d SINGLE_UP forearm_dy=%.3f snap_roll=%.3f",

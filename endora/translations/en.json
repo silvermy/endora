@@ -24,6 +24,7 @@
     "snap_require_rise": { "name": "SNAP requires a rise", "description": "Only fire if the wrist rose from shoulder level recently — blocks long-static poses (default on)" },
     "snap_require_still": { "name": "SNAP requires stillness", "description": "Only fire while the raised wrist holds still — blocks pass-through reaches (default on)" },
     "wrist_still_max_travel": { "name": "Stillness tolerance", "description": "Max wrist travel (body-scaled) that still counts as holding still (default 0.05)" },
+    "raise_travel_min": { "name": "Minimum raise travel", "description": "How far the wrist must rise to count as a raise when the arm starts above shoulder level, e.g. from an armrest (default 0.08)" },
     "sustained_rearm_s": { "name": "Pose re-arm time (s)", "description": "CROSS_ARMS/T_POSE/RAISE_BOTH fire once per pose; the pose must be released this long to fire again (default 2.0)" },
     "hand_crop_enable": { "name": "Hand detection crop", "description": "Run hand detection on a crop around the raised wrist — much better at couch distance (default on)" }
   }

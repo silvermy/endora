@@ -193,6 +193,11 @@ REGISTRY: list[SettingField] = [
                   "Max wrist travel (body-scaled frame fraction) during the stillness "
                   "window for a raise to count as held still",
                   group="Hysteresis", user_facing=True),
+    SettingField("raise_travel_min", float, 0.08,
+                  "How far the wrist must rise (body-scaled) to satisfy the rise "
+                  "requirement when the arm starts above shoulder level "
+                  "(armrest/backrest raises)",
+                  group="Hysteresis", user_facing=True),
     SettingField("state_confirm_s", float, 0.20,
                   "Seconds a new arm state must be seen before being accepted",
                   group="Hysteresis", user_facing=True),

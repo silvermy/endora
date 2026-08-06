@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.120
+
+### Fixed — "just a sound, no gesture" and phantom chimes
+
+Feedback from 3–5 Aug isolated both halves of the same problem: **the chime was decoupled from the gesture logic**, so what you heard had almost nothing to do with what fired.
+
+- **Rise evidence now accepts travel, not just a below-shoulder start.** Requiring the wrist to be seen at/below shoulder level (v1.9.119) made a raise that *begins* with the arm on an armrest or sofa backrest impossible to fire — the wrist never goes below the shoulder. Seven deliberate-sized raises (reference margin 0.13–0.20) were blocked back-to-back with `no_rise` and never fired. A raise now qualifies if the wrist has **risen** by `raise_travel_min` (0.08, body-scaled) within the window, wherever it started; the below-shoulder test is kept as a second route. Movement is the signal that actually separates a raise from a resting arm.
+- **The chime no longer sounds for raises that cannot fire.** It used to sound on *any* entry into SINGLE_UP, so a resting arm reading as raised chimed repeatedly with no gesture behind it — 28 such blocked raises came from one seat in this batch alone. Since the chime is all you hear, that is audibly identical to a false positive. It now requires the same rise evidence the SNAP gate uses.
+- `rise_travel` is logged on every reading and in `feedback.jsonl`, and the `no_rise` near-miss message now reports the measured travel instead of a generic string.
+
 ## 1.9.119
 
 ### Fixed — sofa-backrest/armrest arm postures re-arming SNAP

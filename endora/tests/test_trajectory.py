@@ -99,8 +99,8 @@ def test_upright_backrest_drape_does_not_rearm_rise():
             right_elbow=Point(0.65, wrist_y + 0.20),
             right_wrist=Point(0.65, wrist_y),
         )
-    high = _drape(0.16)   # raised: 0.24 above shoulder (y=0.40)
-    dip  = _drape(0.37)   # dipped: still 0.03 ABOVE the shoulder
+    high = _drape(0.16)   # resting high: 0.24 above shoulder (y=0.40)
+    dip  = _drape(0.20)   # settles 0.04 lower — under raise_travel_min (0.08)
 
     tr = _tracker()
     sched = []
@@ -114,7 +114,43 @@ def test_upright_backrest_drape_does_not_rearm_rise():
     late = [r for t, r in ups if t >= 3.0]    # buffer fully spans the window
     assert late, "drape pose should still classify as SINGLE_UP"
     assert all(not r.rose_recently for r in late), \
-        "near-shoulder dips must not re-arm rise evidence while upright"
+        "small settling movements must not re-arm rise evidence while upright"
+
+
+def test_raise_starting_above_shoulder_counts_as_rise():
+    # The gesture this whole gate nearly made impossible: the arm starts
+    # resting ON THE ARMREST — already at/above shoulder level, so it never
+    # dips below the shoulder — then is deliberately raised. Travel is the
+    # only evidence available, and it must be enough.
+    def _arm(wrist_y, elbow_y):
+        return _build(
+            right_elbow=Point(0.65, elbow_y),
+            right_wrist=Point(0.65, wrist_y),
+        )
+    resting = _arm(0.39, 0.52)   # wrist just above shoulder (y=0.40)
+    raised  = _arm(0.14, 0.32)   # deliberate raise: 0.25 of travel
+
+    tr = _tracker()
+    # Rest long enough that the history fully spans the rise window — no
+    # benefit of the doubt is in play.
+    sched = [(round(0.1 * i, 1), resting) for i in range(30)]        # 0.0–2.9
+    sched += [(round(3.0 + 0.1 * i, 1), raised) for i in range(11)]  # 3.0–4.0
+    readings = _feed(tr, sched)
+
+    ups = [r for _, r in readings if r is not None and r.state == ArmState.SINGLE_UP]
+    assert ups, "raise from an armrest should classify as SINGLE_UP"
+    assert all(r.rose_recently for r in ups), \
+        "travel must supply rise evidence when the arm starts above the shoulder"
+    assert ups[-1].rise_travel >= 0.08
+
+
+def test_rise_travel_is_reported_on_readings():
+    tr = _tracker()
+    sched = [(round(0.1 * i, 1), arm_down()) for i in range(5)]
+    sched += [(round(0.5 + 0.1 * i, 1), right_arm_up_vertical()) for i in range(11)]
+    ups = [r for _, r in _feed(tr, sched)
+           if r is not None and r.state == ArmState.SINGLE_UP]
+    assert ups and ups[-1].rise_travel > 0.0
 
 
 def test_reclined_resting_wrist_still_counts_as_rise_evidence():

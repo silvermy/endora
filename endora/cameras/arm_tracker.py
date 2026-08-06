@@ -69,6 +69,11 @@ class ArmReading:
     #     passing through on its way to grab a phone/blanket/glass.
     rose_recently: bool = True
     wrist_still: bool = True
+    # How far the wrist has risen (frame fraction) from its lowest position
+    # in the last raise_travel_window_s. This is the evidence that makes
+    # rose_recently true for a raise that STARTS above shoulder level (arm
+    # on an armrest/backrest) — see _rose_recently. Logged for tuning.
+    rise_travel: float = 0.0
     # SINGLE_UP only: how far the raised wrist actually cleared its shoulder
     # (shoulder_y - wrist_y, frame fraction, positive = above). Logged to
     # feedback.jsonl so threshold tuning can finally see the achieved margin
@@ -264,6 +269,17 @@ class ArmTrackerConfig:
     # negative once the history buffer actually spans the window, so a
     # freshly-acquired person is never blocked by an empty buffer.
     raise_travel_window_s: float = 2.5
+    # …OR the wrist has RISEN by at least this much (body-scaled frame
+    # fraction) within the same window, wherever it started. The absolute
+    # below-shoulder test alone cannot see a raise that begins with the arm
+    # already resting on an armrest or sofa backrest — the wrist never goes
+    # below the shoulder, so a genuine deliberate raise from that position
+    # was permanently blocked (live data 2026-08-05: seven deliberate-sized
+    # raises, ref-margin 0.13–0.20, blocked back-to-back with no fire).
+    # Movement is what actually separates a raise from a resting arm, so
+    # travel is the more fundamental signal; the below-shoulder test is kept
+    # because it also covers a slow lift that outruns the window.
+    raise_travel_min: float = 0.08
     # The wrist must stay within wrist_still_max_travel (body-scaled frame
     # fraction) of every position sampled in the last wrist_still_window_s
     # for the raise to count as "held still". A reach for a phone/blanket
@@ -299,23 +315,32 @@ class ArmTracker:
         while self._hist and now - self._hist[0].t > horizon:
             self._hist.popleft()
 
-    def _rose_recently(self, side: Side, now: float, factor: float,
-                       upright: Optional[bool]) -> bool:
-        """Was this side's wrist seen at/below "down" level within the raise
-        window?  What counts as down is posture-aware:
+    def _rose_recently(self, side: Side, wy_now: float, now: float,
+                       factor: float,
+                       upright: Optional[bool]) -> tuple[bool, float]:
+        """Did this arm actually rise?  Returns (rose, travel).
 
-        Upright — the wrist must have been AT or BELOW shoulder level. An
-        arm draped over a sofa backrest or resting on a tall armrest hovers
-        a few percent ABOVE the shoulder and bobs in and out of any
-        above-shoulder tolerance band, re-arming the gate every few minutes
-        (live data 2026-07-12 evening: repeated no_rise blocks followed by
-        re-fires at raise_margin 0.04–0.06). A genuine upright raise starts
-        from the lap — far below — and is unaffected by the strict line.
+        Two independent kinds of evidence, either of which suffices:
 
-        Reclined/unknown — the wrist may be within arm_rising_threshold
-        ABOVE the shoulder: a resting wrist on a horizontal body sits at
-        almost the same image height as the shoulder, so demanding
-        strictly-below would leave a lying person with no rise evidence.
+        1. TRAVEL — the wrist is now at least raise_travel_min (body-scaled)
+           higher than it was at some point in the window. This is the
+           general test: it sees a raise no matter where it started, which
+           matters because an arm resting on an armrest or draped over the
+           backrest never goes below the shoulder, and test 2 alone left
+           genuine raises from that position permanently blocked.
+
+        2. POSITION — the wrist was seen at/below "down" level, which is
+           posture-aware:
+
+           Upright — the wrist must have been AT or BELOW shoulder level.
+           A draped/resting arm hovers a few percent ABOVE the shoulder and
+           bobs in and out of any above-shoulder tolerance band, re-arming
+           the gate every few minutes (live data 2026-07-12).
+
+           Reclined/unknown — the wrist may be within arm_rising_threshold
+           ABOVE the shoulder: a resting wrist on a horizontal body sits at
+           almost the same image height as the shoulder, so demanding
+           strictly-below would leave a lying person with no evidence.
 
         Unknown history (buffer doesn't span the window yet — person only
         just acquired) counts as True: only assert "did not rise" when
@@ -324,6 +349,9 @@ class ArmTracker:
         """
         window = self.c.raise_travel_window_s
         down_line = 0.0 if upright is True else self.c.arm_rising_threshold * factor
+        travel_min = self.c.raise_travel_min * factor
+        below_seen = False
+        travel = 0.0
         for s in self._hist:
             if now - s.t > window:
                 continue
@@ -331,10 +359,16 @@ class ArmTracker:
                 wy, wok, shy, shok = s.lw_y, s.lw_ok, s.ls_y, s.ls_ok
             else:
                 wy, wok, shy, shok = s.rw_y, s.rw_ok, s.rs_y, s.rs_ok
-            if wok and shok and wy >= shy - down_line:
-                return True
+            if not wok:
+                continue
+            if shok and wy >= shy - down_line:
+                below_seen = True
+            # y grows downward, so a larger past y means the wrist has risen.
+            travel = max(travel, wy - wy_now)
+        if below_seen or travel >= travel_min:
+            return True, travel
         covered = bool(self._hist) and (now - self._hist[0].t) >= window * 0.9
-        return not covered
+        return (not covered), travel
 
     def _wrist_still(self, side: Side, wx: float, wy: float,
                      now: float, factor: float) -> bool:
@@ -629,10 +663,11 @@ class ArmTracker:
             side = Side.RIGHT if rw_raised else Side.LEFT
             wrist, elbow, shoulder = (rw, re, rs) if rw_raised else (lw, le, ls)
             if now is not None:
-                rose  = self._rose_recently(side, now, f, upright)
+                rose, travel = self._rose_recently(side, wrist.y, now, f, upright)
                 still = self._wrist_still(side, wrist.x, wrist.y, now, f)
             else:
                 rose = still = True
+                travel = 0.0
             return ArmReading(
                 state=ArmState.SINGLE_UP,
                 raised_side=side,
@@ -643,6 +678,7 @@ class ArmTracker:
                 scale_factor=f,
                 rose_recently=rose,
                 wrist_still=still,
+                rise_travel=travel,
                 raise_margin=shoulder.y - wrist.y,
             )
 

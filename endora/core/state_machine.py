@@ -233,7 +233,10 @@ class GestureStateMachine:
                 if "no_rise" not in r.gates_logged:
                     r.gates_logged.add("no_rise")
                     self._on_near_miss(
-                        "SNAP", "no_rise: wrist not seen below shoulder recently",
+                        "SNAP",
+                        f"no_rise: no lift seen — rise_travel="
+                        f"{reading.rise_travel:.3f} (scale={reading.scale_factor:.2f})"
+                        f" and wrist never at/below shoulder",
                         reading)
             elif not still_ok:
                 if "wrist_moving" not in r.gates_logged:

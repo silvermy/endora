@@ -263,6 +263,14 @@ class Settings:
     # toward 0.08 if deliberate raises with a wobbly hand get blocked; lower
     # toward 0.03 if slow reaches still fire.
     wrist_still_max_travel: float = 0.05
+    # How far the wrist must RISE (body-scaled frame fraction, within the
+    # rise window) to satisfy snap_require_rise when the arm starts above
+    # shoulder level — an arm resting on an armrest or sofa backrest never
+    # dips below the shoulder, so without this a genuine raise from that
+    # position could never fire. Lower toward 0.05 if raises still get
+    # blocked with "no_rise"; raise toward 0.12 if a resting arm shifting
+    # position starts firing.
+    raise_travel_min: float = 0.08
 
     # Seconds a new arm state must be seen before being accepted.
     # Lower = more responsive but may get single-frame false positives.
