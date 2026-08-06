@@ -199,16 +199,30 @@ REGISTRY: list[SettingField] = [
                   "snap_forearm_min (0 = disabled; see settings.py for why)", group="Gesture"),
 
     # ── Hysteresis timing ────────────────────────────────────────────────
-    SettingField("snap_sustain_s", float, 0.20,
-                  "Seconds the arm must stay up before SNAP fires", group="Hysteresis", user_facing=True,
+    SettingField("snap_sustain_s", float, 0.0,
+                  "Seconds the arm must stay up before SNAP fires (0 with the flourish "
+                  "test, which fires at the top of the sweep)", group="Hysteresis", user_facing=True,
                   ui=UIMeta("Snap hold time (s)", "slider", 0.0, 1.0, 0.05, "Gesture", order=2)),
-    SettingField("snap_require_rise", bool, True,
-                  "SNAP requires the wrist to have risen from below shoulder level within "
-                  "the last few seconds (blocks long-static poses like chin-on-hand)",
+    SettingField("snap_require_flourish", bool, True,
+                  "Fire on the arm SWEEP (Endora's flourish) rather than on a raised arm "
+                  "held still — also makes resting-arm false positives impossible",
                   group="Hysteresis", user_facing=True),
-    SettingField("snap_require_still", bool, True,
-                  "SNAP requires the raised wrist to hold still briefly "
-                  "(blocks pass-through reaches for phone/blanket)",
+    SettingField("flourish_min_climb", float, 0.60,
+                  "How much elevation the sweep must gain (full down-to-up sweep is ~2.0; "
+                  "starting from an armrest, ~0.7)",
+                  group="Hysteresis", user_facing=True),
+    SettingField("flourish_min_rate", float, 0.80,
+                  "How fast the sweep must be, in elevation units per second "
+                  "(a resting arm is ~0, a deliberate flourish 2-3)",
+                  group="Hysteresis", user_facing=True),
+    SettingField("snap_require_rise", bool, True,
+                  "Legacy hold-style gate (only when snap_require_flourish is off): "
+                  "require the arm to have risen recently",
+                  group="Hysteresis", user_facing=True),
+    SettingField("snap_require_still", bool, False,
+                  "Legacy hold-style gate (only when snap_require_flourish is off): "
+                  "require the raised wrist to hold still. Off by default — a flourish "
+                  "never holds still",
                   group="Hysteresis", user_facing=True),
     SettingField("wrist_still_max_travel_arm", float, 0.15,
                   "Max wrist travel during the stillness window, as a multiple of that "

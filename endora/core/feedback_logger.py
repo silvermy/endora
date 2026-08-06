@@ -67,6 +67,8 @@ def _snap(reading) -> dict:
         "rose_recently": bool(getattr(reading, "rose_recently", True)),
         "wrist_still": bool(getattr(reading, "wrist_still", True)),
         "rise_delta": round(float(getattr(reading, "rise_delta", 0.0)), 3),
+        "sweep_climb": round(float(getattr(reading, "sweep_climb", 0.0)), 3),
+        "sweep_rate": round(float(getattr(reading, "sweep_rate", 0.0)), 3),
     }
 
 

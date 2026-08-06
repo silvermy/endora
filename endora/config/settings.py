@@ -195,26 +195,37 @@ class Settings:
     # Minimum time the arm must stay up before SNAP fires (seconds), measured
     # from the first confirmed SINGLE_UP frame.  Filters out brief accidental
     # raises; ArmTracker's state_confirm_s adds another 0.20s on top.
-    # Raised 0.10 -> 0.20 in v1.9.113 after feedback.jsonl showed a cluster of
+    # Was a hold timer; with the flourish test the sweep itself is the
+    # evidence, so this defaults to 0 — SNAP fires at the top of the arc
+    # instead of waiting. Historical note: raised 0.10 -> 0.20 in v1.9.113 after feedback.jsonl showed a cluster of
     # false SNAPs during a busy morning-routine window that forearm_dy/snap_roll
     # couldn't separate from real fires — a moderate middle ground between this
     # and the 0.50 default that v1.9.93 lowered specifically because real
     # snaps were being missed at higher sustain values; watch near_miss entries
     # for "sustain … < 0.20s required" if genuine snaps start getting dropped.
-    snap_sustain_s: float = 0.20
-    # Trajectory gates for SNAP — both computed by the arm tracker from a
-    # short wrist-position history and carried on each reading:
-    # snap_require_rise: SNAP only fires if the wrist was seen below shoulder
-    # level within the last few seconds. Blocks fires from poses that have
-    # simply existed for a while (hand propped against the head, a ghost
-    # detection with a permanently "raised" arm, sleeping posture) — a
-    # deliberate gesture always starts with an actual upward motion.
+    snap_sustain_s: float = 0.0
+    # ── The flourish ──────────────────────────────────────────────────────
+    # The gesture is Endora's: a theatrical arm sweep, up and usually
+    # straight back down — not a raised hand held still like a question in
+    # class. Requiring the sweep is also what makes the static false
+    # positives impossible by construction: an arm resting on an armrest,
+    # draped over a backrest or holding a phone sweeps at a rate of
+    # essentially zero, however much it resembles a raise geometrically.
+    # Turn this off to fall back to the older hold-style detection.
+    snap_require_flourish: bool = True
+    # How much elevation the sweep must gain. A full sweep from hanging-down
+    # to straight-up is ~2.0; one starting from an armrest has ~0.7
+    # available. 0.60 admits both while rejecting a draped arm shifting
+    # position (~0.4). Lower if flourishes are missed, raise if a lazy arm
+    # movement triggers.
+    flourish_min_climb: float = 0.60
+    # …and how fast, in elevation units per second. A resting arm sits near
+    # 0, a deliberate flourish runs 2–3. 0.80 leaves room for an unhurried
+    # sweep without admitting slow drift.
+    flourish_min_rate: float = 0.80
+    # Legacy hold-style gates — used only when snap_require_flourish is off.
     snap_require_rise: bool = True
-    # snap_require_still: SNAP only fires while the raised wrist is holding
-    # still. A reach (phone, blanket, glass) passes through the raised zone
-    # while still moving; a deliberate raise stops and holds. Disable either
-    # gate live if it ever blocks genuine gestures.
-    snap_require_still: bool = True
+    snap_require_still: bool = False
     # Max wrist travel during the stillness window, as a multiple of that
     # arm's OWN length — so it means the same thing near or far from the
     # camera. Raise toward 0.25 if deliberate raises with a wobbly hand get

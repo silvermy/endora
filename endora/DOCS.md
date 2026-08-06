@@ -217,7 +217,10 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `body_upright_min` | `-0.15` | Hip-shoulder gap to confirm upright (negative OK for fisheye) |
 | `pose_visibility_min` | `0.45` | Min landmark visibility to accept a pose (filters furniture) |
 | `wrist_head_exclude_dist` | `0.09` | Reject a raised wrist within this distance of the nose keypoint (filters resting a hand against your own face) |
-| `snap_elevation_min` | `0.70` | Minimum arm elevation for SNAP to fire |
+| `snap_elevation_min` | `0.70` | Minimum arm elevation for the gesture to fire |
+| `snap_require_flourish` | `true` | Fire on the arm sweep (Endora's flourish), not on a held raise |
+| `flourish_min_climb` | `0.60` | How much elevation the sweep must gain |
+| `flourish_min_rate` | `0.80` | How fast the sweep must be (elevation per second) |
 | `snap_sustain_s` | `0.10` | Seconds the arm must stay up before SNAP fires |
 | `hold_duration_s` | `1.5` | Seconds after SNAP that arm must stay up to fire HOLD |
 | `double_snap_window_s` | `3.0` | Seconds within which two snaps count as DOUBLE_SNAP |

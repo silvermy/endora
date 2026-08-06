@@ -34,15 +34,15 @@
     },
     "snap_sustain_s": {
       "name": "Snap hold time (s)",
-      "description": "Arm must stay up this long before SNAP fires (default 0.20)"
+      "description": "Extra hold required after the arm is up. 0 with the flourish test, which fires at the top of the sweep"
     },
     "snap_require_rise": {
       "name": "SNAP requires a rise",
-      "description": "Only fire if the wrist rose from shoulder level recently — blocks long-static poses (default on)"
+      "description": "Legacy hold-style gate — only applies when 'Require a flourish' is off"
     },
     "snap_require_still": {
       "name": "SNAP requires stillness",
-      "description": "Only fire while the raised wrist holds still — blocks pass-through reaches (default on)"
+      "description": "Legacy hold-style gate — only applies when 'Require a flourish' is off"
     },
     "sustained_rearm_s": {
       "name": "Pose re-arm time (s)",
@@ -79,6 +79,18 @@
     "wrist_still_max_travel_arm": {
       "name": "Stillness tolerance",
       "description": "How far the wrist may drift and still count as held, as a fraction of the arm's own length (default 0.15)"
+    },
+    "snap_require_flourish": {
+      "name": "Require a flourish",
+      "description": "Fire on the arm SWEEP — Endora's flourish — rather than on a raised arm held still. Also makes resting-arm false positives impossible. Turn off for the older hold-style gesture"
+    },
+    "flourish_min_climb": {
+      "name": "Flourish size",
+      "description": "How much the arm must climb during the sweep. A full down-to-up sweep is ~2.0; starting from an armrest, ~0.7 (default 0.60)"
+    },
+    "flourish_min_rate": {
+      "name": "Flourish speed",
+      "description": "How fast the sweep must be, in elevation per second. A resting arm is ~0, a deliberate flourish 2-3 (default 0.80)"
     }
   }
 }

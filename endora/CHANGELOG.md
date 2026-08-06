@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.123
+
+### Changed — detect the flourish, not a held pose
+
+Endora's gesture is a theatrical arm sweep with a chime, not a hand raised and held like a question in class. The detector had been built around the latter, and testing made the gap unambiguous: **a real flourish — arm sweeping up over ~0.6 s and straight back down — fired nothing at all**, at any frame rate. The `wrist_still` gate, added to reject reaching for a phone, rejects a flourish for exactly the same reason: a sweep never holds still.
+
+SNAP now fires on the sweep itself, measured on two new values carried by every reading:
+
+- **`sweep_climb`** — elevation gained since the arm's lowest point in the last 0.8 s. A full down-to-up sweep is ~2.0; one starting from an armrest, ~0.7.
+- **`sweep_rate`** — that climb per second. A resting arm sits at ~0; a deliberate flourish runs 2–3.
+
+This is a stronger false-positive filter than everything it replaces. Every static false positive we have fought — an arm on an armrest, draped over a backrest, holding a phone, a hand at the face — is geometrically similar to a raise but sweeps at a rate of essentially zero, so requiring the sweep excludes them **by construction** rather than by accumulated gates. `snap_require_still` is now off by default and `snap_sustain_s` drops to 0: the sweep is the evidence, so the gesture fires at the top of the arc.
+
+- **Fires roughly 0.6 s sooner**, because it no longer waits for stillness plus a sustain window after the arm arrives. A raise arriving on a large, *progressive* sweep also skips the `state_confirm_s` wait — that delay exists to reject single-frame phantoms, and a coherent multi-frame climb is already proof of real movement. "Progressive" matters: a keypoint flickering between a good position and a garbage one produces a large climb and an enormous rate but is bimodal, never passing through intermediate elevations, and is still rejected.
+- **The chime now fires at sweep onset**, while the arm is still travelling up, so an Echo's 1–2 s latency lands the sound as the flourish completes instead of well after it.
+- `snap_require_flourish` can be turned off to restore the hold-style gesture.
+
+Verified end-to-end at 1280×640: the flourish fires at 8, 10 and 15 fps, fires before the arm comes back down, and fires when the sweep starts from an armrest; a statically raised arm, an armrest rest, a backrest drape, a hand at the face and a ten-second slow lift all stay silent.
+
 ## 1.9.122
 
 ### Added — you can finally see what is actually running

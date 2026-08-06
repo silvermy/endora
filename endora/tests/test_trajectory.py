@@ -210,19 +210,20 @@ def _machine(**overrides) -> GestureStateMachine:
 
 def _up_reading(**kw) -> ArmReading:
     defaults = dict(state=ArmState.SINGLE_UP, raised_side=Side.RIGHT,
-                    wrist_x=800, wrist_y=100, elevation=0.92, extension=0.95)
+                    wrist_x=800, wrist_y=100, elevation=0.92, extension=0.95,
+                    sweep_climb=1.6, sweep_rate=2.4)
     defaults.update(kw)
     return ArmReading(**defaults)
 
 
 def test_snap_blocked_without_rise():
-    m = _machine()
+    m = _machine(snap_require_flourish=False)
     fired = [m.tick(_up_reading(rose_recently=False), t / 10) for t in range(15)]
     assert not any(fired), "SNAP must not fire without rise evidence"
 
 
 def test_snap_blocked_while_wrist_moving_then_fires_when_still():
-    m = _machine()
+    m = _machine(snap_require_flourish=False, snap_require_still=True)
     fired = [m.tick(_up_reading(wrist_still=False), t / 10) for t in range(5)]
     assert not any(fired), "SNAP must not fire while the wrist is moving"
     g = m.tick(_up_reading(wrist_still=True), 0.5)
@@ -230,7 +231,8 @@ def test_snap_blocked_while_wrist_moving_then_fires_when_still():
 
 
 def test_gates_can_be_disabled():
-    m = _machine(snap_require_rise=False, snap_require_still=False)
+    m = _machine(snap_require_flourish=False,
+                 snap_require_rise=False, snap_require_still=False)
     fired = [m.tick(_up_reading(rose_recently=False, wrist_still=False), t / 10)
              for t in range(5)]
     assert Gesture.SNAP in fired, "disabled gates must not block SNAP"

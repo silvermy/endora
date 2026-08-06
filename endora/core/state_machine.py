@@ -77,15 +77,27 @@ class StateMachineConfig:
     # 0.0 = disabled (rely on forearm_dy only).
     snap_roll_threshold: float = 0.0
 
-    # Trajectory gates (computed by ArmTracker, carried on the ArmReading):
-    # snap_require_rise — SNAP only fires if the wrist was seen below
-    #   shoulder level recently (reading.rose_recently); blocks re-fires from
-    #   long-static poses (hand propped against head, ghost detections).
-    # snap_require_still — SNAP only fires while the wrist is holding still
-    #   (reading.wrist_still); blocks pass-through reaches (phone, blanket).
-    # Either can be disabled live if it ever blocks genuine gestures.
+    # ── Flourish ──────────────────────────────────────────────────────────
+    # The gesture is a theatrical arm sweep — up and (usually) straight back
+    # down — not a raised hand held still. Requiring the sweep instead of a
+    # hold is also what makes every static false positive impossible by
+    # construction: an arm resting on an armrest, draped over a backrest, or
+    # holding a phone produces a sweep rate of essentially zero, however
+    # much it resembles a raise geometrically.
+    snap_require_flourish: bool = True
+    # Elevation the arm must gain (see ArmReading.sweep_climb). 0.60 admits a
+    # flourish that starts from an armrest (~0.7 available) while rejecting a
+    # draped arm merely shifting position (~0.4).
+    flourish_min_climb: float = 0.60
+    # …and how fast, in elevation units per second. A resting arm sits near
+    # 0; a deliberate flourish runs 2-3. 0.80 leaves room for a slow,
+    # unhurried sweep without admitting drift.
+    flourish_min_rate: float = 0.80
+
+    # Legacy hold-style gating, used only when snap_require_flourish is off:
+    # require the arm to have risen, and to be held still, before firing.
     snap_require_rise: bool = True
-    snap_require_still: bool = True
+    snap_require_still: bool = False
 
     # A sustained-pose gesture (CROSS_ARMS / T_POSE / RAISE_BOTH) fires once
     # per pose entry and then latches: it cannot re-fire until the pose has
@@ -212,10 +224,17 @@ class GestureStateMachine:
             and abs(reading.snap_roll) >= self.c.snap_roll_threshold
         )
         snap_condition = arm_vertical or roll_snap
-        # Trajectory gates — evidence the raise was a deliberate up-and-hold,
-        # not a static pose (rise) or a pass-through reach (still).
-        rise_ok  = (not self.c.snap_require_rise) or reading.rose_recently
-        still_ok = (not self.c.snap_require_still) or reading.wrist_still
+        # Motion evidence. The flourish test asks "did this arm just sweep up
+        # fast?", which is the gesture itself; the legacy path asks the
+        # weaker "did it rise, and is it being held?".
+        if self.c.snap_require_flourish:
+            gate_ok = (reading.sweep_climb >= self.c.flourish_min_climb
+                       and reading.sweep_rate >= self.c.flourish_min_rate)
+            rise_ok = still_ok = True
+        else:
+            rise_ok  = (not self.c.snap_require_rise) or reading.rose_recently
+            still_ok = (not self.c.snap_require_still) or reading.wrist_still
+            gate_ok = rise_ok and still_ok
 
         # HOLD: arm still vertical, SNAP already fired, enough time passed
         if (r.snap_fired and not r.hold_fired and snap_condition
@@ -224,7 +243,7 @@ class GestureStateMachine:
             return self._fire(Gesture.HOLD, now)
 
         # SNAP: arm has been held up long enough (time-based, rate-independent)
-        if (not r.snap_fired and snap_condition and rise_ok and still_ok
+        if (not r.snap_fired and snap_condition and gate_ok
                 and (now - r.entered_at) >= self.c.snap_sustain_s):
             return self._fire_snap(now)
 
@@ -236,16 +255,27 @@ class GestureStateMachine:
                           f" extension={reading.extension:.2f},"
                           f" snap_roll={reading.snap_roll:.3f}")
                 self._on_near_miss("SNAP", reason, reading)
-            elif not rise_ok:
-                if "no_rise" not in r.gates_logged:
-                    r.gates_logged.add("no_rise")
-                    self._on_near_miss(
-                        "SNAP",
-                        f"no_rise: no lift seen — elevation climbed only "
-                        f"{reading.rise_delta:.2f} and the arm was never low",
-                        reading)
-            elif not still_ok:
-                if "wrist_moving" not in r.gates_logged:
+            elif not gate_ok:
+                if self.c.snap_require_flourish:
+                    if "no_flourish" not in r.gates_logged:
+                        r.gates_logged.add("no_flourish")
+                        self._on_near_miss(
+                            "SNAP",
+                            f"no_flourish: arm is up but did not sweep — "
+                            f"climb={reading.sweep_climb:.2f} "
+                            f"(need {self.c.flourish_min_climb:.2f}), "
+                            f"rate={reading.sweep_rate:.2f}/s "
+                            f"(need {self.c.flourish_min_rate:.2f})",
+                            reading)
+                elif not rise_ok:
+                    if "no_rise" not in r.gates_logged:
+                        r.gates_logged.add("no_rise")
+                        self._on_near_miss(
+                            "SNAP",
+                            f"no_rise: no lift seen — elevation climbed only "
+                            f"{reading.rise_delta:.2f} and the arm was never low",
+                            reading)
+                elif "wrist_moving" not in r.gates_logged:
                     r.gates_logged.add("wrist_moving")
                     self._on_near_miss(
                         "SNAP", "wrist_moving: wrist not held still", reading)

@@ -297,6 +297,9 @@ class _PersonEntry:
     # Last non-None ArmReading — used to centre the hand-detection crop on
     # the raised wrist (see _crop_around_wrist).
     last_reading:      object        = None
+    # True once the chime has sounded for the sweep currently in progress;
+    # cleared when the arm settles, so one flourish makes one sound.
+    chimed_this_sweep: bool          = False
     # Liveness confirmation — see _LIVENESS_CONFIRM_WINDOW_S. Sticky once
     # True; confirmed_human pids (and pids still inside their own grace
     # period since last_genuine_live_at — see _known_centroids) contribute
@@ -446,10 +449,13 @@ class CameraAnalyser(threading.Thread):
             hold_duration_s=float(getattr(s, 'hold_duration_s', 1.5)),
             double_snap_window_s=float(getattr(s, 'double_snap_window_s', 3.0)),
             sustain_s=float(getattr(s, 'sustain_s', 0.5)),
-            snap_sustain_s=float(getattr(s, 'snap_sustain_s', 0.20)),
+            snap_sustain_s=float(getattr(s, 'snap_sustain_s', 0.0)),
             snap_roll_threshold=float(getattr(s, 'snap_roll_threshold', 0.0)),
+            snap_require_flourish=bool(getattr(s, 'snap_require_flourish', True)),
+            flourish_min_climb=float(getattr(s, 'flourish_min_climb', 0.60)),
+            flourish_min_rate=float(getattr(s, 'flourish_min_rate', 0.80)),
             snap_require_rise=bool(getattr(s, 'snap_require_rise', True)),
-            snap_require_still=bool(getattr(s, 'snap_require_still', True)),
+            snap_require_still=bool(getattr(s, 'snap_require_still', False)),
             sustained_rearm_s=float(getattr(s, 'sustained_rearm_s', 2.0)),
         ), on_near_miss=self._near_miss_cb)
         # A brand-new pid can only be created from a candidate that didn't
@@ -811,26 +817,27 @@ class CameraAnalyser(threading.Thread):
                         log.info("[%s] pid=%d state → %s",
                                  self.label, pid, reading.state.name)
                         entry.last_logged_state = reading.state
-                        # Chime on rising edge — fire as early as possible so
-                        # speaker latency (e.g. Alexa ~2s) lands near gesture
-                        # time. Requires rise evidence: the chime used to
-                        # sound on ANY entry into SINGLE_UP, so a resting arm
-                        # that merely reads as raised chimed over and over
-                        # with no gesture behind it (live data 2026-08-05: 28
-                        # such blocked raises from one seat) — audibly
-                        # indistinguishable from a false positive, since the
-                        # chime is all the user hears. rose_recently is the
-                        # same evidence the SNAP gate uses, so the chime now
-                        # only promises a gesture that can actually fire.
-                        if (self._sonos is not None and
-                                reading.state.name in ('SINGLE_UP', 'BOTH_UP') and
-                                prev_state == ArmState.DOWN and
-                                getattr(reading, 'rose_recently', True)):
-                            self._sonos.notify()
                     if reading.state.name == 'SINGLE_UP':
                         log.debug("[%s] pid=%d SINGLE_UP elev=%.2f ext=%.2f snap_roll=%.3f",
                                   self.label, pid, reading.elevation,
                                   reading.extension, reading.snap_roll)
+                    # Chime on sweep ONSET — while the arm is still on its
+                    # way up. This is the Bewitched beat: speaker latency
+                    # (an Echo is ~1-2s) then lands the sound as the
+                    # flourish completes, instead of well after it. Uses the
+                    # same sweep rate the gesture gate uses, so a resting
+                    # arm can never trigger it; chime_debounce_s guards
+                    # against repeats.
+                    _rate = float(getattr(reading, 'sweep_rate', 0.0))
+                    _sweeping = _rate >= float(
+                        getattr(self.s, 'flourish_min_rate', 0.80))
+                    if self._sonos is not None:
+                        if _sweeping and not entry.chimed_this_sweep:
+                            entry.chimed_this_sweep = True
+                            self._sonos.notify()
+                        elif not _sweeping and reading.state == ArmState.DOWN:
+                            entry.chimed_this_sweep = False
+
                     if self._feedback:
                         self._feedback.push_reading(reading)
 
@@ -966,6 +973,11 @@ def _draw_debug(frame, all_person_kps, hand_lm, reading, fired_gesture):
             color = (0, 255, 100) if (rose and still) else (0, 165, 255)
             lines.append((f"rose: {'Y' if rose else 'N'} (+{getattr(reading, 'rise_delta', 0.0):.2f})"
                           f"  still: {'Y' if still else 'N'}", color))
+        _sc = getattr(reading, 'sweep_climb', 0.0)
+        _sr = getattr(reading, 'sweep_rate', 0.0)
+        if _sc > 0.01 or state_name == 'SINGLE_UP':
+            lines.append((f"sweep: climb {_sc:.2f}  rate {_sr:.2f}/s",
+                          (0, 255, 100) if _sr >= 0.8 else (200, 200, 200)))
     else:
         lines = [("state: none", (160, 160, 160))]
 

@@ -28,6 +28,7 @@ def _vertical_up() -> ArmReading:
         raised_side=Side.RIGHT,
         wrist_x=800, wrist_y=100,
         elevation=0.92, extension=0.95,
+        sweep_climb=1.6, sweep_rate=2.4,
     )
 
 

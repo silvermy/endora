@@ -109,6 +109,24 @@ class ArmReading:
     wrist_still: bool = True
     # How much this arm's elevation has climbed within the rise window.
     rise_delta: float = 0.0
+    # ── Flourish (the actual gesture: a sweep, not a held pose) ───────────
+    # sweep_climb — elevation gained since this arm's lowest point inside
+    #   flourish_window_s. A full sweep from hanging-down to straight-up is
+    #   ~2.0; starting from an armrest, ~0.7.
+    # sweep_rate  — that climb divided by how long it took, in elevation
+    #   units per second. This is the number that separates a deliberate
+    #   flourish from every static pose we have ever had trouble with: a
+    #   resting arm's rate is ~0 no matter how much it looks like a raise.
+    # Both are computed for whichever arm is highest, including while the
+    # state is still DOWN, so the chime can fire on the way up.
+    sweep_climb: float = 0.0
+    sweep_rate: float = 0.0
+    # True when the climb was progressive — the arm was actually observed
+    # passing through intermediate elevations rather than jumping between
+    # two extremes. A real sweep is progressive; a keypoint flickering
+    # between a good and a garbage position is bimodal and is not, which is
+    # what stops noise from being mistaken for a fast gesture.
+    sweep_progressive: bool = False
 
 
 # ── Landmark protocol for type hints ──────────────────────────────────────────
@@ -286,6 +304,18 @@ class ArmTrackerConfig:
     wrist_still_window_s: float = 0.30
     wrist_still_max_travel: float = 0.15
 
+    # ── Flourish ──────────────────────────────────────────────────────────
+    # How far back to look for the bottom of the sweep. A theatrical arm
+    # flourish takes roughly half a second to a second.
+    flourish_window_s: float = 0.80
+    # A raise arriving on the end of a sweep at least this large skips the
+    # state_confirm_s wait. That delay exists to reject single-frame
+    # phantoms, and a coherent multi-frame climb of this size is already
+    # proof the arm is genuinely moving — whereas paying the delay would
+    # eat most of the brief window a fast flourish spends at the top, and
+    # a really snappy one could never confirm at all.
+    sweep_confirm_climb: float = 0.60
+
 
 class ArmTracker:
     def __init__(self, config: ArmTrackerConfig):
@@ -306,13 +336,51 @@ class ArmTracker:
             self._hist.popleft()
 
     def _side_hist(self, side: Side, now: float, window: float):
-        """Yield this side's samples inside *window* seconds of now."""
+        """Yield (timestamp, sample) for this side inside *window* seconds."""
         for s in self._hist:
             if now - s.t > window:
                 continue
             sample = s.left if side is Side.LEFT else s.right
             if sample.ok:
-                yield sample
+                yield s.t, sample
+
+    def _sweep(self, side: Side, elevation: float,
+               now: float) -> Tuple[float, float, bool]:
+        """Return (climb, rate) for this arm's current upward sweep.
+
+        Returns (climb, rate, progressive).
+
+        climb is the elevation gained since the arm's lowest point inside
+        flourish_window_s; rate is that climb per second since that low
+        point. Together they describe a flourish — a fast arc from low to
+        high — and they are what distinguishes a deliberate gesture from a
+        resting arm, which produces a rate of essentially zero however much
+        it happens to resemble a raise geometrically.
+
+        progressive says the arm was seen at intermediate elevations on the
+        way, so the climb is a trajectory rather than a jump between two
+        extremes. Pose-keypoint noise flickering between a good position and
+        a garbage one produces a large climb and a huge rate but is bimodal,
+        and must not be read as a very fast gesture.
+        """
+        low_elev = None
+        low_t = now
+        for t, sample in self._side_hist(side, now, self.c.flourish_window_s):
+            if low_elev is None or sample.elevation < low_elev:
+                low_elev, low_t = sample.elevation, t
+        if low_elev is None:
+            return 0.0, 0.0, False
+        climb = elevation - low_elev
+        dt = now - low_t
+        if climb <= 0.0 or dt <= 1e-6:
+            return max(climb, 0.0), 0.0, False
+        band_lo = low_elev + 0.25 * climb
+        band_hi = elevation - 0.25 * climb
+        progressive = any(
+            band_lo < sample.elevation < band_hi
+            for _t, sample in self._side_hist(side, now, self.c.flourish_window_s)
+        )
+        return climb, climb / dt, progressive
 
     def _rose_recently(self, side: Side, elevation: float,
                        now: float) -> Tuple[bool, float]:
@@ -332,7 +400,7 @@ class ArmTracker:
         """
         window = self.c.raise_travel_window_s
         lowest = None
-        for sample in self._side_hist(side, now, window):
+        for _t, sample in self._side_hist(side, now, window):
             if lowest is None or sample.elevation < lowest:
                 lowest = sample.elevation
         if lowest is None:
@@ -352,7 +420,7 @@ class ArmTracker:
         if arm_len <= 1e-6:
             return True
         max_travel = self.c.wrist_still_max_travel * arm_len
-        for sample in self._side_hist(side, now, self.c.wrist_still_window_s):
+        for _t, sample in self._side_hist(side, now, self.c.wrist_still_window_s):
             if _dist((x, y), (sample.x, sample.y)) > max_travel:
                 return False
         return True
@@ -399,7 +467,7 @@ class ArmTracker:
                 self._pending_state = raw_state
                 self._pending_since = now
 
-            if (now - self._pending_since) >= self.c.state_confirm_s:
+            if (now - self._pending_since) >= self._confirm_needed(raw):
                 self._stable_reading = raw
                 self._pending_state = None
                 return raw
@@ -416,7 +484,8 @@ class ArmTracker:
             self._pending_state = raw_state
             self._pending_since = now
 
-        needed = self.c.state_release_s if raw_state == ArmState.DOWN else self.c.state_confirm_s
+        needed = (self.c.state_release_s if raw_state == ArmState.DOWN
+                  else self._confirm_needed(raw))
 
         if (now - self._pending_since) >= needed:
             self._stable_reading = raw if raw is not None else ArmReading(state=ArmState.DOWN)
@@ -424,6 +493,21 @@ class ArmTracker:
             return self._stable_reading
 
         return self._stable_reading
+
+    def _confirm_needed(self, raw: Optional[ArmReading]) -> float:
+        """How long a new non-DOWN state must persist before it is accepted.
+
+        Normally state_confirm_s, which rejects single-frame phantoms. A
+        raise that arrives on the end of a substantial sweep skips the wait:
+        the sweep is itself multi-frame evidence of real movement, and a
+        fast flourish may spend barely longer than state_confirm_s above the
+        raise threshold — paying it would drop the gesture entirely.
+        """
+        if (raw is not None and raw.state == ArmState.SINGLE_UP
+                and raw.sweep_climb >= self.c.sweep_confirm_climb
+                and raw.sweep_progressive):
+            return 0.0
+        return self.c.state_confirm_s
 
     # ── Classification ────────────────────────────────────────────────────
 
@@ -570,8 +654,10 @@ class ArmTracker:
             if now is not None:
                 rose, rise_delta = self._rose_recently(side, elev, now)
                 still = self._wrist_still(side, wrist[0], wrist[1], now, arm_len)
+                climb, rate, progressive = self._sweep(side, elev, now)
             else:
                 rose, still, rise_delta = True, True, 0.0
+                climb, rate, progressive = 0.0, 0.0, False
 
             return ArmReading(
                 state=ArmState.SINGLE_UP,
@@ -586,16 +672,26 @@ class ArmTracker:
                 rose_recently=rose,
                 wrist_still=still,
                 rise_delta=rise_delta,
+                sweep_climb=climb,
+                sweep_rate=rate,
+                sweep_progressive=progressive,
             )
 
-        # Nothing raised — report the better arm's geometry for the overlay,
-        # and whether either arm is on its way up (drives the early chime).
+        # Nothing raised — report the higher arm's geometry for the overlay,
+        # including its sweep, so the chime can fire while the arm is still
+        # on its way up rather than after it arrives.
         if l_ok and (not r_ok or l_elev >= r_elev):
-            best_elev, best_ext, best_len = l_elev, l_ext, l_len
+            best_side, best_elev, best_ext, best_len = Side.LEFT, l_elev, l_ext, l_len
         else:
-            best_elev, best_ext, best_len = r_elev, r_ext, r_len
+            best_side, best_elev, best_ext, best_len = Side.RIGHT, r_elev, r_ext, r_len
+        if now is not None and (l_ok or r_ok):
+            climb, rate, progressive = self._sweep(best_side, best_elev, now)
+        else:
+            climb, rate, progressive = 0.0, 0.0, False
         rising = max(l_elev if l_ok else -1.0,
                      r_elev if r_ok else -1.0) >= self.c.arm_rising_elevation
         return ArmReading(state=ArmState.DOWN, upright=bool(upright),
                           elevation=best_elev, extension=best_ext,
-                          arm_len_px=best_len, arm_rising=rising)
+                          arm_len_px=best_len, arm_rising=rising,
+                          sweep_climb=climb, sweep_rate=rate,
+                          sweep_progressive=progressive)
