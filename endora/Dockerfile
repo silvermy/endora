@@ -70,6 +70,17 @@ RUN wget -q -L "${MODELS_BASE}/yolo11n-pose.onnx"     -O yolo11n-pose.onnx \
  && wget -q -L "${MODELS_BASE}/yolo11s-pose-320.onnx" -O yolo11s-pose-320.onnx \
  && wget -q -L "${MODELS_BASE}/yolo11s-pose-480.onnx" -O yolo11s-pose-480.onnx
 
+# ── Validate ONNX models ─────────────────────────────────────────────────────
+# Placed BEFORE the application COPY, and as ONE layer, deliberately.
+#
+# These checks depend only on the models fetched above, never on the source —
+# but sitting after the COPY meant every code change invalidated them, so all
+# six re-ran on every single build. Each was its own layer, so onnxruntime was
+# imported six times and six models (the 640 pair are ~40 MB each) were loaded
+# from scratch, adding minutes to a Pi build for a result that could not have
+# changed. Now they run only when the model download layer itself changes.
+RUN python3 -c "import onnxruntime as ort; [print('ONNX OK:', n, ort.InferenceSession(n, providers=['CPUExecutionProvider']).get_inputs()[0].shape, flush=True) for n in ('yolo11n-pose.onnx','yolo11n-pose-320.onnx','yolo11n-pose-480.onnx','yolo11s-pose.onnx','yolo11s-pose-320.onnx','yolo11s-pose-480.onnx')]"
+
 # ── Application code (changes frequently — only invalidates these COPY layers)
 COPY cameras/           cameras/
 COPY config/            config/
@@ -78,14 +89,6 @@ COPY output/            output/
 COPY main.py            .
 COPY version.py         .
 COPY config.json        .
-
-# ── Validate ONNX models ─────────────────────────────────────────────────────
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose.onnx',     providers=['CPUExecutionProvider']); print('ONNX nano-640 OK:', s.get_inputs()[0].shape)"
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose-320.onnx', providers=['CPUExecutionProvider']); print('ONNX nano-320 OK:', s.get_inputs()[0].shape)"
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11n-pose-480.onnx', providers=['CPUExecutionProvider']); print('ONNX nano-480 OK:', s.get_inputs()[0].shape)"
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11s-pose.onnx',     providers=['CPUExecutionProvider']); print('ONNX small-640 OK:', s.get_inputs()[0].shape)"
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11s-pose-320.onnx', providers=['CPUExecutionProvider']); print('ONNX small-320 OK:', s.get_inputs()[0].shape)"
-RUN python3 -c "import onnxruntime as ort; s = ort.InferenceSession('yolo11s-pose-480.onnx', providers=['CPUExecutionProvider']); print('ONNX small-480 OK:', s.get_inputs()[0].shape)"
 
 # ── S6 service definition ─────────────────────────────────────────────────────
 # S6 looks for services in /etc/services.d/<name>/run

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.139
+
+### Changed — faster rebuilds
+
+The six ONNX model-validation steps sat *after* the application `COPY`, so every code change invalidated them and all six re-ran. Each was its own layer, so `onnxruntime` was imported six times and six models (the two 640 variants are ~40 MB each) were loaded from scratch — minutes added to every Pi build, for a result that could not have changed, since the checks depend only on the model download layer.
+
+They now run before the source `COPY`, as a single layer. A code-only change no longer re-validates the models at all; the check re-runs only when the download layer itself changes.
+
 ## 1.9.138
 
 ### Changed
