@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.140
+
+### Fixed — replacing the chime kept playing the old sound
+
+The .wav was copied to `/media/endora_chime.wav` on every start, so the *file* was always current — but the name never changed, so neither did the URL. Home Assistant's media proxy and the speaker both cache by URL, so a new clip kept playing as the old one.
+
+The installed file is now named after a hash of its contents (`endora_chime_<hash>.wav`), so the URL changes exactly when the audio does and no cache can serve a stale clip. Clips installed for previous versions of the sound are removed from `/media` on start.
+
 ## 1.9.139
 
 ### Changed — faster rebuilds

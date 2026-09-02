@@ -205,6 +205,7 @@ def _install_chime_wav() -> str:
     it to speakers via media-source://media_source/local/ — no firewall issues.
     Falls back to the debug HTTP server URL for standalone use.
     """
+    import hashlib
     import shutil
     from pathlib import Path
     src = Path(__file__).parent.parent / "cameras" / "static" / "chime.wav"
@@ -215,11 +216,25 @@ def _install_chime_wav() -> str:
     if not media_dir.is_dir():
         log.warning("Chime: /media not mounted — add 'media' to the add-on map in config.json")
         return ""
-    dest = media_dir / "endora_chime.wav"
+    # Name the file after a hash of its contents. The bytes are copied on
+    # every start, but a fixed filename meant a fixed URL, and both HA's
+    # media proxy and the speaker itself cache by URL — so replacing the
+    # audio kept playing the old clip indefinitely. A content-derived name
+    # changes exactly when the audio does, which no cache can defeat.
+    digest = hashlib.sha256(src.read_bytes()).hexdigest()[:8]
+    dest = media_dir / f"endora_chime_{digest}.wav"
     try:
         shutil.copy2(src, dest)
+        # Drop clips we installed for previous versions of the sound.
+        for stale in media_dir.glob("endora_chime*.wav"):
+            if stale != dest:
+                try:
+                    stale.unlink()
+                    log.info("Chime: removed superseded %s", stale.name)
+                except Exception as e:
+                    log.debug("Chime: could not remove %s: %s", stale.name, e)
         log.info("Chime: installed %s → %s", src.name, dest)
-        return "media-source://media_source/local/endora_chime.wav"
+        return f"media-source://media_source/local/{dest.name}"
     except PermissionError:
         log.warning(
             "Chime: cannot write to /media (uid=%d permissions=%s) — "
