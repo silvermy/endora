@@ -342,8 +342,11 @@ class Settings:
     # Chromecast, Echo, HomePod, DLNA, Spotify Connect, etc.).
     # Example: "media_player.living_room_sonos"
     chime_entity_id: str = ""
-    # Volume for the chime clip (0–100).  40 is audible but not jarring
-    # when the TV is playing at normal levels.
+    # Volume for the chime clip (0–100). This is the clip's OWN absolute
+    # volume, not a percentage of what the speaker is currently playing —
+    # Sonos applies it to the announcement and leaves the music untouched.
+    # 40 is audible but not jarring when the TV is playing at normal levels;
+    # start there rather than at 100, which is genuinely full output.
     chime_volume: int = 40
     # Minimum seconds between chimes — prevents rapid-fire if the arm
     # bobs up and down or two cameras both fire the transition. Must exceed

@@ -101,7 +101,9 @@ class TestChimeNotifier(unittest.TestCase):
             n._post()
 
         body = json.loads(captured[0])
-        self.assertAlmostEqual(body["extra"]["volume"], 0.6)
+        # 0-100, passed through as HA's announce support expects. Sent as a
+        # 0-1 fraction, a configured 60 arrived at Sonos as "0.6 percent".
+        self.assertEqual(body["extra"]["volume"], 60)
 
 
 class TestMakeChimeNotifier(unittest.TestCase):

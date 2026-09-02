@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.143
+
+### Fixed — the chime was played at one percent volume on Sonos
+
+`chime_volume` was sent as a 0-1 fraction, but Home Assistant's announce support takes it on a **0-100** scale and passes it straight through. A configured volume of 100 therefore arrived as `1` — one percent — and the chime was barely audible.
+
+It is now sent unscaled. The value is the clip's own absolute volume, independent of whatever the speaker is playing, and the music is left untouched either way.
+
+This only became visible once a Sonos was the target: Alexa ignores the field entirely and plays announcements at the device's own notification volume, so the wrong scale had no effect there.
+
+**If you had `chime_volume` at 100 to compensate, turn it down** — it now means genuinely full output. 40 is a sensible starting point.
+
 ## 1.9.142
 
 ### Added — say why a gesture was blocked, in the log

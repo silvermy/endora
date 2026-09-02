@@ -127,6 +127,10 @@
     "motion_area_min": {
       "name": "Motion sensitivity (area)",
       "description": "Fraction of the frame that must change to count as motion. Catches a moving arm, which the frame-average test misses at room distance (default 0.002)"
+    },
+    "chime_volume": {
+      "name": "Chime volume",
+      "description": "The clip's own absolute volume (0-100), not a percentage of what is currently playing. The music is left untouched. 40 is audible without being jarring"
     }
   }
 }

@@ -88,7 +88,15 @@ class ChimeNotifier:
             "media_content_id":   self._chime_url,
             "media_content_type": "music",
             "announce":           True,
-            "extra":              {"volume": self._volume / 100.0},
+            # Home Assistant's announce support takes this on a 0-100 scale
+            # and passes it straight through — Sonos then reads it as the
+            # audio clip's own absolute volume, independent of whatever the
+            # speaker is playing. Sending it as a 0-1 fraction meant a
+            # configured 100 arrived as 1, i.e. one percent, and the chime
+            # was almost inaudible. (Alexa ignores this field entirely and
+            # uses the device's notification volume, which is why the bug
+            # only appeared once a Sonos was the target.)
+            "extra":              {"volume": self._volume},
         }).encode()
         req = urllib.request.Request(
             self._service_url, data=payload,
