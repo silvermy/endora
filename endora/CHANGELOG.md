@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.141
+
+### Fixed — the motion gate never woke for a gesture
+
+Read from a live install: motion fired on **1 of 125 YOLO runs** while four deliberate arm raises were performed. The raises themselves were recognised — `state -> SINGLE_UP` four times, elevation 0.79-0.90, extension 0.82-0.91, all comfortably past the thresholds — yet **nothing fired**, because the pose model was only ever woken by the idle heartbeat, roughly every 2.1 s. A sweep cannot be measured from two samples.
+
+The gate averaged the change across the whole frame. Measured on a real frame from that room, an arm-sized limb moving shifts the mean by **0.0016** and a *whole person* by **0.0115** — both under the 0.015 default. One person in a wide view is simply diluted away.
+
+- **A second, area-based test**: the fraction of the frame that changed appreciably (`motion_area_min`, 0.002). That is what a moving limb actually looks like, independent of how much empty room surrounds it. Either test firing counts as motion. Sensor noise scores 0.
+- **Person pruning now counts missed YOLO runs**, not wall-clock seconds. The heartbeat ran every ~2.1 s against a 2.0 s timeout, so a single missed detection dropped the person — and re-acquiring builds a fresh tracker with empty history, discarding the sweep evidence a flourish depends on. It now takes three consecutive misses.
+
 ## 1.9.140
 
 ### Fixed — replacing the chime kept playing the old sound

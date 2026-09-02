@@ -101,6 +101,11 @@ def _person_visible_kp_count(kps_row: np.ndarray) -> int:
 
 _MIN_VISIBLE_KPS = 6  # fewer than this → almost certainly not a real person
 
+# Per-cell brightness change (0-255, on the 80x60 motion thumbnail) that counts
+# as that cell having genuinely changed rather than having drifted with sensor
+# noise. Used by the area half of the motion gate.
+_MOTION_CELL_DELTA = 25
+
 # Person-pool constants
 _PERSON_MATCH_DIST = 0.30  # max centroid displacement (fraction of frame diagonal)
                              # to link a detection to an existing tracked person
@@ -112,7 +117,14 @@ _PERSON_MATCH_DIST = 0.30  # max centroid displacement (fraction of frame diagon
                              # one corner of the room can sit well within 30%
                              # of the frame diagonal from a real person on the
                              # couch, which would wrongly exempt it too.
-_PERSON_PRUNE_S    = 2.0   # seconds without a YOLO detection before dropping entry
+# A person is dropped after being absent from this many CONSECUTIVE YOLO
+# runs — not after a wall-clock timeout. The motion gate makes YOLO's cadence
+# wildly variable: on a live install the idle heartbeat ran it every ~2.1 s,
+# just over the old 2.0 s timeout, so a single missed detection pruned the
+# person. Re-acquiring builds a fresh ArmTracker with empty history, which
+# throws away the sweep evidence a flourish depends on — the gesture was then
+# unrecognisable through no fault of the geometry.
+_PERSON_PRUNE_MISSES = 3
 
 # How close a detection must be to an already-tracked person's last position
 # to be trusted as "probably that same real person, just briefly still" and
@@ -291,6 +303,7 @@ class _PersonEntry:
     state_machine:     GestureStateMachine
     centroid:          tuple         # last seen pixel centroid (x, y)
     last_seen:         float         # monotonic time of last YOLO detection
+    last_seen_run:     int           # YOLO-run index of the last detection
     last_lm:           object        # cached _YOLOLandmarks from last YOLO frame
     last_arm_state:    ArmState      = ArmState.DOWN
     last_logged_state: object        = None
@@ -379,6 +392,27 @@ def _crop_around_wrist(frame: np.ndarray, reading, lm) -> Optional[np.ndarray]:
     return crop
 
 
+def _frame_has_motion(prev_small, small, mean_thresh: float,
+                      area_min: float) -> bool:
+    """Has enough of the scene changed to be worth running the pose model?
+
+    Two tests, either sufficient. The mean is the original and is the wrong
+    statistic for one person in a wide view: measured on a real living-room
+    frame, an arm-sized limb moving changes the mean by 0.0016 and even a
+    whole person shifting only reaches 0.0115 — both under the 0.015 default,
+    so gestures never woke the detector at all. The area test asks how much
+    of the frame changed appreciably, which is what a moving limb looks like
+    regardless of how much empty room surrounds it, and stays at zero for
+    sensor noise.
+    """
+    if prev_small is None:
+        return True
+    diff = cv2.absdiff(small, prev_small)
+    if float(diff.mean()) / 255.0 > mean_thresh:
+        return True
+    return float((diff > _MOTION_CELL_DELTA).sum()) / diff.size > area_min
+
+
 def _sweep_meets_flourish(reading, climb_min: float, rate_min: float) -> bool:
     """Does this reading show a sweep worth chiming for?
 
@@ -446,6 +480,9 @@ class CameraAnalyser(threading.Thread):
         # by nearest-centroid matching across YOLO frames.
         self._persons: dict[int, _PersonEntry] = {}
         self._next_pid: int = 0
+        # Counts actual YOLO runs, so person pruning can be expressed in
+        # missed detections rather than elapsed time (see _PERSON_PRUNE_MISSES).
+        self._yolo_runs: int = 0
 
     def stop(self):
         self._stop_evt.set()
@@ -505,6 +542,7 @@ class CameraAnalyser(threading.Thread):
             state_machine=state_machine,
             centroid=centroid,
             last_seen=now,
+            last_seen_run=self._yolo_runs,
             last_lm=lm,
             last_genuine_live_at=now,
         )
@@ -563,6 +601,7 @@ class CameraAnalyser(threading.Thread):
                 e.centroid  = centroid
                 e.last_lm   = lm
                 e.last_seen = now
+                e.last_seen_run = self._yolo_runs
                 available.remove(best_pid)
                 self._note_liveness(e, raw_live, moved, now)
             else:
@@ -574,7 +613,7 @@ class CameraAnalyser(threading.Thread):
 
     def _prune_persons(self, now: float) -> None:
         stale = [pid for pid, e in self._persons.items()
-                 if now - e.last_seen > _PERSON_PRUNE_S]
+                 if self._yolo_runs - e.last_seen_run >= _PERSON_PRUNE_MISSES]
         for pid in stale:
             log.info("[%s] Lost person pid=%d", self.label, pid)
             del self._persons[pid]
@@ -758,16 +797,12 @@ class CameraAnalyser(threading.Thread):
             #   • any arm already raised       (responsive snap detection)
             #   • heartbeat interval reached   (catch slow arm lifts)
             mot_thresh = float(getattr(self.s, 'motion_threshold', 0.015))
+            area_min   = float(getattr(self.s, 'motion_area_min', 0.002))
             max_skip   = int(getattr(self.s,   'yolo_max_skip',    12))
 
             gray  = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2GRAY)
             small = cv2.resize(gray, (80, 60), interpolation=cv2.INTER_AREA)
-            if _prev_small is None:
-                motion = True
-            else:
-                motion = (
-                    float(cv2.absdiff(small, _prev_small).mean()) / 255.0
-                ) > mot_thresh
+            motion = _frame_has_motion(_prev_small, small, mot_thresh, area_min)
             _prev_small = small
             _frames_since_yolo += 1
 
@@ -784,6 +819,7 @@ class CameraAnalyser(threading.Thread):
 
                 _cached_kps = model(proc_frame)    # Optional[ndarray [N,17,3]]
                 _frames_since_yolo = 0
+                self._yolo_runs += 1
                 log.debug("[%s] YOLO ran (motion=%s any_arm_up=%s persons=%d)",
                           self.label, motion, any_arm_up, len(self._persons))
 

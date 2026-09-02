@@ -253,3 +253,43 @@ def test_a_raise_survives_mirroring():
     for label, pose in (("as-is", lm), ("mirrored", _mirror(lm))):
         r = _tracker()._classify_raw(pose, 1280, 640)
         assert r.state == ArmState.SINGLE_UP, f"{label} gave {r.state}"
+
+
+# ── Motion gate ───────────────────────────────────────────────────────────────
+
+def test_motion_gate_sees_a_limb_that_the_frame_average_misses():
+    """Regression from a live install: motion fired on 1 of 125 YOLO runs
+    while four deliberate arm raises were performed.
+
+    The gate averaged the change across the whole frame, so one person in a
+    wide room view was diluted to nothing — the gesture never woke the pose
+    model, leaving the arm sampled only by the idle heartbeat, far too
+    coarsely for a sweep to be measured.
+    """
+    import numpy as np, cv2
+    from cameras.analyser import _frame_has_motion
+
+    scene = np.full((60, 80), 90, dtype=np.uint8)          # a static room
+    limb = scene.copy()
+    limb[20:28, 40:42] = 230                               # an arm-sized bright patch
+
+    # The frame average alone cannot see it…
+    assert not _frame_has_motion(scene, limb, mean_thresh=0.015, area_min=1.0)
+    # …but the area test can.
+    assert _frame_has_motion(scene, limb, mean_thresh=0.015, area_min=0.002)
+
+
+def test_motion_gate_ignores_sensor_noise():
+    import numpy as np
+    from cameras.analyser import _frame_has_motion
+    rng = np.random.default_rng(0)
+    scene = np.full((60, 80), 90, dtype=np.uint8)
+    noisy = np.clip(scene.astype(np.int16) + rng.normal(0, 3, scene.shape),
+                    0, 255).astype(np.uint8)
+    assert not _frame_has_motion(scene, noisy, mean_thresh=0.015, area_min=0.002)
+
+
+def test_first_frame_always_counts_as_motion():
+    import numpy as np
+    from cameras.analyser import _frame_has_motion
+    assert _frame_has_motion(None, np.zeros((60, 80), dtype=np.uint8), 0.015, 0.002)

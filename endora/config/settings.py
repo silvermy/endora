@@ -70,6 +70,14 @@ class Settings:
     # fraction (0–1 mean absolute pixel difference over an 80×60 thumbnail).
     # 0.008 catches slow arm raises (low per-frame velocity); 0.0 = always run.
     motion_threshold: float = 0.015
+    # Second, more sensitive motion test: the fraction of the frame that
+    # changed appreciably. The mean above is the wrong statistic for one
+    # person in a wide view — measured on a real living-room frame, an
+    # arm-sized limb moving shifts the mean by only 0.0016 and a whole person
+    # by 0.0115, both under the 0.015 default, so a gesture never woke the
+    # detector and the arm was sampled only by the idle heartbeat. Either
+    # test firing counts as motion. Sensor noise scores 0 here.
+    motion_area_min: float = 0.002
     # Heartbeat: even with no motion, run YOLO at least every N frames so
     # slow arm lifts are eventually detected. 6 ≈ re-confirm every ~0.6s at 10fps.
     yolo_max_skip: int = 4

@@ -123,6 +123,10 @@
     "chime_debounce_s": {
       "name": "Chime debounce (s)",
       "description": "Minimum seconds between chimes. Must exceed the clip's length or one sound runs into the next — the bundled chime is 4.0 s (default 6.0)"
+    },
+    "motion_area_min": {
+      "name": "Motion sensitivity (area)",
+      "description": "Fraction of the frame that must change to count as motion. Catches a moving arm, which the frame-average test misses at room distance (default 0.002)"
     }
   }
 }

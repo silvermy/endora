@@ -88,6 +88,11 @@ REGISTRY: list[SettingField] = [
     SettingField("motion_threshold", float, 0.015,
                   "Motion gate: only run YOLO when the frame changes by more than this fraction",
                   group="Pose", user_facing=True),
+    SettingField("motion_area_min", float, 0.002,
+                  "Fraction of the frame that must change appreciably to count as "
+                  "motion — catches a moving limb, which the frame-average test "
+                  "misses entirely at room distance",
+                  group="Pose", user_facing=True),
     SettingField("yolo_max_skip", int, 4,
                   "Run YOLO at least every N frames even with no motion", group="Pose", user_facing=True),
     SettingField("bg_subtract_enable", bool, True,
