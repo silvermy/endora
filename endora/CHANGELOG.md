@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.142
+
+### Added — say why a gesture was blocked, in the log
+
+Diagnosing "the arm was clearly seen but nothing fired" took several rounds, because the numbers that decide it were not visible anywhere live: near-miss reasons went only to `feedback.jsonl`, which has to be exported by hand, and the per-frame `SINGLE_UP` log line reported elevation and extension but not the sweep.
+
+- The `SINGLE_UP` line now carries the deciding values: `sweep=<climb>@<rate>/s rose=… still=…`.
+- Blocked gestures are logged at info as `Gesture SNAP blocked: <reason>`, alongside the existing feedback entry, and are now emitted whether or not a feedback logger is attached.
+
 ## 1.9.141
 
 ### Fixed — the motion gate never woke for a gesture

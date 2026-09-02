@@ -914,9 +914,12 @@ class CameraAnalyser(threading.Thread):
                                  self.label, pid, reading.state.name)
                         entry.last_logged_state = reading.state
                     if reading.state.name == 'SINGLE_UP':
-                        log.debug("[%s] pid=%d SINGLE_UP elev=%.2f ext=%.2f snap_roll=%.3f",
-                                  self.label, pid, reading.elevation,
-                                  reading.extension, reading.snap_roll)
+                        log.debug(
+                            "[%s] pid=%d SINGLE_UP elev=%.2f ext=%.2f "
+                            "sweep=%.2f@%.2f/s rose=%s still=%s",
+                            self.label, pid, reading.elevation, reading.extension,
+                            reading.sweep_climb, reading.sweep_rate,
+                            reading.rose_recently, reading.wrist_still)
                     # Chime as soon as a sweep meets the FULL flourish bar —
                     # a head start on speaker latency (an Echo is ~1-2s), so
                     # the sound lands with the gesture rather than after it.

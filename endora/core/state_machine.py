@@ -227,6 +227,15 @@ class GestureStateMachine:
 
     # ── Handlers ──────────────────────────────────────────────────────────
 
+    def _near_miss(self, gesture: str, reason: str, reading: ArmReading) -> None:
+        """Record a blocked gesture. Logged as well as written to feedback,
+        because feedback.jsonl has to be exported by hand while the log can be
+        read live — and 'the arm was seen but nothing fired' is precisely the
+        case where the reason needs to be visible immediately."""
+        log.info("Gesture %s blocked: %s", gesture, reason)
+        if self._on_near_miss:
+            self._on_near_miss(gesture, reason, reading)
+
     def _tick_single_up(self, reading: ArmReading, now: float) -> Optional[Gesture]:
         r = self._raise
         r.up_frames += 1
@@ -274,18 +283,18 @@ class GestureStateMachine:
             return self._fire_snap(now)
 
         # Near-miss: arm is up but snap condition not met — log for tuning.
-        if not r.snap_fired and self._on_near_miss and r.up_frames > 1:
+        if not r.snap_fired and r.up_frames > 1:
             if not snap_condition:
                 reason = (f"elevation={reading.elevation:.2f} < "
                           f"{self.c.snap_elevation_min:.2f} (min),"
                           f" extension={reading.extension:.2f},"
                           f" snap_roll={reading.snap_roll:.3f}")
-                self._on_near_miss("SNAP", reason, reading)
+                self._near_miss("SNAP", reason, reading)
             elif not gate_ok:
                 if self.c.snap_require_flourish:
                     if "no_flourish" not in r.gates_logged:
                         r.gates_logged.add("no_flourish")
-                        self._on_near_miss(
+                        self._near_miss(
                             "SNAP",
                             f"no_flourish: arm is up but did not sweep — "
                             f"climb={reading.sweep_climb:.2f} "
@@ -296,19 +305,19 @@ class GestureStateMachine:
                 elif not rise_ok:
                     if "no_rise" not in r.gates_logged:
                         r.gates_logged.add("no_rise")
-                        self._on_near_miss(
+                        self._near_miss(
                             "SNAP",
                             f"no_rise: no lift seen — elevation climbed only "
                             f"{reading.rise_delta:.2f} and the arm was never low",
                             reading)
                 elif "wrist_moving" not in r.gates_logged:
                     r.gates_logged.add("wrist_moving")
-                    self._on_near_miss(
+                    self._near_miss(
                         "SNAP", "wrist_moving: wrist not held still", reading)
             elif (now - r.entered_at) < sustain_needed:
                 held = now - r.entered_at
                 reason = f"sustain={held:.3f}s < {self.c.snap_sustain_s}s required"
-                self._on_near_miss("SNAP", reason, reading)
+                self._near_miss("SNAP", reason, reading)
 
         return None
 

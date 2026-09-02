@@ -275,3 +275,34 @@ def test_chime_requires_the_arm_to_actually_be_raised():
     swept_and_raised = ArmReading(state=S.SINGLE_UP, sweep_climb=1.6,
                                   sweep_rate=2.4, extension=0.95)
     assert _sweep_meets_flourish(swept_and_raised, 0.60, 0.80)
+
+
+def test_a_blocked_gesture_is_reported_even_without_a_feedback_logger():
+    """The near-miss reason must be produced whether or not feedback logging
+    is attached — it is written to the log too, and 'the arm was seen but
+    nothing fired' is exactly when that reason has to be visible live.
+    """
+    import logging
+    from cameras.arm_tracker import ArmReading, ArmState as S, Side
+
+    m = GestureStateMachine(StateMachineConfig(snap_sustain_s=0.0))  # no callback
+    up_no_sweep = ArmReading(state=S.SINGLE_UP, raised_side=Side.RIGHT,
+                             elevation=0.95, extension=0.95,
+                             sweep_climb=0.0, sweep_rate=0.0)
+    logger = logging.getLogger("core.state_machine")
+    records = []
+    handler = logging.Handler()
+    handler.setLevel(logging.DEBUG)
+    handler.emit = records.append
+    prev_level = logger.level
+    logger.setLevel(logging.INFO)      # pytest leaves the root at WARNING
+    logger.addHandler(handler)
+    try:
+        m.tick(up_no_sweep, 0.0)
+        m.tick(up_no_sweep, 0.1)          # up_frames > 1, so the reason is emitted
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prev_level)
+
+    msgs = " ".join(r.getMessage() for r in records)
+    assert "no_flourish" in msgs, f"blocked reason was not logged: {msgs!r}"
