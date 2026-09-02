@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.137
+
+### Changed
+
+- New chime sound (`cameras/static/chime.wav`), replacing the previous clip. Now 4.0 s, 44.1 kHz stereo, up from 0.5 s.
+
+Note that `chime_debounce_s` defaults to 4.0 s, so the clip is now as long as the minimum gap between chimes — back-to-back gestures will run one sound straight into the next. Lower the clip length or raise the debounce if that overlaps awkwardly.
+
 ## 1.9.136
 
 ### Added — report the camera's native resolution, and what the resize discards
