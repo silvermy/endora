@@ -332,8 +332,10 @@ REGISTRY: list[SettingField] = [
                   "HA media_player entity to play chime on", group="Chime", user_facing=True),
     SettingField("chime_volume", int, 40,
                   "Chime volume 0-100", group="Chime", user_facing=True),
-    SettingField("chime_debounce_s", float, 4.0,
-                  "Min seconds between chimes", group="Chime", user_facing=True),
+    SettingField("chime_debounce_s", float, 6.0,
+                  "Min seconds between chimes — must exceed the clip length or one "
+                  "sound runs into the next (the bundled chime is 4.0 s)",
+                  group="Chime", user_facing=True),
 
     # ── Misc ─────────────────────────────────────────────────────────────
     SettingField("log_level", str, "info", "Log verbosity", group="Misc", user_facing=True,

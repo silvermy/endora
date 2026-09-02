@@ -71,11 +71,11 @@ class GestureSystem:
             debug_server.start(settings.debug_port, ingress_port=8766)
 
         # Optional chime on arm-up transitions
-        self._sonos = None
+        self._chime = None
         chime_on = getattr(settings, "chime_enable", False)
         if chime_on:
             chime_url = _install_chime_wav()
-            self._sonos = make_chime_notifier(settings, chime_url)
+            self._chime = make_chime_notifier(settings, chime_url)
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
 
@@ -97,7 +97,7 @@ class GestureSystem:
             on_candidate=self.fusion.receive, label="A",
             debug_frame_cb=dbg_cb,
             feedback_logger=self.feedback,
-            sonos_notifier=self._sonos,
+            chime_notifier=self._chime,
             num_threads=model_threads,
         )
         self.analyser_a._recorder = self._recorder
@@ -109,7 +109,7 @@ class GestureSystem:
             on_candidate=self.fusion.receive, label="B",
             debug_frame_cb=dbg_cb,
             feedback_logger=self.feedback,
-            sonos_notifier=self._sonos,
+            chime_notifier=self._chime,
             num_threads=model_threads,
         )
         if self.analyser_b:

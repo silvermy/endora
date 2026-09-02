@@ -412,7 +412,7 @@ class CameraAnalyser(threading.Thread):
         label: str = "cam",
         debug_frame_cb=None,
         feedback_logger=None,
-        sonos_notifier=None,
+        chime_notifier=None,
         num_threads: int = 0,
     ):
         super().__init__(daemon=True, name=f"Analyser-{label}")
@@ -424,7 +424,7 @@ class CameraAnalyser(threading.Thread):
         self._num_threads = num_threads
         self._stop_evt = threading.Event()
         self._feedback = feedback_logger
-        self._sonos = sonos_notifier
+        self._chime = chime_notifier
         self._near_miss_cb = feedback_logger.on_near_miss if feedback_logger else None
 
         # CLAHE cache — object is expensive; recreate only when clip changes.
@@ -897,10 +897,10 @@ class CameraAnalyser(threading.Thread):
                         reading,
                         float(getattr(self.s, 'flourish_min_climb', 0.60)),
                         float(getattr(self.s, 'flourish_min_rate', 0.80)))
-                    if self._sonos is not None:
+                    if self._chime is not None:
                         if _sweeping and not entry.chimed_this_sweep:
                             entry.chimed_this_sweep = True
-                            self._sonos.notify()
+                            self._chime.notify()
                         elif not _sweeping and reading.state == ArmState.DOWN:
                             entry.chimed_this_sweep = False
 
@@ -914,9 +914,9 @@ class CameraAnalyser(threading.Thread):
                     # sweep-onset chime above is only a head start on speaker
                     # latency and may not have fired (a sustained pose has no
                     # sweep at all); chime_debounce_s dedupes when it did.
-                    if self._sonos is not None:
+                    if self._chime is not None:
                         entry.chimed_this_sweep = True
-                        self._sonos.notify()
+                        self._chime.notify()
                     self.on_candidate(gesture, 1.0, self.label)
                     if self._recorder is not None:
                         self._recorder.on_gesture(gesture, self.label)

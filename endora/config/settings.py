@@ -338,8 +338,10 @@ class Settings:
     # when the TV is playing at normal levels.
     chime_volume: int = 40
     # Minimum seconds between chimes — prevents rapid-fire if the arm
-    # bobs up and down or two cameras both fire the transition.
-    chime_debounce_s: float = 4.0
+    # bobs up and down or two cameras both fire the transition. Must exceed
+    # the clip's own length or one sound runs into the next; the bundled
+    # chime is 4.0 s.
+    chime_debounce_s: float = 6.0
     # ── Misc ──────────────────────────────────────────────────────────────
     log_level: str = "info"
     show_display: bool = False

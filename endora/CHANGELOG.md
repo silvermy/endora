@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.138
+
+### Changed
+
+- **`chime_debounce_s` default 4.0 -> 6.0 s.** The new chime clip is 4.0 s long, so at the old 4.0 s debounce two gestures in succession ran one sound straight into the start of the next. 6.0 leaves a gap. **Existing installs keep whatever is saved in their add-on configuration** — change it there to pick this up.
+- `tests/test_sonos.py` renamed to `tests/test_chime.py`. It tests `output/chime.py`, which drives any Home Assistant `media_player`; "Sonos" was left over from when that was the only target.
+- The same leftover naming inside the code is gone too: `sonos_notifier` -> `chime_notifier` and `self._sonos` -> `self._chime` in `core/system.py` and `cameras/analyser.py`. Internal only — no setting keys, HA event names or behaviour change.
+
 ## 1.9.137
 
 ### Changed

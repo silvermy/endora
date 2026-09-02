@@ -119,6 +119,10 @@
     "gesture_raise_both_enable": {
       "name": "Enable RAISE_BOTH",
       "description": "Fire the RAISE_BOTH gesture. Turn off gestures you do not use — they still send HA events and can suppress ones you do use"
+    },
+    "chime_debounce_s": {
+      "name": "Chime debounce (s)",
+      "description": "Minimum seconds between chimes. Must exceed the clip's length or one sound runs into the next — the bundled chime is 4.0 s (default 6.0)"
     }
   }
 }
