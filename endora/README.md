@@ -59,6 +59,114 @@ Click **Start** → check the **Log** tab for stream connection. Open the debug 
 
 ---
 
+## Installation — Standalone container (Jetson / any Docker host)
+
+The add-on above runs on the Home Assistant machine itself. The same
+application also runs as a plain container on a separate box — the reason to
+do that being a Jetson, where pose inference moves to the GPU instead of the
+CPU. It reports gestures to Home Assistant over the network with a
+Long-Lived Access Token rather than through the Supervisor.
+
+Everything else — settings, the debug page, gesture logic — is identical.
+Which deployment you are looking at is the first line of the log:
+
+```
+Endora v1.9.145 starting — standalone container, accelerators: TensorrtExecutionProvider
+```
+
+### 1. Prepare the host
+
+For a Jetson Orin: JetPack 6.x, with the QSPI bootloader firmware updated to
+match (a board still on JetPack 5 firmware will not boot a JP6 image, and the
+67-TOPS `MAXN_SUPER` profile needs firmware 36.4.3+). Install
+`nvidia-container-toolkit`.
+
+For any other Docker host, use `docker-compose.yml` instead of
+`docker-compose.jetson.yml` below — same application, CPU inference.
+
+### 2. Create a Long-Lived Access Token
+
+**HA → Profile (bottom-left) → Long-Lived Access Tokens → Create Token**
+
+### 3. Configure
+
+```bash
+cp .env.example .env
+```
+
+Set `RTSP_URL_A` / `RTSP_URL_B`, `HA_TOKEN`, and — unlike the add-on —
+`HA_URL` pointing at the **Home Assistant machine's address**, not
+`localhost`. This container is on a different host.
+
+Settings beyond those live in `/data/settings.yaml` on the container's
+volume (there is no Configuration tab here); the full list is the same
+[configuration reference](#full-configuration-reference) below.
+
+### 4. Build and start
+
+```bash
+make up
+```
+
+The first build downloads a multi-gigabyte JetPack base image and is slow.
+
+A `Makefile` wraps the Compose commands for this deployment (it is Jetson-only;
+the add-on is managed by the Supervisor and ignores it). `make` on its own
+lists everything. The ones you will use:
+
+| | |
+|---|---|
+| `make rebuild` | `git pull`, rebuild, restart — the normal update path |
+| `make logs` | follow the log |
+| `make restart` | restart without rebuilding, to pick up `settings.yaml` edits |
+| `make gpu` | confirm inference landed on the GPU |
+| `make debug` | print the debug UI URL |
+| `make disk` | where the space went |
+| `make prune` | reclaim space from old images and build cache |
+
+The disk targets matter more than they sound: a JetPack image is several GB
+and every rebuild leaves the previous layers behind, which fills a microSD
+card fast. None of them touch Docker volumes — `endora_data` holds your
+settings, feedback log and TensorRT cache, so `make prune` is deliberately
+never `docker system prune --volumes`. The destructive targets refuse to run
+on anything that is not a Tegra board.
+
+### 5. Confirm it is on the GPU
+
+```bash
+make gpu
+```
+
+Expect `provider=TensorrtExecutionProvider`. If it says
+`provider=CPUExecutionProvider`, the GPU wheel or the nvidia runtime is not
+in play and you are getting no benefit from the board — see
+`yolo_execution_provider` in the configuration reference.
+
+The first inference after a build stalls for several minutes while TensorRT
+compiles an engine for the model. It is cached in the `/data` volume, so
+later restarts are immediate — do not delete that volume casually.
+
+### 6. Open the debug UI
+
+There is no sidebar entry and no **Open Web UI** button here — those belong
+to the add-on. Go to the port directly:
+
+```
+http://<jetson-ip>:8765/
+```
+
+The exact URL is printed at startup (`Debug stream: http://...`). It is the
+same page as the add-on's, with the same live view, sliders and Save button;
+Save writes `/data/runtime_overrides.yaml` on the container's volume exactly
+as it does under Home Assistant.
+
+`DEBUG_PORT` in `.env` controls the port and defaults to 8765 for this
+deployment. (The add-on ships it off by default, since add-on users turn it
+on in the Configuration tab — which does not exist here.) Set it to `0` to
+disable the page.
+
+---
+
 ## HA Automation examples
 
 ```yaml
@@ -149,6 +257,13 @@ Click **Start** → check the **Log** tab for stream connection. Open the debug 
 Endora can play a short sound on any HA-integrated speaker the moment it detects an arm moving up — before the gesture fires. This gives you instant confirmation that Endora saw you, even if the gesture takes another second to complete.
 
 Works with **any speaker HA knows about**: Sonos, Chromecast, Echo, HomePod, Spotify Connect, DLNA, etc. Uses HA's `media_player.play_media` with `announce: true`, so it overlays on whatever is currently playing (TV, music) and resumes automatically.
+
+How the speaker gets the audio depends on the deployment. The **add-on**
+copies the clip into HA's `/media` folder and hands the speaker a
+`media-source://` URL. A **standalone container** has no access to that
+folder — it serves the clip from its own debug server instead, so the chime
+there requires `DEBUG_PORT` to be set. With the debug page disabled the log
+says so rather than going quiet.
 
 ### Setup
 

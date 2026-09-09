@@ -1,1 +1,8 @@
 # Models are hosted as GitHub Release assets — not stored in this repo.
+
+# The Makefile drives the Jetson deployment and is executed on Linux. GNU
+# make treats a trailing \r as part of the recipe, so a CRLF checkout breaks
+# every target with errors that point nowhere near the cause. core.autocrlf
+# is true on at least one machine working on this repo, so pin it explicitly
+# rather than relying on each checkout's configuration.
+Makefile text eol=lf

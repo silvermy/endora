@@ -29,6 +29,9 @@ services:
       - HA_TOKEN=${HA_TOKEN}
       - HA_URL=${HA_URL:-http://localhost:8123/api}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # debug_port ships as 0 (off) for the add-on, whose users set it in
+      # the Configuration tab. There is no such tab here, so default it on.
+      - DEBUG_PORT=${DEBUG_PORT:-8765}
     volumes:
       # Optional: mount a local settings file to override defaults
       # - ./config/settings.yaml:/data/settings.yaml:ro

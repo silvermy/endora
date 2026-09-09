@@ -11,6 +11,8 @@ import threading
 import time
 import socketserver
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+from core import deployment
 from pathlib import Path
 from typing import Dict, Optional
 from urllib.parse import urlparse, parse_qs
@@ -1473,6 +1475,15 @@ def start(port: int, ingress_port: int = 8766) -> None:
     # works through HA's HTTPS ingress proxy without popup/mixed-content issues.
     # All URLs in the HTML are relative (/stream, /settings, /set, /save) so
     # they resolve correctly whether accessed via ingress or the direct port.
+    #
+    # Only under the Supervisor. Nothing proxies this port in the standalone
+    # deployment, where it would be a duplicate of the UI already served
+    # above — and that deployment runs with network_mode: host, so it would
+    # be claiming a real port on the Jetson to serve a page nothing links to.
+    if not deployment.is_addon():
+        log.info("Ingress listener skipped (not an add-on) — debug UI is on port %d", port)
+        return
+
     ingress_server = _Server(("0.0.0.0", ingress_port), _Handler)
     threading.Thread(target=ingress_server.serve_forever, daemon=True,
                      name="IngressServer").start()

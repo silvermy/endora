@@ -85,6 +85,12 @@ REGISTRY: list[SettingField] = [
                   "since there is no runtime export there)",
                   group="Pose", user_facing=True,
                   enum=("320", "480", "640")),
+    SettingField("yolo_execution_provider", str, "auto",
+                  "ONNX Runtime execution provider. 'auto' uses the GPU when this "
+                  "onnxruntime build has one and the CPU otherwise, so it is correct "
+                  "on both a Pi and a Jetson; the explicit values exist to pin or "
+                  "rule out a provider when debugging",
+                  group="Pose", enum=("auto", "tensorrt", "cuda", "cpu")),
     SettingField("motion_threshold", float, 0.015,
                   "Motion gate: only run YOLO when the frame changes by more than this fraction",
                   group="Pose", user_facing=True),

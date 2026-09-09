@@ -37,6 +37,14 @@ Typical timing on Pi 5 (Cortex-A76, 4 cores):
   ultralytics YOLO  @ 640×640, 1 thread   ~250 ms / frame
   PoseModel         @ 640×640, 4 threads   ~80 ms  / frame  (3×)
   PoseModel         @ 320×320, 4 threads   ~25 ms  / frame  (10×)
+
+Execution providers
+-------------------
+Everything above is the CPU provider, which is the only one the stock
+onnxruntime wheel ships. With the onnxruntime-gpu wheel on a Jetson (see
+Dockerfile.jetson) the same .onnx files run on the GPU via TensorRT or CUDA
+instead — see ``select_providers``. Nothing else in the pipeline changes:
+pre/post-processing stay numpy, and the output array is identical.
 """
 from __future__ import annotations
 
@@ -52,14 +60,127 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
+# ── execution-provider selection ──────────────────────────────────────────────
+#
+# On a Pi there is exactly one choice and this whole section is a no-op: the
+# stock onnxruntime wheel ships only the CPU provider. On a Jetson (with the
+# onnxruntime-gpu wheel built for JetPack — see Dockerfile.jetson) the same
+# ONNX files can run on the GPU instead, which is the entire reason for
+# putting the app on that board.
+
+TRT_EP = "TensorrtExecutionProvider"
+CUDA_EP = "CUDAExecutionProvider"
+CPU_EP = "CPUExecutionProvider"
+
+# Ordered preference lists. CPU is last in every one of them: ONNX Runtime
+# walks the list and assigns each graph node to the first provider that can
+# run it, so a trailing CPU entry is what keeps an unsupported op from being
+# a hard failure rather than a slow node.
+PROVIDER_PREFERENCES: dict[str, tuple[str, ...]] = {
+    "auto":     (TRT_EP, CUDA_EP, CPU_EP),
+    "tensorrt": (TRT_EP, CUDA_EP, CPU_EP),
+    "cuda":     (CUDA_EP, CPU_EP),
+    "cpu":      (CPU_EP,),
+}
+
+# Where TensorRT caches the engines it builds. Building one for yolo11s-pose
+# takes minutes on an Orin Nano, and it happens on the first inference, not at
+# session creation — so without a cache on a *persistent* volume every
+# container restart looks like a hang. /data is a mounted volume in both the
+# add-on and the compose deployments.
+TRT_CACHE_DIR = "/data/trt_cache"
+
+
+def _trt_options(cache_dir: str) -> dict:
+    """TensorRT EP options.
+
+    fp16 is the point of the exercise on Orin — its tensor cores give roughly
+    2× over fp32 and pose keypoint regression is nowhere near precision-
+    limited at half precision.
+
+    The caches are enabled only if *cache_dir* is actually writable. Left to
+    itself TensorRT writes them to the process working directory, which in
+    this image is /app (baked into the read-only-ish image layer, and wiped on
+    every rebuild) — so a failure to create the directory means "don't cache",
+    not "cache somewhere useless".
+    """
+    opts: dict = {"trt_fp16_enable": True}
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        opts["trt_engine_cache_enable"] = True
+        opts["trt_engine_cache_path"] = cache_dir
+        opts["trt_timing_cache_enable"] = True
+        opts["trt_timing_cache_path"] = cache_dir
+    except OSError as exc:
+        log.warning(
+            "TensorRT engine cache disabled — could not create %s (%s). "
+            "Every restart will rebuild the engine, which takes minutes.",
+            cache_dir, exc,
+        )
+    return opts
+
+
+def select_providers(
+    preference: str = "auto",
+    available: Optional[list[str]] = None,
+    cache_dir: str = TRT_CACHE_DIR,
+) -> list:
+    """Return an ONNX Runtime ``providers`` list for *preference*.
+
+    *available* defaults to ``ort.get_available_providers()``; it is a
+    parameter so the selection logic can be tested on a machine with no GPU.
+
+    An explicitly requested GPU provider that isn't installed warns and
+    degrades to the next one down. "auto" degrades silently, since a missing
+    TensorRT provider is the normal, expected state on a Pi and a warning on
+    every boot there would be noise.
+    """
+    if available is None:
+        import onnxruntime as ort
+        available = list(ort.get_available_providers())
+
+    pref = (preference or "auto").strip().lower()
+    if pref not in PROVIDER_PREFERENCES:
+        log.warning(
+            "Unknown yolo_execution_provider=%r — using 'auto'. Valid values: %s",
+            preference, ", ".join(PROVIDER_PREFERENCES),
+        )
+        pref = "auto"
+
+    providers: list = []
+    for name in PROVIDER_PREFERENCES[pref]:
+        if name not in available:
+            if pref != "auto" and name != CPU_EP:
+                log.warning(
+                    "%s was requested but is not available in this onnxruntime "
+                    "build (have: %s). On a Jetson this usually means the CPU-only "
+                    "onnxruntime wheel got installed instead of onnxruntime-gpu.",
+                    name, ", ".join(available) or "none",
+                )
+            continue
+        providers.append((TRT_EP, _trt_options(cache_dir)) if name == TRT_EP else name)
+
+    # Defensive: ORT raises on an empty provider list, and a config typo
+    # should degrade to slow-but-working rather than refuse to start.
+    if not providers:
+        providers = [CPU_EP]
+    return providers
+
+
 # ── model-path resolution ─────────────────────────────────────────────────────
 
 def _static_input_size(model_path: str) -> Optional[int]:
-    """Return the static input H (=W) of an ONNX model, or None if dynamic."""
+    """Return the static input H (=W) of an ONNX model, or None if dynamic.
+
+    Deliberately pinned to the CPU provider even on a Jetson: this only reads
+    an input shape off the graph, and creating the session under TensorRT
+    would kick off an engine build (minutes) just to answer a question the
+    model file already contains.
+    """
     try:
         import onnxruntime as ort
         sess = ort.InferenceSession(
-            model_path, providers=["CPUExecutionProvider"]
+            model_path, providers=[CPU_EP]
         )
         shape = sess.get_inputs()[0].shape   # e.g. [1, 3, 640, 640] or [1,3,'h','w']
         h = shape[2]
@@ -227,6 +348,11 @@ class PoseModel:
         Minimum person confidence to keep a detection (mutable at runtime).
     num_threads:
         ONNX Runtime intra-op thread count.  0 = ``os.cpu_count()``.
+        Only meaningfully in play for nodes that land on the CPU provider.
+    execution_provider:
+        "auto" (GPU if this onnxruntime build has one, else CPU), "tensorrt",
+        "cuda", or "cpu".  Anything but CPU requires the onnxruntime-gpu
+        wheel; on a Pi "auto" resolves to CPU and the rest degrade to it.
     """
 
     def __init__(
@@ -235,6 +361,7 @@ class PoseModel:
         imgsz: int = 320,
         conf: float = 0.45,
         num_threads: int = 0,
+        execution_provider: str = "auto",
     ) -> None:
         try:
             import onnxruntime as ort
@@ -259,15 +386,39 @@ class PoseModel:
         self._sess = ort.InferenceSession(
             actual_path,
             sess_options=opts,
-            providers=["CPUExecutionProvider"],
+            providers=select_providers(execution_provider),
         )
+        # What ORT actually accepted, which is not always what was asked for:
+        # a provider whose shared library fails to load (wrong CUDA version,
+        # missing TensorRT) is dropped at session creation with only a log
+        # line, leaving inference silently on the CPU. Report the real answer
+        # so "why is this still slow on my Jetson" is one log line away.
+        active = self._sess.get_providers()
+        self.provider = active[0] if active else CPU_EP
         self._input_name = self._sess.get_inputs()[0].name
         self.imgsz = actual_imgsz
         self.conf = conf
         log.info(
-            "PoseModel: %s  imgsz=%d  threads=%d  conf=%.2f",
+            "PoseModel: %s  imgsz=%d  threads=%d  conf=%.2f  provider=%s",
             os.path.basename(actual_path), actual_imgsz, num_threads, conf,
+            self.provider,
         )
+        if self.provider == TRT_EP:
+            log.info(
+                "TensorRT is building an optimised engine on the first frames — "
+                "expect a one-off stall of several minutes. Cached in %s, so "
+                "later restarts start immediately.", TRT_CACHE_DIR,
+            )
+        elif self.provider == CPU_EP and (execution_provider or "").strip().lower() in ("tensorrt", "cuda"):
+            # Only when a GPU was explicitly asked for. Under "auto" — the
+            # default, and every Pi install — landing on the CPU is the
+            # correct outcome, and warning about it on every boot would be
+            # noise (select_providers stays quiet for the same reason).
+            log.warning(
+                "Pose inference fell back to the CPU despite execution_provider=%r "
+                "(available providers: %s).",
+                execution_provider, ", ".join(ort.get_available_providers()),
+            )
 
     # ── inference ─────────────────────────────────────────────────────────
 

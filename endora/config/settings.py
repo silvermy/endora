@@ -66,6 +66,12 @@ class Settings:
     # Default 480: at 320 a couch-distance person's wrist/elbow keypoints are
     # too coarse for reliable gesture geometry, especially in low contrast.
     yolo_imgsz: str = "480"
+    # ONNX Runtime execution provider: "auto", "tensorrt", "cuda", "cpu".
+    # "auto" is right almost everywhere — it picks the fastest provider the
+    # installed onnxruntime actually has, which on a Pi is only ever the CPU
+    # one. Pin a value when you need to prove where inference is running (or
+    # force it off the GPU to compare). Also settable as YOLO_EXECUTION_PROVIDER.
+    yolo_execution_provider: str = "auto"
     # Motion gate: only run YOLO when the frame changes by more than this
     # fraction (0–1 mean absolute pixel difference over an 80×60 thumbnail).
     # 0.008 catches slow arm raises (low per-frame velocity); 0.0 = always run.
@@ -444,6 +450,7 @@ class Settings:
             ("HA_URL",      "ha_url",      str),
             ("LOG_LEVEL",   "log_level",   str),
             ("DEBUG_PORT",  "debug_port",  int),
+            ("YOLO_EXECUTION_PROVIDER", "yolo_execution_provider", str),
         ]:
             val = os.environ.get(var)
             if val:

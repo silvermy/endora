@@ -1,0 +1,53 @@
+# ── Endora — Jetson Orin (GPU) Docker Compose ────────────────────────────
+#
+# For running on a Jetson Orin Nano / NX with pose inference on the GPU,
+# reporting gestures to a Home Assistant instance elsewhere on the LAN.
+#
+# Prerequisites:
+#   1. JetPack 6.x, matching bootloader firmware, nvidia-container-toolkit.
+#      (See the header of Dockerfile.jetson.)
+#   2. Create a Long-Lived Access Token in HA:
+#        HA → Profile (bottom-left) → Long-Lived Access Tokens → Create Token
+#   3. cp .env.example .env  — and set HA_URL to the HA machine's address,
+#      NOT localhost: unlike the add-on, this container is on another host.
+#   4. docker compose -f docker-compose.jetson.yml up -d --build
+#   5. docker compose -f docker-compose.jetson.yml logs -f endora
+#
+# Confirm it is actually on the GPU — the startup line reports the provider
+# ONNX Runtime really accepted, which is not always the one requested:
+#   docker compose -f docker-compose.jetson.yml logs endora | grep provider=
+# Expect `provider=TensorrtExecutionProvider`. `provider=CPUExecutionProvider`
+# means the GPU wheel or the nvidia runtime is not in play.
+
+services:
+  endora:
+    build:
+      context: .
+      dockerfile: Dockerfile.jetson
+    container_name: endora
+    # Explicit rather than relying on default-runtime in daemon.json, so this
+    # file works on a host where only the toolkit is installed.
+    runtime: nvidia
+    restart: unless-stopped
+    network_mode: host        # Reaches cameras on the LAN directly
+    environment:
+      - RTSP_URL_A=${RTSP_URL_A}
+      - RTSP_URL_B=${RTSP_URL_B}
+      - HA_TOKEN=${HA_TOKEN}
+      # No Supervisor here — must point at the HA host, not localhost.
+      - HA_URL=${HA_URL}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # debug_port ships as 0 (off) for the add-on, whose users set it in
+      # the Configuration tab. There is no such tab here, so default it on.
+      - DEBUG_PORT=${DEBUG_PORT:-8765}
+      # "auto" already prefers TensorRT when it is available. Pin it to
+      # "cpu" to A/B the GPU against the old Pi behaviour, or to "cuda" if
+      # a TensorRT engine build turns out to be misbehaving for your model.
+      - YOLO_EXECUTION_PROVIDER=${YOLO_EXECUTION_PROVIDER:-auto}
+    volumes:
+      # Persistent: settings.yaml, runtime_overrides.yaml, feedback.jsonl,
+      # and trt_cache/ — losing the last one costs minutes on every restart.
+      - endora_data:/data
+
+volumes:
+  endora_data:

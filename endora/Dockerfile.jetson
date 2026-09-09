@@ -1,0 +1,123 @@
+# ── Endora — Jetson Orin (GPU) image ─────────────────────────────────────────
+#
+# Runs the same application as the Home Assistant add-on image, but with pose
+# inference on the Jetson's GPU via TensorRT instead of on the CPU.
+#
+# This is NOT an add-on image. HA add-ons run under the Supervisor on the HA
+# host; a Jetson is a separate machine, so this builds a plain container that
+# talks to Home Assistant over the network with a Long-Lived Access Token
+# (output/backends.py already supports that — see HA_TOKEN).
+#
+#   Build (on the Jetson itself — this is an arm64/L4T image):
+#     docker build -f Dockerfile.jetson -t endora:jetson .
+#
+#   Run:
+#     cp .env.example .env      # fill in RTSP_URL_A/B, HA_TOKEN, HA_URL
+#     docker compose -f docker-compose.jetson.yml up -d
+#
+# Prerequisites on the host
+# -------------------------
+#   * JetPack 6.x flashed, and the QSPI bootloader firmware updated to match.
+#     A board still carrying JetPack 5 firmware will not boot a JP6 image at
+#     all, and MAXN_SUPER (the 67-TOPS profile) needs firmware 36.4.3+.
+#   * nvidia-container-toolkit, and the nvidia runtime set as the DEFAULT
+#     runtime in /etc/docker/daemon.json:
+#         { "default-runtime": "nvidia" }
+#     Without that, `docker build` has no GPU and the verification step below
+#     is the only thing that still works; `docker run` needs --runtime nvidia
+#     (docker-compose.jetson.yml sets it explicitly either way).
+#
+# Base image: l4t-jetpack carries CUDA, cuDNN and TensorRT already. It is
+# large (~7 GB) — that is the cost of GPU inference in a container on this
+# platform, and it is why this file exists separately rather than as a flag
+# on the add-on Dockerfile. Pin the tag to your JetPack version.
+ARG BUILD_FROM=nvcr.io/nvidia/l4t-jetpack:r36.4.0
+FROM ${BUILD_FROM}
+
+ENV LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    YOLO_CONFIG_DIR=/tmp/Ultralytics \
+    DEBIAN_FRONTEND=noninteractive
+
+# ── System dependencies ───────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    ffmpeg \
+    wget \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python dependencies ───────────────────────────────────────────────────────
+# Installed into the system interpreter rather than a venv (the add-on image
+# uses /opt/venv). The GPU stack — libnvinfer, cuDNN, CUDA — is installed
+# system-wide by the L4T base, this container runs exactly one application,
+# and the venv indirection buys nothing here while giving pip two places to
+# resolve numpy from.
+COPY requirements.jetson.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir --upgrade pip \
+    && pip3 install --no-cache-dir -r /tmp/requirements.txt \
+    && pip3 install --no-cache-dir --no-deps grlib==1.0.12 \
+    && rm /tmp/requirements.txt
+
+# ── ONNX Runtime with GPU support ─────────────────────────────────────────────
+# The PyPI `onnxruntime-gpu` wheel is built for desktop x86 CUDA and will not
+# work here; Jetson needs a wheel built against JetPack's CUDA/TensorRT.
+#
+# The index below is the jetson-ai-lab wheel index (maintained by NVIDIA's
+# Jetson developer-relations team, but a third-party index nonetheless —
+# review it if that matters to you). Match the CUDA suffix to your JetPack:
+#     JetPack 6.2  → jp6/cu126
+#     JetPack 6.0/6.1 → jp6/cu122
+# The equivalent wheels are also linked from the Jetson Zoo wiki page if you
+# would rather download and COPY one in.
+ARG ORT_INDEX_URL=https://pypi.jetson-ai-lab.dev/jp6/cu126
+RUN pip3 install --no-cache-dir --index-url ${ORT_INDEX_URL} onnxruntime-gpu
+
+WORKDIR /app
+
+# ── Download ONNX models from GitHub Release assets ──────────────────────────
+# Identical to the add-on image: models are Release assets, not in the repo.
+# Kept before the application COPY so a code change does not re-download them.
+ARG MODELS_TAG=models-v1
+ARG MODELS_BASE=https://github.com/silvermy/endora/releases/download/${MODELS_TAG}
+
+RUN wget -q -L "${MODELS_BASE}/yolo11n-pose.onnx"     -O yolo11n-pose.onnx \
+ && wget -q -L "${MODELS_BASE}/yolo11n-pose-320.onnx" -O yolo11n-pose-320.onnx \
+ && wget -q -L "${MODELS_BASE}/yolo11n-pose-480.onnx" -O yolo11n-pose-480.onnx \
+ && wget -q -L "${MODELS_BASE}/yolo11s-pose.onnx"     -O yolo11s-pose.onnx \
+ && wget -q -L "${MODELS_BASE}/yolo11s-pose-320.onnx" -O yolo11s-pose-320.onnx \
+ && wget -q -L "${MODELS_BASE}/yolo11s-pose-480.onnx" -O yolo11s-pose-480.onnx
+
+# ── Verify the GPU providers are present ─────────────────────────────────────
+# Checks that onnxruntime REPORTS the TensorRT/CUDA providers, not that they
+# initialise — a docker build has no GPU unless the nvidia runtime is the
+# daemon default, so an actual inference here would fail on a correctly
+# configured machine. Listing them is enough to catch the failure that
+# actually happens: pip quietly resolving `onnxruntime-gpu` to a CPU-only
+# build, which otherwise shows up as "why is my Jetson as slow as the Pi".
+RUN python3 -c "import onnxruntime as ort, sys; \
+p = ort.get_available_providers(); print('providers:', p); \
+sys.exit(0 if 'TensorrtExecutionProvider' in p or 'CUDAExecutionProvider' in p \
+else 'no GPU execution provider — onnxruntime-gpu did not install correctly')"
+
+# Model shape check, same as the add-on image, on CPU.
+RUN python3 -c "import onnxruntime as ort; [print('ONNX OK:', n, ort.InferenceSession(n, providers=['CPUExecutionProvider']).get_inputs()[0].shape, flush=True) for n in ('yolo11n-pose.onnx','yolo11n-pose-320.onnx','yolo11n-pose-480.onnx','yolo11s-pose.onnx','yolo11s-pose-320.onnx','yolo11s-pose-480.onnx')]"
+
+# ── Application code ─────────────────────────────────────────────────────────
+COPY cameras/           cameras/
+COPY config/            config/
+COPY core/              core/
+COPY output/            output/
+COPY main.py            .
+COPY version.py         .
+COPY config.json        .
+
+# /data holds settings.yaml, runtime_overrides.yaml, feedback.jsonl and the
+# TensorRT engine cache. Mount it as a volume — a cold engine build costs
+# minutes on every restart otherwise.
+VOLUME ["/data"]
+
+# No S6 here: that came from the HA base image, which this does not use.
+CMD ["python3", "/app/main.py"]

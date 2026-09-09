@@ -17,6 +17,7 @@ faulthandler.enable()  # dump native stack trace on SIGSEGV/SIGFPE/etc.
 
 from config.settings import Settings
 from core.system import GestureSystem
+from core import deployment
 from version import __version__
 
 
@@ -82,7 +83,7 @@ def main():
     setup_logging(settings.log_level)
 
     log = logging.getLogger("main")
-    log.info("Endora v%s starting (HA add-on mode)", __version__)
+    log.info("Endora v%s starting — %s", __version__, deployment.describe())
     _log_effective_gesture_settings(log, settings)
     log.info("RTSP A: %s", _mask(settings.rtsp_url_a))
     log.info("RTSP B: %s", _mask(settings.rtsp_url_b))
@@ -99,8 +100,10 @@ def main():
             _ip = "homeassistant.local"
         log.info("Debug stream: http://%s:%d/", _ip, settings.debug_port)
     else:
+        _where = ("the add-on Configuration tab" if deployment.is_addon()
+                  else "/data/settings.yaml (or DEBUG_PORT in the environment)")
         log.warning("Debug stream DISABLED (debug_port=0). "
-                    "Set debug_port=8765 in the add-on Configuration tab to enable.")
+                    "Set debug_port=8765 in %s to enable.", _where)
 
     system = GestureSystem(settings)
 

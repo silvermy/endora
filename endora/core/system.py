@@ -74,7 +74,7 @@ class GestureSystem:
         self._chime = None
         chime_on = getattr(settings, "chime_enable", False)
         if chime_on:
-            chime_url = _install_chime_wav()
+            chime_url = _install_chime_wav(self._host_ip, settings.debug_port)
             self._chime = make_chime_notifier(settings, chime_url)
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
@@ -198,12 +198,25 @@ class GestureSystem:
             )
 
 
-def _install_chime_wav() -> str:
-    """Copy the bundled chime.wav to HA's /media folder and return a URL.
+def _install_chime_wav(host_ip: str = "", debug_port: int = 0,
+                       media_dir: "Path | None" = None) -> str:
+    """Return a URL Home Assistant can hand to a speaker for the chime.
 
-    When running as an HA add-on, /media is mapped and HA proxies files from
-    it to speakers via media-source://media_source/local/ — no firewall issues.
-    Falls back to the debug HTTP server URL for standalone use.
+    Two routes, because the two deployments have different access to HA:
+
+    * **Add-on** — /media is mapped, so the clip is copied there and HA
+      proxies it via media-source://media_source/local/. No firewall issues,
+      and it works whether or not the debug server is running.
+    * **Standalone (Jetson)** — /media belongs to the HA machine and is not
+      reachable from here. The debug server already serves the bundled clip
+      at /chime.wav, so the speaker fetches it from this host over the LAN.
+      That makes the chime depend on debug_port being set, which is why the
+      failure below says so explicitly rather than going quiet.
+
+    Either way the URL carries a hash of the audio's own bytes: a fixed URL
+    meant HA's media proxy and the speaker both kept playing a replaced clip
+    from cache indefinitely (v1.9.140). A content-derived URL changes exactly
+    when the audio does, which no cache can defeat.
     """
     import hashlib
     import shutil
@@ -212,39 +225,48 @@ def _install_chime_wav() -> str:
     if not src.exists():
         log.error("Chime: bundled chime.wav not found at %s", src)
         return ""
-    media_dir = Path("/media")
-    if not media_dir.is_dir():
-        log.warning("Chime: /media not mounted — add 'media' to the add-on map in config.json")
-        return ""
-    # Name the file after a hash of its contents. The bytes are copied on
-    # every start, but a fixed filename meant a fixed URL, and both HA's
-    # media proxy and the speaker itself cache by URL — so replacing the
-    # audio kept playing the old clip indefinitely. A content-derived name
-    # changes exactly when the audio does, which no cache can defeat.
     digest = hashlib.sha256(src.read_bytes()).hexdigest()[:8]
-    dest = media_dir / f"endora_chime_{digest}.wav"
-    try:
-        shutil.copy2(src, dest)
-        # Drop clips we installed for previous versions of the sound.
-        for stale in media_dir.glob("endora_chime*.wav"):
-            if stale != dest:
-                try:
-                    stale.unlink()
-                    log.info("Chime: removed superseded %s", stale.name)
-                except Exception as e:
-                    log.debug("Chime: could not remove %s: %s", stale.name, e)
-        log.info("Chime: installed %s → %s", src.name, dest)
-        return f"media-source://media_source/local/{dest.name}"
-    except PermissionError:
-        log.warning(
-            "Chime: cannot write to /media (uid=%d permissions=%s) — "
-            "try adding 'full_access: true' to the add-on config",
-            os.getuid(), oct(media_dir.stat().st_mode),
-        )
-        return ""
-    except Exception as e:
-        log.warning("Chime: copy to /media failed: %s", e)
-        return ""
+
+    # Injectable so the two routes can be tested without a real /media.
+    media_dir = Path("/media") if media_dir is None else media_dir
+    if media_dir.is_dir():
+        dest = media_dir / f"endora_chime_{digest}.wav"
+        try:
+            shutil.copy2(src, dest)
+            # Drop clips we installed for previous versions of the sound.
+            for stale in media_dir.glob("endora_chime*.wav"):
+                if stale != dest:
+                    try:
+                        stale.unlink()
+                        log.info("Chime: removed superseded %s", stale.name)
+                    except Exception as e:
+                        log.debug("Chime: could not remove %s: %s", stale.name, e)
+            log.info("Chime: installed %s → %s", src.name, dest)
+            return f"media-source://media_source/local/{dest.name}"
+        except PermissionError:
+            log.warning(
+                "Chime: cannot write to /media (uid=%d permissions=%s) — "
+                "try adding 'full_access: true' to the add-on config",
+                os.getuid(), oct(media_dir.stat().st_mode),
+            )
+        except Exception as e:
+            log.warning("Chime: copy to /media failed: %s", e)
+        # Fall through — the HTTP route below may still work.
+
+    # Standalone route. The query string is what carries the digest; the
+    # debug server matches on path alone, so /chime.wav serves it unchanged
+    # while the URL a cache keys on still moves with the audio.
+    if debug_port > 0 and host_ip:
+        url = f"http://{host_ip}:{debug_port}/chime.wav?v={digest}"
+        log.info("Chime: serving from the debug server at %s", url)
+        return url
+
+    log.warning(
+        "Chime: no way to serve the audio — /media is not mounted (expected "
+        "outside the HA add-on) and the debug server is disabled. Set "
+        "debug_port to a real port so the speaker can fetch the clip from "
+        "this host.")
+    return ""
 
 
 def _detect_host_ip() -> str:

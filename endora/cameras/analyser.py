@@ -712,6 +712,7 @@ class CameraAnalyser(threading.Thread):
             imgsz=yolo_imgsz,
             conf=yolo_conf,
             num_threads=self._num_threads,
+            execution_provider=str(getattr(self.s, 'yolo_execution_provider', 'auto')),
         )
 
         # Adaptive background model — flags framed pictures, mirrors, TV content

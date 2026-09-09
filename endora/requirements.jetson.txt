@@ -1,0 +1,37 @@
+# Endora — Python dependencies for the Jetson (GPU) image.
+#
+# Deliberately NOT requirements.txt. Two things differ, and both matter:
+#
+#   1. No ultralytics / torch. The only import of ultralytics is the ONNX
+#      export path in cameras/pose_model.py (_export_at_size), which returns
+#      early on aarch64 before importing it — so on a Jetson it is ~1 GB of
+#      image for code that can never run. Worse, PyPI has no working torch
+#      for Jetson: pip would install the generic aarch64 CPU wheel, which is
+#      not built against JetPack's CUDA. Models are exported on an x86/macOS
+#      machine and downloaded as Release assets (see Dockerfile.jetson).
+#
+#   2. onnxruntime, not onnxruntime-gpu, is absent here on purpose. The GPU
+#      wheel has to come from a JetPack-specific index and is installed as a
+#      separate step in Dockerfile.jetson; listing plain `onnxruntime` here
+#      would let pip satisfy the name with the CPU-only build and silently
+#      undo the entire point of the board.
+
+# ── Computer vision ───────────────────────────────────────────────────────────
+# MediaPipe: required by grlib for hand landmark detection (the snap_roll
+# path). CPU-only — there is no GPU delegate for Jetson — so this stays the
+# slowest stage even after YOLO moves to the GPU.
+mediapipe>=0.10.9
+
+# grlib runtime deps (grlib itself is installed --no-deps in the Dockerfile).
+pandas>=1.1.4
+imutils>=0.5.4
+
+onnx>=1.12.0
+
+# OpenCV headless with FFmpeg for RTSP. Decodes on the CPU; Orin's NVDEC
+# would need an OpenCV built against GStreamer, which is a much bigger build
+# and not worth it until RTSP decode actually shows up as the bottleneck.
+opencv-python-headless>=4.9.0.80
+
+# ── Config ────────────────────────────────────────────────────────────────────
+PyYAML>=6.0
