@@ -101,6 +101,13 @@ REGISTRY: list[SettingField] = [
                   group="Pose", user_facing=True),
     SettingField("yolo_max_skip", int, 4,
                   "Run YOLO at least every N frames even with no motion", group="Pose", user_facing=True),
+    SettingField("yolo_max_skip_active", int, 1,
+                  "Run YOLO at least every N frames while a person is tracked. A "
+                  "sweep is only measurable if several samples land inside it, and "
+                  "during the ascent the arm is still DOWN, so nothing else forces "
+                  "a run — 1 means every frame once somebody is in view, while an "
+                  "empty room stays on the cheaper yolo_max_skip heartbeat",
+                  group="Pose", user_facing=True),
     SettingField("bg_subtract_enable", bool, True,
                   "Reject detections whose wrist never moves against the learned background "
                   "(filters framed pictures/mirrors/TV mis-read as a raised arm)",

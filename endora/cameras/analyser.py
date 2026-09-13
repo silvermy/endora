@@ -107,6 +107,20 @@ _MIN_VISIBLE_KPS = 6  # fewer than this → almost certainly not a real person
 # noise. Used by the area half of the motion gate.
 _MOTION_CELL_DELTA = 25
 
+# Motion-thumbnail geometry, and the smallest person box worth testing on its
+# own (below this the region is a handful of cells and its statistics are
+# noise rather than a limb).
+_MOTION_THUMB_W, _MOTION_THUMB_H = 80, 60
+_MOTION_REGION_MIN_CELLS = 12
+
+# Target width for the background-subtraction frame. MOG2 on the full 1280x640
+# canvas measured 68 ms per frame on the deployed host — over a third of the
+# entire loop, and spent every iteration for a mask only the pose path reads.
+# The mask feeds a wrist patch sized as a fraction of the diagonal and a
+# coverage fraction, both scale-free, so a smaller mask answers the same
+# question for ~1/16 of the cost.
+_BG_SUBTRACT_WIDTH = 320
+
 # Person-pool constants
 _PERSON_MATCH_DIST = 0.30  # max centroid displacement (fraction of frame diagonal)
                              # to link a detection to an existing tracked person
@@ -197,18 +211,25 @@ def _wrist_shows_motion(
     person) that YOLO mis-detects as a permanently "raised arm" but which never
     actually moves. Returns True (don't reject) when there's nothing to check
     against — no background model yet, or no confidently-visible wrist.
+
+    The mask may be smaller than the frame (the background model runs
+    downscaled — it cost 68 ms a frame at full size, more than a third of the
+    whole loop), so keypoints are scaled into mask space rather than indexed
+    directly. The patch is a fraction of the diagonal either way, so what it
+    covers of the person is unchanged.
     """
     if fg_mask is None:
         return True
     mh, mw = fg_mask.shape[:2]
-    diag = (frame_w ** 2 + frame_h ** 2) ** 0.5
+    sx, sy = mw / max(1, frame_w), mh / max(1, frame_h)
+    diag = ((mw) ** 2 + (mh) ** 2) ** 0.5
     half = max(2, int(_WRIST_PATCH_FRAC * diag))
     seen_wrist = False
     for idx in (_COCO_LEFT_WRIST, _COCO_RIGHT_WRIST):
         if kps_row[idx, 2] <= 0.3:
             continue
         seen_wrist = True
-        x, y = kps_row[idx, 0], kps_row[idx, 1]
+        x, y = kps_row[idx, 0] * sx, kps_row[idx, 1] * sy
         x0, x1 = max(0, int(x - half)), min(mw, int(x + half))
         y0, y1 = max(0, int(y - half)), min(mh, int(y + half))
         if x1 <= x0 or y1 <= y0:
@@ -393,8 +414,28 @@ def _crop_around_wrist(frame: np.ndarray, reading, lm) -> Optional[np.ndarray]:
     return crop
 
 
+def _diff_moves(diff: np.ndarray, mean_thresh: float, area_min: float) -> bool:
+    """Both motion tests over one patch of the frame difference."""
+    if float(diff.mean()) / 255.0 > mean_thresh:
+        return True
+    return float((diff > _MOTION_CELL_DELTA).sum()) / diff.size > area_min
+
+
+def _boxes_to_thumb(boxes, pw: int, ph: int) -> list[tuple]:
+    """Person boxes in frame pixels → motion-thumbnail rectangles."""
+    out = []
+    for box in boxes:
+        x1 = max(0, int(box[0] * _MOTION_THUMB_W / pw))
+        y1 = max(0, int(box[1] * _MOTION_THUMB_H / ph))
+        x2 = min(_MOTION_THUMB_W, int(box[2] * _MOTION_THUMB_W / pw) + 1)
+        y2 = min(_MOTION_THUMB_H, int(box[3] * _MOTION_THUMB_H / ph) + 1)
+        if (x2 - x1) * (y2 - y1) >= _MOTION_REGION_MIN_CELLS:
+            out.append((x1, y1, x2, y2))
+    return out
+
+
 def _frame_has_motion(prev_small, small, mean_thresh: float,
-                      area_min: float) -> bool:
+                      area_min: float, regions=None) -> bool:
     """Has enough of the scene changed to be worth running the pose model?
 
     Two tests, either sufficient. The mean is the original and is the wrong
@@ -405,13 +446,24 @@ def _frame_has_motion(prev_small, small, mean_thresh: float,
     of the frame changed appreciably, which is what a moving limb looks like
     regardless of how much empty room surrounds it, and stays at zero for
     sensor noise.
+
+    *regions* re-runs the same two tests inside the last known person boxes.
+    Both statistics divide by the area they are measured over, so a sweeping
+    arm that is a rounding error against a whole living room is a large
+    fraction of the person it belongs to — the same denominator problem that
+    kept the gate shut before, one scale down. The full-frame test still runs
+    first, so somebody walking in where nobody is tracked yet still wakes it.
     """
     if prev_small is None:
         return True
     diff = cv2.absdiff(small, prev_small)
-    if float(diff.mean()) / 255.0 > mean_thresh:
+    if _diff_moves(diff, mean_thresh, area_min):
         return True
-    return float((diff > _MOTION_CELL_DELTA).sum()) / diff.size > area_min
+    for x1, y1, x2, y2 in regions or ():
+        sub = diff[y1:y2, x1:x2]
+        if sub.size and _diff_moves(sub, mean_thresh, area_min):
+            return True
+    return False
 
 
 class _StageTimer:
@@ -531,6 +583,8 @@ class CameraAnalyser(threading.Thread):
         # Counts actual YOLO runs, so person pruning can be expressed in
         # missed detections rather than elapsed time (see _PERSON_PRUNE_MISSES).
         self._yolo_runs: int = 0
+        # Last known person boxes, in motion-thumbnail coordinates.
+        self._motion_regions: list[tuple] = []
 
     def stop(self):
         self._stop_evt.set()
@@ -827,10 +881,17 @@ class CameraAnalyser(threading.Thread):
             # Sampled BEFORE CLAHE (below) — CLAHE's local-contrast boost can
             # amplify sensor noise in dim areas into something that looks like
             # motion, which would undermine the liveness check it feeds.
-            fg_mask = (
-                bg_subtractor.apply(proc_frame)
-                if getattr(self.s, 'bg_subtract_enable', True) else None
-            )
+            if getattr(self.s, 'bg_subtract_enable', True):
+                if pw > _BG_SUBTRACT_WIDTH:
+                    bg_in = cv2.resize(
+                        proc_frame,
+                        (_BG_SUBTRACT_WIDTH, max(1, ph * _BG_SUBTRACT_WIDTH // pw)),
+                        interpolation=cv2.INTER_AREA)
+                else:
+                    bg_in = proc_frame
+                fg_mask = bg_subtractor.apply(bg_in)
+            else:
+                fg_mask = None
             _t_stage = _stage_timer.mark("bgsub", _t_stage)
             min_fg_frac = float(getattr(self.s, 'bg_subtract_min_foreground', 0.12))
             # Confirmed-human persons' positions, plus pids still inside
@@ -854,10 +915,19 @@ class CameraAnalyser(threading.Thread):
             mot_thresh = float(getattr(self.s, 'motion_threshold', 0.015))
             area_min   = float(getattr(self.s, 'motion_area_min', 0.002))
             max_skip   = int(getattr(self.s,   'yolo_max_skip',    12))
+            # While somebody is tracked, sample as fast as the loop allows.
+            # The gate exists to keep an empty room cheap; it was also
+            # throttling the one moment that matters, because during a
+            # sweep's ascent the arm state is still DOWN and neither
+            # `motion` nor `any_arm_up` is reliably true.
+            if self._persons:
+                max_skip = max(1, int(getattr(self.s, 'yolo_max_skip_active', 1)))
 
             gray  = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2GRAY)
-            small = cv2.resize(gray, (80, 60), interpolation=cv2.INTER_AREA)
-            motion = _frame_has_motion(_prev_small, small, mot_thresh, area_min)
+            small = cv2.resize(gray, (_MOTION_THUMB_W, _MOTION_THUMB_H),
+                               interpolation=cv2.INTER_AREA)
+            motion = _frame_has_motion(_prev_small, small, mot_thresh, area_min,
+                                       regions=self._motion_regions)
             _prev_small = small
             _frames_since_yolo += 1
             _t_stage = _stage_timer.mark("motion", _t_stage)
@@ -1060,6 +1130,13 @@ class CameraAnalyser(threading.Thread):
                         _all_dbg_kps.append(_cached_kps[i])
                     if box is not None:
                         _dbg_boxes.append((box, reason))
+
+            # Next iteration's motion gate measures inside these. Accepted
+            # boxes only: a rejected detection is usually a static ghost, and
+            # watching its box for motion would hand it the wake-up the
+            # liveness gate exists to deny it.
+            self._motion_regions = _boxes_to_thumb(
+                [b for b, reason in _dbg_boxes if reason is None], pw, ph)
 
             # ── Frame capture on noteworthy events ────────────────────────────
             current_primary_state = (

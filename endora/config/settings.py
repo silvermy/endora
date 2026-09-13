@@ -87,6 +87,7 @@ class Settings:
     # Heartbeat: even with no motion, run YOLO at least every N frames so
     # slow arm lifts are eventually detected. 6 ≈ re-confirm every ~0.6s at 10fps.
     yolo_max_skip: int = 4
+    yolo_max_skip_active: int = 1
     # Background-subtraction liveness filter: rejects a YOLO detection whose
     # wrist(s) sit entirely over pixels the adaptive background model considers
     # static. Catches things like a framed picture on the wall that YOLO
