@@ -72,7 +72,11 @@ RUN pip3 install --no-cache-dir --upgrade pip \
 #     JetPack 6.0/6.1 → jp6/cu122
 # The equivalent wheels are also linked from the Jetson Zoo wiki page if you
 # would rather download and COPY one in.
-ARG ORT_INDEX_URL=https://pypi.jetson-ai-lab.dev/jp6/cu126
+#
+# The index host moved from pypi.jetson-ai-lab.dev to pypi.jetson-ai-lab.io;
+# the old name no longer resolves, which surfaces as a pip NameResolutionError
+# rather than anything that looks like a URL problem.
+ARG ORT_INDEX_URL=https://pypi.jetson-ai-lab.io/jp6/cu126
 RUN pip3 install --no-cache-dir --index-url ${ORT_INDEX_URL} onnxruntime-gpu
 
 WORKDIR /app
