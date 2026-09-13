@@ -736,6 +736,7 @@ class CameraAnalyser(threading.Thread):
                  self.label, __version__)
 
         _cached_kps: Optional[np.ndarray] = None   # [N, 17, 3] from PoseModel
+        _cached_boxes: Optional[np.ndarray] = None  # [N, 5] xyxy+conf, same rows
         _prev_small: Optional[np.ndarray] = None   # for motion gate
         _frames_since_yolo: int = 999              # force run on first frame
         _prev_primary_state: ArmState = ArmState.DOWN
@@ -818,7 +819,9 @@ class CameraAnalyser(threading.Thread):
                 base_conf = float(getattr(self.s, 'yolo_conf', 0.45))
                 model.conf = base_conf * 0.65 if self._persons else base_conf * 1.3
 
-                _cached_kps = model(proc_frame)    # Optional[ndarray [N,17,3]]
+                # Boxes are carried alongside the keypoints purely for the
+                # debug overlay; nothing in the gesture path reads them.
+                _cached_kps, _cached_boxes = model.infer(proc_frame)
                 _frames_since_yolo = 0
                 self._yolo_runs += 1
                 log.debug("[%s] YOLO ran (motion=%s any_arm_up=%s persons=%d)",
@@ -975,19 +978,33 @@ class CameraAnalyser(threading.Thread):
             # liveness half of that gate (see _passes_liveness_gate), so
             # holding still doesn't make them vanish from the overlay as
             # "NO POSE DETECTED" while they're plainly still there.
+            # Boxes are collected for *every* detection, including the ones
+            # rejected above. A rejection is invisible in the skeleton view —
+            # a ghost on the wall art and a person the gate wrongly dropped
+            # both render as empty frame — and telling those two apart is the
+            # whole diagnostic question. The box, with its confidence and
+            # reject reason, answers it.
             _all_dbg_kps: list[np.ndarray] = []
+            _dbg_boxes: list[tuple] = []          # (box[5], reason|None)
             if _cached_kps is not None:
                 for i in range(_cached_kps.shape[0]):
+                    box = (_cached_boxes[i] if _cached_boxes is not None
+                           and i < _cached_boxes.shape[0] else None)
+                    reason: Optional[str] = None
                     if _person_visible_kp_count(_cached_kps[i]) < _MIN_VISIBLE_KPS:
-                        continue
+                        reason = "few kps"
                     c = _person_centroid(_cached_kps[i])
-                    if c is None:
-                        continue
-                    if _passes_liveness_gate(
+                    if reason is None and c is None:
+                        reason = "no centroid"
+                    if reason is None and not _passes_liveness_gate(
                         _cached_kps[i], c, fg_mask, pw, ph, min_fg_frac,
                         known_centroids, match_dist,
                     ):
+                        reason = "not live"
+                    if reason is None:
                         _all_dbg_kps.append(_cached_kps[i])
+                    if box is not None:
+                        _dbg_boxes.append((box, reason))
 
             # ── Frame capture on noteworthy events ────────────────────────────
             current_primary_state = (
@@ -1003,7 +1020,8 @@ class CameraAnalyser(threading.Thread):
                     r = _primary_reading
                     try:
                         _cap_frame = _draw_debug(
-                            proc_frame, _all_dbg_kps, hand_lm, r, _primary_gesture
+                            proc_frame, _all_dbg_kps, hand_lm, r, _primary_gesture,
+                            person_boxes=_dbg_boxes,
                         )
                         self._frame_capture.save(
                             _cap_frame, _cap_event,
@@ -1020,7 +1038,8 @@ class CameraAnalyser(threading.Thread):
             if self.debug_frame_cb is not None:
                 try:
                     dbg = _draw_debug(
-                        proc_frame, _all_dbg_kps, hand_lm, _primary_reading, _primary_gesture
+                        proc_frame, _all_dbg_kps, hand_lm, _primary_reading,
+                        _primary_gesture, person_boxes=_dbg_boxes,
                     )
                     self.debug_frame_cb(self.label, dbg)
                 except Exception as e:
@@ -1031,13 +1050,46 @@ class CameraAnalyser(threading.Thread):
 
 # ── Debug overlay ─────────────────────────────────────────────────────────────
 
-def _draw_debug(frame, all_person_kps, hand_lm, reading, fired_gesture):
+def _draw_person_boxes(img, person_boxes) -> None:
+    """Draw one rectangle per person YOLO returned.
+
+    *person_boxes* is a list of ``(box, reason)`` where box is
+    ``[x1, y1, x2, y2, conf]`` in frame pixels and reason is None for a
+    detection that survived the gates, or a short string naming the gate that
+    dropped it. Accepted boxes are green and labelled with the confidence;
+    rejected ones are dim red and labelled with the reason, so a ghost and a
+    wrongly-dropped person are distinguishable at a glance.
+    """
+    h, w = img.shape[:2]
+    fs = max(0.35, w / 2200)
+    for box, reason in person_boxes:
+        x1, y1, x2, y2 = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+        ok = reason is None
+        color = (0, 200, 0) if ok else (60, 60, 200)
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2 if ok else 1)
+        label = f"{box[4]:.2f}" if ok else f"{box[4]:.2f} {reason}"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, fs, 1)
+        # Label above the box, or inside it when the box touches the top edge.
+        ly = y1 - 4 if y1 - th - 6 >= 0 else min(y1 + th + 6, h - 2)
+        cv2.rectangle(img, (x1, ly - th - 4), (x1 + tw + 6, ly + 3), color, -1)
+        cv2.putText(img, label, (x1 + 3, ly), cv2.FONT_HERSHEY_SIMPLEX,
+                    fs, (255, 255, 255), 1, cv2.LINE_AA)
+
+
+def _draw_debug(frame, all_person_kps, hand_lm, reading, fired_gesture,
+                person_boxes=None):
     """Draw YOLO skeleton for all detected persons + gesture state overlay.
 
     *all_person_kps* is a list of [17, 3] numpy arrays, one per valid person.
+    *person_boxes* is the optional ``(box, reason)`` list described in
+    :func:`_draw_person_boxes` — every detection, accepted or not.
     """
     img = frame.copy()
     h, w = img.shape[:2]
+
+    # Boxes first, so skeletons draw over them rather than under.
+    if person_boxes:
+        _draw_person_boxes(img, person_boxes)
 
     for person_kps in all_person_kps:
         for a, b in _COCO_UPPER_BODY:
@@ -1052,7 +1104,12 @@ def _draw_debug(frame, all_person_kps, hand_lm, reading, fired_gesture):
                 cv2.circle(img, (int(x), int(y)), 4, (0, 255, 0), -1)
 
     if not all_person_kps:
-        msg = "NO POSE DETECTED"
+        # "NO POSE DETECTED" is only true when YOLO returned nothing. When it
+        # returned someone the gates then dropped, say so — the two look
+        # identical without the boxes and need opposite fixes.
+        n_rejected = len(person_boxes or ())
+        msg = (f"{n_rejected} DETECTED, ALL REJECTED" if n_rejected
+               else "NO POSE DETECTED")
         fs = max(0.6, w / 800)
         (tw, th), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, fs, 2)
         tx, ty = (w - tw) // 2, 60

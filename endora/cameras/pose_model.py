@@ -423,12 +423,28 @@ class PoseModel:
     # ── inference ─────────────────────────────────────────────────────────
 
     def __call__(self, frame: np.ndarray) -> Optional[np.ndarray]:
+        """Keypoints only — see :meth:`infer` for the boxes as well."""
+        return self.infer(frame)[0]
+
+    def infer(
+        self, frame: np.ndarray
+    ) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """Run pose inference on *frame* (BGR uint8, any resolution).
 
-        Returns an ndarray of shape **[N, 17, 3]** — N detected persons,
-        17 COCO keypoints, each ``[x_px, y_px, visibility]`` in *frame*
-        pixel space — or **None** when no person exceeds the confidence
-        threshold.
+        Returns ``(keypoints, boxes)``:
+
+        * **keypoints** — [N, 17, 3]: N detected persons, 17 COCO keypoints,
+          each ``[x_px, y_px, visibility]`` in *frame* pixel space.
+        * **boxes** — [N, 5]: ``[x1, y1, x2, y2, person_conf]`` in the same
+          pixel space, **row-for-row aligned with keypoints**.
+
+        Both are ``None`` when no person exceeds the confidence threshold.
+
+        The box is what the detector actually found, which is not always what
+        the skeleton suggests: a confident box around a badly-articulated
+        skeleton means the keypoints are the weak link, while a low-confidence
+        box on a picture frame is a ghost. The debug overlay draws it for
+        exactly that reason.
 
         YOLO11n-pose ONNX output layout (per grid anchor):
             [cx, cy, w, h, person_conf, kp0_x, kp0_y, kp0_v, kp1_x, …]
@@ -452,7 +468,7 @@ class PoseModel:
         mask = preds[:, 4] >= self.conf
         preds = preds[mask]
         if preds.shape[0] == 0:
-            return None
+            return None, None
 
         # 5. Decode boxes: cx,cy,w,h → x1,y1,x2,y2 (letterboxed pixels)
         cx, cy, bw, bh = preds[:, 0], preds[:, 1], preds[:, 2], preds[:, 3]
@@ -463,12 +479,21 @@ class PoseModel:
         # 6. NMS
         keep = _nms(boxes, preds[:, 4])
         if not keep:
-            return None
+            return None, None
         preds = preds[keep]
+        boxes = boxes[keep]
 
         # 7. Keypoints: [N, 51] → [N, 17, 3], unpad & unscale to frame pixels
         kps = preds[:, 5:].reshape(-1, 17, 3).copy()
         kps[:, :, 0] = np.clip((kps[:, :, 0] - pad_w) / ratio, 0, fw)
         kps[:, :, 1] = np.clip((kps[:, :, 1] - pad_h) / ratio, 0, fh)
 
-        return kps   # [N, 17, 3]
+        # 8. Boxes: same unpad/unscale, with the confidence appended → [N, 5]
+        out_boxes = np.empty((boxes.shape[0], 5), dtype=np.float32)
+        out_boxes[:, 0] = np.clip((boxes[:, 0] - pad_w) / ratio, 0, fw)
+        out_boxes[:, 1] = np.clip((boxes[:, 1] - pad_h) / ratio, 0, fh)
+        out_boxes[:, 2] = np.clip((boxes[:, 2] - pad_w) / ratio, 0, fw)
+        out_boxes[:, 3] = np.clip((boxes[:, 3] - pad_h) / ratio, 0, fh)
+        out_boxes[:, 4] = preds[:, 4]
+
+        return kps, out_boxes
