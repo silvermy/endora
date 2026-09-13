@@ -15,6 +15,7 @@ Any person can trigger a gesture.
 """
 from __future__ import annotations
 
+import collections
 import logging
 import sys
 import threading
@@ -413,6 +414,53 @@ def _frame_has_motion(prev_small, small, mean_thresh: float,
     return float((diff > _MOTION_CELL_DELTA).sum()) / diff.size > area_min
 
 
+class _StageTimer:
+    """Where the analyser loop's time actually goes.
+
+    Added because a live system was sampling poses only 0.63 times a second
+    while its camera reported 11 fps, and nothing in the logs could say
+    which stage was responsible — the capture rate in the stats line says
+    nothing about how often the pose model actually looks at the scene, and
+    that rate is what decides whether an arm sweep is measurable. Guessing
+    from YOLO-run gaps gave the wrong answer once already.
+
+    Costs one monotonic() per stage per frame and logs a summary every
+    *period_s*, so it stays on in normal operation rather than being a
+    debugging build someone has to reproduce the problem under.
+    """
+
+    def __init__(self, period_s: float = 30.0) -> None:
+        self._period = period_s
+        self._totals: "collections.OrderedDict[str, float]" = collections.OrderedDict()
+        self._iters = 0
+        self._yolo_at_start = 0
+        self._started = time.monotonic()
+
+    def mark(self, stage: str, since: float) -> float:
+        t = time.monotonic()
+        self._totals[stage] = self._totals.get(stage, 0.0) + (t - since)
+        return t
+
+    def tick(self, label: str, yolo_runs: int) -> None:
+        self._iters += 1
+        elapsed = time.monotonic() - self._started
+        if elapsed < self._period:
+            return
+        yolo = yolo_runs - self._yolo_at_start
+        parts = " ".join(
+            f"{k} {v / self._iters * 1000:.0f}" for k, v in self._totals.items()
+        )
+        log.info(
+            "[%s] loop %.1f iter/s, pose %.2f sample/s (%d in %.0fs) | "
+            "mean ms/iter: %s",
+            label, self._iters / elapsed, yolo / elapsed, yolo, elapsed, parts,
+        )
+        self._totals.clear()
+        self._iters = 0
+        self._yolo_at_start = yolo_runs
+        self._started = time.monotonic()
+
+
 def _sweep_meets_flourish(reading, climb_min: float, rate_min: float) -> bool:
     """Does this reading show a sweep worth chiming for?
 
@@ -735,6 +783,7 @@ class CameraAnalyser(threading.Thread):
         log.info("[%s] Analyser running (v%s — YOLO pose + grlib hands)",
                  self.label, __version__)
 
+        _stage_timer = _StageTimer()
         _cached_kps: Optional[np.ndarray] = None   # [N, 17, 3] from PoseModel
         _cached_boxes: Optional[np.ndarray] = None  # [N, 5] xyxy+conf, same rows
         _prev_small: Optional[np.ndarray] = None   # for motion gate
@@ -750,8 +799,10 @@ class CameraAnalyser(threading.Thread):
                 continue
 
             now = time.monotonic()
+            _t_stage = now
 
             proc_frame, pw, ph = self._preprocess(frame)
+            _t_stage = _stage_timer.mark("prep", _t_stage)
 
             # Report the real pixel budget once. Everything downstream is
             # limited by it, and it is not otherwise visible anywhere: an
@@ -780,6 +831,7 @@ class CameraAnalyser(threading.Thread):
                 bg_subtractor.apply(proc_frame)
                 if getattr(self.s, 'bg_subtract_enable', True) else None
             )
+            _t_stage = _stage_timer.mark("bgsub", _t_stage)
             min_fg_frac = float(getattr(self.s, 'bg_subtract_min_foreground', 0.12))
             # Confirmed-human persons' positions, plus pids still inside
             # their own confirmation grace period (see _known_centroids),
@@ -790,6 +842,7 @@ class CameraAnalyser(threading.Thread):
             match_dist = _LIVENESS_EXEMPT_DIST * ((pw ** 2 + ph ** 2) ** 0.5)
 
             proc_frame = self._apply_low_light_enhance(proc_frame)
+            _t_stage = _stage_timer.mark("clahe", _t_stage)
 
             # ── Motion gate ───────────────────────────────────────────────
             # Resize to 80×60 (~0.1 ms) and diff against previous frame.
@@ -807,6 +860,7 @@ class CameraAnalyser(threading.Thread):
             motion = _frame_has_motion(_prev_small, small, mot_thresh, area_min)
             _prev_small = small
             _frames_since_yolo += 1
+            _t_stage = _stage_timer.mark("motion", _t_stage)
 
             any_arm_up = any(e.last_arm_state != ArmState.DOWN
                              for e in self._persons.values())
@@ -824,6 +878,7 @@ class CameraAnalyser(threading.Thread):
                 _cached_kps, _cached_boxes = model.infer(proc_frame)
                 _frames_since_yolo = 0
                 self._yolo_runs += 1
+                _t_stage = _stage_timer.mark("yolo", _t_stage)
                 log.debug("[%s] YOLO ran (motion=%s any_arm_up=%s persons=%d)",
                           self.label, motion, any_arm_up, len(self._persons))
 
@@ -1035,6 +1090,8 @@ class CameraAnalyser(threading.Thread):
                         log.debug("[%s] frame capture error: %s", self.label, e)
             _prev_primary_state = current_primary_state
 
+            _t_stage = _stage_timer.mark("gesture", _t_stage)
+
             if self.debug_frame_cb is not None:
                 try:
                     dbg = _draw_debug(
@@ -1044,6 +1101,14 @@ class CameraAnalyser(threading.Thread):
                     self.debug_frame_cb(self.label, dbg)
                 except Exception as e:
                     log.debug("[%s] debug render error: %s", self.label, e)
+            _stage_timer.mark("debug", _t_stage)
+
+            # Pose sample rate is the number that decides whether a sweep is
+            # measurable at all: the flourish window only holds a climb if
+            # several samples land inside it. It is not derivable from the
+            # capture fps in the stats line — the analyser loop runs slower
+            # than the camera, and YOLO slower still.
+            _stage_timer.tick(self.label, self._yolo_runs)
 
         log.info("[%s] Analyser stopped", self.label)
 
