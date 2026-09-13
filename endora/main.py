@@ -56,12 +56,24 @@ _GESTURE_CRITICAL = [
     "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
     "gesture_snap_enable", "gesture_cross_arms_enable",
     "gesture_t_pose_enable", "gesture_raise_both_enable",
+    # HOLD was missing here while every other gesture flag was listed, and
+    # it is the one that most visibly surprises: it fires hold_duration_s
+    # after a successful SNAP, from the same raised arm, with its own HA
+    # event and its own chime. Someone who left their arm up reads that as
+    # the detector firing twice for one gesture, and nothing in the startup
+    # diagnostic said HOLD was enabled.
+    "gesture_hold_enable", "hold_duration_s",
+    "gesture_double_snap_enable", "double_snap_window_s",
     "cross_gesture_cooldown_s",
     "snap_require_rise", "snap_require_still",
     "rise_elevation_delta", "rise_start_elevation_max",
     "wrist_still_max_travel_arm",
     "state_confirm_s", "state_release_s", "cooldown_s", "sustained_rearm_s",
     "pose_visibility_min", "keypoint_visibility_min",
+    # The pose sample rate ceiling (see _StageTimer): a sweep is only
+    # measurable if several samples land inside flourish_window_s, and
+    # these two decide how often the model looks.
+    "yolo_max_skip", "yolo_max_skip_active",
 ]
 
 
