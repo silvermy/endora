@@ -17,6 +17,7 @@ from cameras.analyser import CameraAnalyser
 from core.state_machine import Gesture
 from cameras import debug_server
 from cameras.recorder import TestRecorder
+from core import deployment
 from core.feedback_logger import FeedbackLogger
 from core.fusion import GestureFusion
 from output.backends import make_backend
@@ -229,7 +230,15 @@ def _install_chime_wav(host_ip: str = "", debug_port: int = 0,
 
     # Injectable so the two routes can be tested without a real /media.
     media_dir = Path("/media") if media_dir is None else media_dir
-    if media_dir.is_dir():
+    # Gate on the deployment, not on whether a /media directory happens to
+    # exist. The Jetson's L4T base image has one, so the add-on route was
+    # taken on a standalone install: the clip was copied into the container's
+    # own throwaway /media and Home Assistant was handed a
+    # media-source:// URL for a file that only existed on the HA machine —
+    # left there by an add-on install that had since been removed. It played
+    # until someone cleaned up, then would have failed with nothing in the
+    # log to explain why.
+    if deployment.is_addon() and media_dir.is_dir():
         dest = media_dir / f"endora_chime_{digest}.wav"
         try:
             shutil.copy2(src, dest)

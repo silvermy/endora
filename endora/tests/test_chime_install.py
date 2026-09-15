@@ -30,27 +30,50 @@ def digest():
     return hashlib.sha256(WAV.read_bytes()).hexdigest()[:8]
 
 
+@pytest.fixture
+def addon():
+    """Run as though under the Supervisor."""
+    with patch("core.system.deployment.is_addon", return_value=True):
+        yield
+
+
 # ── add-on route ──────────────────────────────────────────────────────────
 
-def test_addon_copies_into_media_and_returns_a_media_source_url(tmp_path, digest):
+def test_addon_copies_into_media_and_returns_a_media_source_url(addon, tmp_path, digest):
     url = _install_chime_wav(media_dir=tmp_path)
     assert url == f"media-source://media_source/local/endora_chime_{digest}.wav"
     assert (tmp_path / f"endora_chime_{digest}.wav").exists()
 
 
-def test_addon_route_wins_even_when_a_debug_port_is_available(tmp_path):
+def test_addon_route_wins_even_when_a_debug_port_is_available(addon, tmp_path):
     """/media works regardless of debug_port, so it stays the preferred route
     on the add-on — it does not depend on the debug page being switched on."""
     url = _install_chime_wav("10.0.0.5", 8765, media_dir=tmp_path)
     assert url.startswith("media-source://")
 
 
-def test_superseded_clips_are_removed(tmp_path, digest):
+def test_superseded_clips_are_removed(addon, tmp_path, digest):
     stale = tmp_path / "endora_chime_deadbeef.wav"
     stale.write_bytes(b"old")
     _install_chime_wav(media_dir=tmp_path)
     assert not stale.exists()
     assert (tmp_path / f"endora_chime_{digest}.wav").exists()
+
+
+def test_standalone_ignores_a_media_directory_that_happens_to_exist(tmp_path, digest):
+    """The bug this guards against, seen on a live Jetson.
+
+    The route used to be chosen by whether /media was a directory. The L4T
+    base image has one, so a standalone install copied the clip into its own
+    container's throwaway /media and handed Home Assistant a media-source://
+    URL for a file only the HA machine could serve. It played only because an
+    earlier add-on install had left that file behind, and would have gone
+    silent the moment anyone tidied up — with nothing in the log to say why.
+    """
+    url = _install_chime_wav("10.0.0.5", 8765, media_dir=tmp_path)
+    assert url == f"http://10.0.0.5:8765/chime.wav?v={digest}"
+    assert not list(tmp_path.glob("endora_chime*.wav")), \
+        "wrote into a /media that Home Assistant cannot read"
 
 
 # ── standalone route ──────────────────────────────────────────────────────
@@ -87,7 +110,7 @@ def test_standalone_without_a_host_ip_gives_up(tmp_path):
 
 # ── fallthrough ───────────────────────────────────────────────────────────
 
-def test_unwritable_media_falls_through_to_the_http_route(tmp_path, digest):
+def test_unwritable_media_falls_through_to_the_http_route(addon, tmp_path, digest):
     """A mounted but unwritable /media used to return "" outright. If the
     debug server can serve the clip, that is a working chime going unused."""
     with patch("shutil.copy2", side_effect=PermissionError):
