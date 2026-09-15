@@ -147,16 +147,6 @@ def set_host_info(ip: str, port: int) -> None:
     _debug_port = port
 
 
-def _direct_url() -> str:
-    """Absolute URL of the console on its own port.
-
-    Must be absolute and must name the host by IP: the ingress copy of this
-    page is served from Home Assistant's origin, so a relative link would
-    resolve back into HA rather than to the add-on's own port.
-    """
-    return f"http://{_host_ip}:{_debug_port}/"
-
-
 def update_frame(label: str, frame: np.ndarray) -> None:
     with _lock:
         _latest[label] = frame
@@ -627,11 +617,6 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
   overflow-y:auto;flex:1;padding:3px 8px;
   font-family:'SF Mono','Consolas','Fira Mono',monospace;font-size:11px;line-height:1.65;
 }
-/* Shown only inside Home Assistant's ingress frame — see initPopout(). */
-#popout{float:right;font-size:12px;font-weight:normal;text-decoration:none;
-        padding:3px 9px;border:1px solid #3a6ea5;border-radius:4px;
-        color:#9ecbff;background:#16212e}
-#popout:hover{background:#1e3247}
 .logline{white-space:pre-wrap;word-break:break-all}
 .ll-D{color:#3a7a3a}
 .ll-I{color:#6a6a6a}
@@ -640,9 +625,7 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 </style>
 </head>
 <body>
-<h3>&bull;&nbsp;ENDORA DEBUG&nbsp;<span class="sub">&nbsp;&bull;&nbsp;YOLO POSE&nbsp;&bull;&nbsp;GRLIB HANDS</span>
-<a id="popout" href="__DIRECT_URL__" target="_blank" rel="noopener" hidden
-   title="Open the debug console in its own tab, outside the Home Assistant sidebar">&#8599;&nbsp;Open in new tab</a></h3>
+<h3>&bull;&nbsp;ENDORA DEBUG&nbsp;<span class="sub">&nbsp;&bull;&nbsp;YOLO POSE&nbsp;&bull;&nbsp;GRLIB HANDS</span></h3>
 <div id="wrap">
   <div id="vbox">
     <img id="streamimg" alt="stream">
@@ -694,26 +677,6 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 const PARAMS  = __PARAMS_JSON__;
 const TOGGLES = __TOGGLES_JSON__;
 const JOY     = __JOY_PARAMS_JSON__;
-
-// ── "Open in new tab" ───────────────────────────────────────────────────────
-// Home Assistant shows an add-on's ingress panel in an iframe, so clicking
-// the sidebar item keeps you inside HA's chrome. HA gives no way to make a
-// sidebar entry open an external URL directly, so the panel offers the jump
-// instead: one click to the console on its own origin, in its own tab.
-//
-// The link is absolute http:// while HA is https://, which is fine — mixed
-// content blocks embedded subresources (iframes, images, fetch), not
-// top-level navigation. That asymmetry is exactly why the ingress panel
-// serves the whole UI itself rather than framing the http port.
-//
-// Hidden when not framed: on the direct console the button would just open a
-// second copy of the page you are already looking at.
-function initPopout() {
-  var framed = false;
-  try { framed = window.self !== window.top; } catch (e) { framed = true; }
-  if (framed) document.getElementById('popout').hidden = false;
-}
-initPopout();
 
 function fmt(v, step) {
   const n = +v;
@@ -1201,7 +1164,6 @@ class _Handler(BaseHTTPRequestHandler):
                     .replace("__PARAMS_JSON__",     json.dumps(_PARAMS))
                     .replace("__TOGGLES_JSON__",    json.dumps(_TOGGLES))
                     .replace("__JOY_PARAMS_JSON__", json.dumps(_JOY_PARAMS))
-                    .replace("__DIRECT_URL__",      _direct_url())
                     )
             body = html.encode()
             self.send_response(200)
