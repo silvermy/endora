@@ -169,11 +169,27 @@ const tests = {
     assert.strictEqual(h.calls.replaceState[0][2], "/dashboard-main/2");
   },
 
-  "falls back when HA offers no default panel"() {
+  "does not navigate when no dashboard is known"() {
+    // The bug this replaces: with hass.defaultPanel empty the panel fell back
+    // to "/lovelace", which does not exist on a system whose dashboards were
+    // all created by hand. HA answers such a route by spinning forever, and
+    // that spinner was mistaken for the panel failing through four wrong
+    // diagnoses. Staying put is always safe — the panel has rendered and
+    // carries a link.
     const h = load({ openReturns: () => ({ opener: {} }) });
-    newPanel(h).connectedCallback();               // no hass property at all
+    const el = newPanel(h, { hass: {} });          // hass set, defaultPanel not
+    el.connectedCallback();
     h.flush();
-    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace");
+    assert.strictEqual(h.calls.replaceState.length, 0,
+      "navigated to a guessed dashboard");
+    assert.ok(el.innerHTML.trim().length > 0, "left the user with nothing");
+  },
+
+  "does not navigate when hass is absent entirely"() {
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    newPanel(h).connectedCallback();
+    h.flush();
+    assert.strictEqual(h.calls.replaceState.length, 0);
   },
 
   "stays put and offers a link when the popup is blocked"() {

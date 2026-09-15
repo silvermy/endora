@@ -22,19 +22,10 @@ if (!customElements.get("endora-console")) {
 
 const TARGET = "http://10.0.0.142:8765/";
 
-// Where Home Assistant should land after the console opens in its own tab.
-//
-// Normally nothing to set: HA tells the panel which dashboard the user has
-// chosen as their default, via hass.defaultPanel. This constant is only the
-// last resort if that is unavailable, and is a guess — "lovelace" is the
-// stock dashboard's path, and an install whose dashboards were all created
-// by hand may not have one at all. (The install this was written against
-// had dashboards named lovelace-home, dashboard-cameras and so on, and no
-// plain "lovelace" anywhere, so the old hardcoded default navigated to a
-// dashboard that did not exist.) Override with `config: home_path:` in the
-// panel_custom block.
-const HOME_PATH = "/lovelace";
-
+// Where Home Assistant lands after the console opens is NOT configured here.
+// It comes from `config: home_path:` in the panel_custom block, or failing
+// that from hass.defaultPanel. If neither says, the panel stays put rather
+// than guessing — see _goHome.
 // How long a reconnect counts as the same visit rather than a new click.
 // Long enough to absorb HA disconnecting and reconnecting the element around
 // a navigation, short enough that clicking the sidebar item again does what
@@ -54,7 +45,38 @@ const RECONNECT_GUARD_MS = 1500;
 // an HTTPS page. It does not reject top-level navigation, which is why
 // opening a tab and the fallback link below are both fine.
 class EndoraConsole extends HTMLElement {
+  // ── Temporary lifecycle instrumentation ─────────────────────────────────
+  // The panel spins on every visit after the first, with no exception in the
+  // browser console — so the module loads and nothing throws, and four
+  // guesses at what happens next were all wrong. Rather than guess again,
+  // report what actually fires into Home Assistant's own log, which can be
+  // read remotely. Remove once the cause is known.
+  _log(msg) {
+    try {
+      if (this.hass && this.hass.callService) {
+        this.hass.callService("system_log", "write", {
+          message: "endora-panel: " + msg,
+          level: "warning",
+          logger: "endora_panel",
+        });
+      }
+    } catch (e) { /* diagnostics must never break the panel */ }
+  }
+
+  constructor() {
+    super();
+    EndoraConsole._instances = (EndoraConsole._instances || 0) + 1;
+    this._id = EndoraConsole._instances;
+  }
+
+  disconnectedCallback() {
+    this._log(`disconnected #${this._id}`);
+  }
+
   connectedCallback() {
+    this._log(`connected #${this._id} children=${this.childElementCount} ` +
+              `lastRun=${this._lastRun ? Date.now() - this._lastRun + "ms ago" : "never"} ` +
+              `hass=${!!this.hass} panel=${!!this.panel}`);
     // HA can disconnect and reconnect this element around a navigation, and
     // each reconnect must not open another tab. But the guard has to expire:
     // when it was permanent, the first click worked and every later one
@@ -94,6 +116,7 @@ class EndoraConsole extends HTMLElement {
     // rewritten, so only a reload escaped it.
     this._lastOpened = !!opened;
     this._render(this._lastOpened);
+    this._log(`opened=${!!opened} rendered=${this.innerHTML.trim().length}chars`);
 
     if (opened) this._goHome();
   }
@@ -122,7 +145,20 @@ class EndoraConsole extends HTMLElement {
     // Explicit config wins; otherwise ask HA which dashboard this user set as
     // their default, and only guess if it will not say.
     const preferred = this.hass && this.hass.defaultPanel;
-    const home = cfg.home_path || (preferred ? "/" + preferred : HOME_PATH);
+    const home = cfg.home_path || (preferred ? "/" + preferred : null);
+
+    // Never navigate to a guess. hass.defaultPanel is not always populated —
+    // on the install this was debugged against it was empty even though hass
+    // itself was set — and the old fallback, "/lovelace", does not exist on
+    // any system whose dashboards were all created by hand. Home Assistant
+    // answers a route with nothing behind it by spinning forever, which is
+    // indistinguishable from the panel having failed, and cost four wrong
+    // diagnoses. Staying here is always safe: the panel has already rendered
+    // and carries a link to the console.
+    if (!home) {
+      this._log("no known dashboard to return to; staying put");
+      return;
+    }
 
     // Deferred by a tick, and fired on window rather than on this element.
     // Dispatched inline from connectedCallback the event never reached HA's
@@ -142,6 +178,7 @@ class EndoraConsole extends HTMLElement {
       window.dispatchEvent(new CustomEvent("location-changed", {
         detail: { replace: true }, bubbles: true, composed: true,
       }));
+      this._log(`navigated to ${home}`);
     }, 0);
   }
 }
