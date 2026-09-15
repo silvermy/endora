@@ -62,13 +62,19 @@ can change detection settings and restart behaviour.
 
 Once the console opens, the panel sends Home Assistant back to the dashboard
 so it never rests on this route — otherwise every later reload that restores
-it opens another tab. The default is HA's stock `/lovelace/0`; if your
-dashboard has been renamed, set it:
+it opens another tab.
+
+It goes to whichever dashboard HA reports as your default, so there is
+usually nothing to configure. To send it somewhere specific instead:
 
 ```yaml
     config:
-      home_path: /dashboard-main/0
+      home_path: /lovelace-home
 ```
+
+Use a real `url_path` from **Settings → Dashboards**. Do not assume
+`/lovelace` exists: on an install whose dashboards were all created by hand
+there may be no dashboard at that path at all.
 
 ### 3. Restart Home Assistant
 

@@ -88,20 +88,38 @@ const tests = {
 
   "navigates Home Assistant home once the tab is open"() {
     const h = load({ openReturns: () => ({ opener: {} }) });
-    newPanel(h).connectedCallback();
+    newPanel(h, { hass: { defaultPanel: "lovelace-home" } }).connectedCallback();
     assert.strictEqual(h.calls.replaceState.length, 1, "did not navigate home");
-    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace/0");
     assert.strictEqual(h.calls.dispatched.length, 1, "no location-changed event");
     const ev = h.calls.dispatched[0];
     assert.strictEqual(ev.type, "location-changed");
     assert.ok(ev.bubbles && ev.composed, "event will not reach HA's router");
   },
 
-  "honours a configured home path"() {
+  "uses the dashboard HA says is the user's default"() {
+    // The hardcoded "/lovelace" is a guess that is wrong on any install whose
+    // dashboards were all created by hand — one such install had no dashboard
+    // at that path at all, so the panel navigated nowhere.
     const h = load({ openReturns: () => ({ opener: {} }) });
-    const el = newPanel(h, { panel: { config: { home_path: "/dashboard-main/2" } } });
+    const el = newPanel(h, { hass: { defaultPanel: "lovelace-home" } });
+    el.connectedCallback();
+    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace-home");
+  },
+
+  "honours a configured home path over HA's default"() {
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    const el = newPanel(h, {
+      hass: { defaultPanel: "lovelace-home" },
+      panel: { config: { home_path: "/dashboard-main/2" } },
+    });
     el.connectedCallback();
     assert.strictEqual(h.calls.replaceState[0][2], "/dashboard-main/2");
+  },
+
+  "falls back when HA offers no default panel"() {
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    newPanel(h).connectedCallback();               // no hass property at all
+    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace");
   },
 
   "stays put and offers a link when the popup is blocked"() {

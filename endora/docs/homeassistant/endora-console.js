@@ -13,10 +13,17 @@
 const TARGET = "http://10.0.0.142:8765/";
 
 // Where Home Assistant should land after the console opens in its own tab.
-// Override per-install with `config: home_path: /your-dashboard/0` in the
-// panel_custom block — "/lovelace/0" is HA's stock default dashboard, which
-// is wrong if yours has been renamed.
-const HOME_PATH = "/lovelace/0";
+//
+// Normally nothing to set: HA tells the panel which dashboard the user has
+// chosen as their default, via hass.defaultPanel. This constant is only the
+// last resort if that is unavailable, and is a guess — "lovelace" is the
+// stock dashboard's path, and an install whose dashboards were all created
+// by hand may not have one at all. (The install this was written against
+// had dashboards named lovelace-home, dashboard-cameras and so on, and no
+// plain "lovelace" anywhere, so the old hardcoded default navigated to a
+// dashboard that did not exist.) Override with `config: home_path:` in the
+// panel_custom block.
+const HOME_PATH = "/lovelace";
 
 // Why a custom panel rather than a link or an iframe:
 //
@@ -81,7 +88,10 @@ class EndoraConsole extends HTMLElement {
   // fallback link and leave no way to reach the console at all.
   _goHome() {
     const cfg = (this.panel && this.panel.config) || {};
-    const home = cfg.home_path || HOME_PATH;
+    // Explicit config wins; otherwise ask HA which dashboard this user set as
+    // their default, and only guess if it will not say.
+    const preferred = this.hass && this.hass.defaultPanel;
+    const home = cfg.home_path || (preferred ? "/" + preferred : HOME_PATH);
     // replaceState, not pushState: this panel must not stay in history, or
     // the browser's Back button returns to it and opens a further tab.
     history.replaceState(null, "", home);
