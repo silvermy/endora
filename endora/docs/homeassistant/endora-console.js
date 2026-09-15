@@ -6,7 +6,7 @@
 //
 // TARGET is wherever Endora's debug server listens, logged at startup as
 // "Debug stream: http://<host>:<port>/".
-const TARGET = "http://10.0.0.142:8765/";
+const TARGET = "http://10.0.0.141:8765/";
 
 // Home Assistant renders sidebar entries in-page and offers no way to make
 // one open an external URL, so the panel does it instead: panel_custom with

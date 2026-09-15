@@ -39,7 +39,7 @@ Edit the `TARGET` constant at the top of the file to point at your Endora
 host. The address is logged at startup:
 
 ```
-Debug stream: http://10.0.0.142:8765/
+Debug stream: http://10.0.0.141:8765/
 ```
 
 ### 2. Add the panel
