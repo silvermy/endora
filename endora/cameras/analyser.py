@@ -964,12 +964,23 @@ class CameraAnalyser(threading.Thread):
 
                 # Boxes are carried alongside the keypoints purely for the
                 # debug overlay; nothing in the gesture path reads them.
-                _cached_kps, _cached_boxes = model.infer(proc_frame)
+                if getattr(self.s, 'crop_refine_enable', False):
+                    _cached_kps, _cached_boxes = model.infer_refined(
+                        proc_frame,
+                        margin=float(getattr(self.s, 'crop_refine_margin', 0.15)),
+                        max_persons=int(getattr(self.s, 'crop_refine_max_persons', 2)),
+                        min_box_frac=float(
+                            getattr(self.s, 'crop_refine_min_box_frac', 0.55)),
+                    )
+                else:
+                    _cached_kps, _cached_boxes = model.infer(proc_frame)
                 _frames_since_yolo = 0
                 self._yolo_runs += 1
                 _t_stage = _stage_timer.mark("yolo", _t_stage)
-                log.debug("[%s] YOLO ran (motion=%s any_arm_up=%s persons=%d)",
-                          self.label, motion, any_arm_up, len(self._persons))
+                log.debug("[%s] YOLO ran (motion=%s any_arm_up=%s persons=%d "
+                          "refined=%d)",
+                          self.label, motion, any_arm_up, len(self._persons),
+                          getattr(model, 'last_refined', 0))
 
                 detected = _all_valid_landmarks(
                     _cached_kps, pw, ph, fg_mask=fg_mask, min_foreground_frac=min_fg_frac,

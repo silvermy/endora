@@ -88,6 +88,28 @@ class Settings:
     # slow arm lifts are eventually detected. 6 ≈ re-confirm every ~0.6s at 10fps.
     yolo_max_skip: int = 4
     yolo_max_skip_active: int = 1
+
+    # ── Crop-then-pose refinement ─────────────────────────────────────────
+    # A full-frame pass scales the whole image into the model's square input,
+    # so how well a person resolves depends on how much of the frame they
+    # fill, not on the camera's resolution. Someone at the far end of the
+    # room lands on a few dozen rows, which is where the pose model stops
+    # locating elbows and starts placing them on the shoulder-wrist line.
+    # With this on, each under-resolved person is re-inferred on a crop of
+    # their own detection box, which spends the same compute on far more
+    # pixels of the person. Off by default: it costs an extra inference per
+    # refined person, and the close-range case does not need it.
+    crop_refine_enable: bool = False
+    # Grow the detector's box by this fraction on each side before cropping.
+    # The box hugs the body the first pass found; a wrist it missed sits just
+    # outside, so too tight a crop inherits the first pass's blind spot.
+    crop_refine_margin: float = 0.15
+    # Latency budget: at most this many persons re-inferred per frame,
+    # smallest (worst-resolved) first.
+    crop_refine_max_persons: int = 2
+    # Only refine a person whose box spans less than this fraction of the
+    # frame's long edge. Above it they already fill the model input.
+    crop_refine_min_box_frac: float = 0.55
     # Background-subtraction liveness filter: rejects a YOLO detection whose
     # wrist(s) sit entirely over pixels the adaptive background model considers
     # static. Catches things like a framed picture on the wall that YOLO

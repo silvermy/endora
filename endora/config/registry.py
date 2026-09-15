@@ -108,6 +108,27 @@ REGISTRY: list[SettingField] = [
                   "a run — 1 means every frame once somebody is in view, while an "
                   "empty room stays on the cheaper yolo_max_skip heartbeat",
                   group="Pose", user_facing=True),
+    SettingField("crop_refine_enable", bool, False,
+                  "Re-run pose on a crop around each under-resolved person. A "
+                  "full-frame pass scales the whole image into one square input, "
+                  "so someone across the room lands on a few dozen rows — the "
+                  "regime where a pose model stops locating an elbow and starts "
+                  "placing it on the shoulder-wrist line",
+                  group="Pose", user_facing=True),
+    SettingField("crop_refine_margin", float, 0.15,
+                  "Grow the detection box by this fraction per side before cropping. "
+                  "The box hugs the body the first pass found, so a wrist it missed "
+                  "sits just outside it and too tight a crop inherits the blind spot",
+                  group="Pose", user_facing=True),
+    SettingField("crop_refine_max_persons", int, 2,
+                  "At most this many persons re-inferred per frame, worst-resolved "
+                  "first — a latency budget, since each one costs a second inference",
+                  group="Pose", user_facing=True),
+    SettingField("crop_refine_min_box_frac", float, 0.55,
+                  "Only refine a person spanning less than this fraction of the "
+                  "frame's long edge; above it they already fill the model input and "
+                  "a second pass buys nothing but latency",
+                  group="Pose", user_facing=True),
     SettingField("bg_subtract_enable", bool, True,
                   "Reject detections whose wrist never moves against the learned background "
                   "(filters framed pictures/mirrors/TV mis-read as a raised arm)",

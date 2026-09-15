@@ -331,6 +331,124 @@ def _nms(
     return keep
 
 
+# ── crop-then-pose refinement ─────────────────────────────────────────────────
+# A single full-frame pass scales the whole image into the model's square
+# input, so a person's on-model size is set by how much of the frame they
+# occupy — not by how many pixels the camera gave them. After the dewarp
+# crops a 2:1 slice, someone at the far end of the room lands on a few dozen
+# rows, which is where a pose model stops finding elbows and starts inventing
+# them (see the collapsed-elbow gate in the arm tracker). Cropping to the
+# detector's own box and inferring again spends the same compute on far more
+# pixels of the person.
+
+# Below this the crop is too small to be worth a second inference, and cv2
+# would be resizing noise.
+_MIN_CROP_PX = 16
+
+
+def _expand_box(
+    box: np.ndarray, margin: float, frame_w: int, frame_h: int
+) -> tuple[int, int, int, int]:
+    """Grow *box* by *margin* on every side, clamped to the frame.
+
+    The detector's box hugs the body it found, which is precisely the body
+    part the first pass resolved well. A raised wrist that pass 1 clipped or
+    missed sits just outside it, so the crop deliberately takes more than the
+    box — otherwise the second pass inherits the first one's blind spot.
+    """
+    x1, y1, x2, y2 = (float(v) for v in box[:4])
+    mw = (x2 - x1) * margin
+    mh = (y2 - y1) * margin
+    return (
+        int(max(0, x1 - mw)),
+        int(max(0, y1 - mh)),
+        int(min(frame_w, x2 + mw + 0.5)),
+        int(min(frame_h, y2 + mh + 0.5)),
+    )
+
+
+def _should_refine_box(
+    box: np.ndarray, frame_w: int, frame_h: int, min_box_frac: float
+) -> bool:
+    """True when a person is small enough in-frame that a crop would help.
+
+    A person spanning fraction f of the frame's long edge lands on roughly
+    f * imgsz model pixels. Past *min_box_frac* they are already resolved as
+    well as the model input allows and a second inference buys only latency,
+    so the close-range case — someone standing in front of the camera — costs
+    exactly what it costs today.
+    """
+    x1, y1, x2, y2 = (float(v) for v in box[:4])
+    long_edge = max(frame_w, frame_h)
+    if long_edge <= 0:
+        return False
+    return max(x2 - x1, y2 - y1) < min_box_frac * long_edge
+
+
+def refine_by_crop(
+    frame: np.ndarray,
+    kps: Optional[np.ndarray],
+    boxes: Optional[np.ndarray],
+    infer_fn,
+    *,
+    margin: float,
+    max_persons: int,
+    min_box_frac: float,
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray], int]:
+    """Re-infer small persons on their own crop; return keypoints in frame space.
+
+    *infer_fn* has :meth:`PoseModel.infer`'s signature and is injected rather
+    than reached for, so the whole policy — who gets refined, in what order,
+    how coordinates come back — is testable with no model and no GPU.
+
+    Returns ``(kps, boxes, refined_count)``. Boxes are passed through
+    unchanged: they are the detector's own answer and the debug overlay's
+    input, and a box redrawn from refined keypoints would hide exactly the
+    disagreement between box and skeleton that makes the overlay useful.
+    """
+    if kps is None or boxes is None or kps.shape[0] == 0:
+        return kps, boxes, 0
+
+    fh, fw = frame.shape[:2]
+    # Smallest first: they are the ones pass 1 resolved worst. max_persons is
+    # a latency budget, not a fairness rule — a crowded frame should spend it
+    # on the people the first pass failed, not on whoever sorted first.
+    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    out_kps = kps.copy()
+    refined = 0
+
+    for i in np.argsort(areas):
+        if refined >= max_persons:
+            break
+        if not _should_refine_box(boxes[i], fw, fh, min_box_frac):
+            continue
+
+        x1, y1, x2, y2 = _expand_box(boxes[i], margin, fw, fh)
+        if (x2 - x1) < _MIN_CROP_PX or (y2 - y1) < _MIN_CROP_PX:
+            continue
+
+        crop_kps, crop_boxes = infer_fn(frame[y1:y2, x1:x2])
+        if crop_kps is None or crop_boxes is None or crop_kps.shape[0] == 0:
+            # No detection in the crop is a real answer, not an error: pass 1
+            # may have found a ghost. Keep pass 1's keypoints rather than
+            # dropping the person, so refinement can only add detail.
+            continue
+
+        # The crop can catch a bystander at its edge. Take the detection
+        # occupying most of it — the crop was cut around exactly one person.
+        j = int(np.argmax(
+            (crop_boxes[:, 2] - crop_boxes[:, 0])
+            * (crop_boxes[:, 3] - crop_boxes[:, 1])
+        ))
+        row = crop_kps[j].copy()
+        row[:, 0] += x1
+        row[:, 1] += y1
+        out_kps[i] = row
+        refined += 1
+
+    return out_kps, boxes, refined
+
+
 # ── main class ────────────────────────────────────────────────────────────────
 
 class PoseModel:
@@ -397,6 +515,8 @@ class PoseModel:
         self.provider = active[0] if active else CPU_EP
         self._input_name = self._sess.get_inputs()[0].name
         self.imgsz = actual_imgsz
+        # Set by infer_refined; see its docstring.
+        self.last_refined = 0
         self.conf = conf
         log.info(
             "PoseModel: %s  imgsz=%d  threads=%d  conf=%.2f  provider=%s",
@@ -497,3 +617,37 @@ class PoseModel:
         out_boxes[:, 4] = preds[:, 4]
 
         return kps, out_boxes
+
+    def infer_refined(
+        self,
+        frame: np.ndarray,
+        *,
+        margin: float = 0.15,
+        max_persons: int = 2,
+        min_box_frac: float = 0.55,
+    ) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """:meth:`infer`, then a second pass on a crop around each small person.
+
+        Same return contract as :meth:`infer` — keypoints and boxes in *frame*
+        pixel space — so callers can swap one for the other.
+
+        Cost is one inference plus one per refined person, but the refinement
+        only fires for people the full-frame pass under-resolved, so the
+        common cases are unchanged: an empty room costs one inference, and
+        someone standing close enough to fill the frame costs one as well.
+
+        ``last_refined`` records how many persons the most recent call
+        actually re-inferred, which is the number worth watching: if it sits
+        at *max_persons* every frame the budget is the binding constraint,
+        and if it sits at zero the threshold is doing nothing.
+        """
+        kps, boxes = self.infer(frame)
+        if kps is None or boxes is None:
+            self.last_refined = 0
+            return kps, boxes
+
+        kps, boxes, self.last_refined = refine_by_crop(
+            frame, kps, boxes, self.infer,
+            margin=margin, max_persons=max_persons, min_box_frac=min_box_frac,
+        )
+        return kps, boxes
