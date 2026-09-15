@@ -79,6 +79,9 @@ class GestureSystem:
             self._chime = make_chime_notifier(settings, chime_url)
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
+        # Only render the live overlay while someone is watching it — see
+        # debug_server.is_being_viewed. Captures and logs stay unconditional.
+        dbg_wanted = debug_server.is_being_viewed if self._debug_enabled else None
 
         # Regression-test recorder — activated by ENDORA_RECORD_TESTS=1
         self._recorder: TestRecorder | None = None
@@ -97,6 +100,7 @@ class GestureSystem:
             camera=self.cam_a, settings=settings,
             on_candidate=self.fusion.receive, label="A",
             debug_frame_cb=dbg_cb,
+            debug_wanted_cb=dbg_wanted,
             feedback_logger=self.feedback,
             chime_notifier=self._chime,
             num_threads=model_threads,
@@ -109,6 +113,7 @@ class GestureSystem:
             camera=self.cam_b, settings=settings,
             on_candidate=self.fusion.receive, label="B",
             debug_frame_cb=dbg_cb,
+            debug_wanted_cb=dbg_wanted,
             feedback_logger=self.feedback,
             chime_notifier=self._chime,
             num_threads=model_threads,

@@ -53,6 +53,12 @@ _feedback_logger = None
 _host_ip: str = "homeassistant.local"
 _debug_port: int = 8765
 
+# Frames are rendered only while someone is actually looking. Generous enough
+# to span a slow poll or a browser tab briefly backgrounded, short enough that
+# a closed page stops costing anything within seconds.
+_VIEWER_TIMEOUT_S = 5.0
+_last_viewed: float = 0.0
+
 # ── In-browser live log ───────────────────────────────────────────────────────
 _LOG_BUF: collections.deque = collections.deque(maxlen=300)
 _log_lock = threading.Lock()
@@ -145,6 +151,29 @@ def set_host_info(ip: str, port: int) -> None:
     global _host_ip, _debug_port
     _host_ip = ip
     _debug_port = port
+
+
+def note_viewer() -> None:
+    """Record that something just asked for a rendered frame."""
+    global _last_viewed
+    _last_viewed = time.monotonic()
+
+
+def is_being_viewed() -> bool:
+    """Has a frame been requested recently enough to keep rendering?
+
+    The debug overlay costs ~8% of the analyser loop on the Jetson and used
+    to be drawn on every iteration whether or not anyone had the page open,
+    because nothing tracked viewers. Since the chime is now served by this
+    same server, switching the debug port off to reclaim that is no longer an
+    option — so the idle cost has to be near zero instead.
+
+    Only the live stream is gated on this. The log ring buffer and the
+    gesture frame captures deliberately keep running unwatched: their whole
+    value is having history from before anyone opened the page, which is how
+    every intermittent bug in this project has actually been found.
+    """
+    return time.monotonic() - _last_viewed <= _VIEWER_TIMEOUT_S
 
 
 def update_frame(label: str, frame: np.ndarray) -> None:
@@ -1214,6 +1243,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/frame":
             # Single JPEG — used by the JS frame-poller (works in all browsers
             # including Safari, and through HA ingress without mixed content).
+            note_viewer()
             jpg = _compose()
             self.send_response(200)
             self.send_header("Content-Type", "image/jpeg")
@@ -1229,6 +1259,10 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 while True:
+                    # Re-marked every frame: an MJPEG client is one long-lived
+                    # request, so noting only the initial one would let the
+                    # renderer idle out underneath a viewer still watching.
+                    note_viewer()
                     jpg = _compose()
                     self.wfile.write(
                         b"--frame\r\nContent-Type: image/jpeg\r\n"

@@ -556,6 +556,7 @@ class CameraAnalyser(threading.Thread):
         on_candidate: Callable[[Gesture, float, str], None],
         label: str = "cam",
         debug_frame_cb=None,
+        debug_wanted_cb=None,
         feedback_logger=None,
         chime_notifier=None,
         num_threads: int = 0,
@@ -566,6 +567,9 @@ class CameraAnalyser(threading.Thread):
         self.on_candidate = on_candidate
         self.label = label
         self.debug_frame_cb = debug_frame_cb
+        # Asked before each stream render. None means "always render", which
+        # keeps every existing caller and test behaving as before.
+        self.debug_wanted_cb = debug_wanted_cb
         self._num_threads = num_threads
         self._stop_evt = threading.Event()
         self._feedback = feedback_logger
@@ -1184,7 +1188,19 @@ class CameraAnalyser(threading.Thread):
 
             _t_stage = _stage_timer.mark("gesture", _t_stage)
 
-            if self.debug_frame_cb is not None:
+            # Rendered only while someone is actually looking. The overlay
+            # copies the frame and draws over it, which measured ~8% of this
+            # loop on the Jetson — paid on every iteration regardless, because
+            # nothing tracked viewers. Turning the debug port off to reclaim
+            # it is not an option now that the chime is served from the same
+            # server, so the idle cost is removed instead.
+            #
+            # The gesture frame captures above are deliberately NOT gated:
+            # their value is having the picture from before anyone opened the
+            # page, which is how the intermittent bugs here were found.
+            if self.debug_frame_cb is not None and (
+                self.debug_wanted_cb is None or self.debug_wanted_cb()
+            ):
                 try:
                     dbg = _draw_debug(
                         proc_frame, _all_dbg_kps, hand_lm, _primary_reading,
