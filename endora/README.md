@@ -55,7 +55,15 @@ Click **Start** → check the **Log** tab for stream connection. Open the debug 
 
 ### 4. Sidebar (optional)
 
-**Settings → Add-ons → Endora → Info tab → "Show in sidebar" toggle** — adds a shortcut that opens the debug stream in a new tab.
+**Settings → Add-ons → Endora → Info tab → "Show in sidebar" toggle** — adds
+an entry that opens the debug UI *inside* Home Assistant, via ingress. Home
+Assistant renders sidebar entries in-page and offers no way to make one open
+an external URL.
+
+To get a separate browser tab instead — and the only option for a standalone
+host, which has no ingress at all — see
+**[docs/homeassistant/](docs/homeassistant/README.md)**: a small custom panel
+that opens the console in its own tab and returns HA to your dashboard.
 
 ---
 
@@ -165,6 +173,16 @@ deployment. (The add-on ships it off by default, since add-on users turn it
 on in the Configuration tab — which does not exist here.) Set it to `0` to
 disable the page.
 
+**Leave it on.** This server also delivers the chime audio here, so `0`
+silences the sound too. It is cheap to leave running: the overlay is drawn
+only while a browser is actually requesting frames, so an unwatched debug
+page costs nothing beyond the log ring buffer and the gesture captures —
+both of which you want running unwatched, because their value is having the
+record from *before* you noticed something was wrong.
+
+For a sidebar entry that opens this page in its own tab, see
+**[docs/homeassistant/](docs/homeassistant/README.md)**.
+
 ---
 
 ## HA Automation examples
@@ -269,22 +287,38 @@ says so rather than going quiet.
 
 1. Find your speaker's entity ID in HA → **Settings → Devices & Services → Entities**, filter by `media_player`.
 
-2. Add to add-on config:
+2. Add to the add-on config (or `settings.yaml` on a standalone host):
 
 ```yaml
 chime_enable: true
 chime_entity_id: "media_player.living_room"
-chime_volume: 40        # 0–100
-chime_debounce_s: 4.0   # minimum seconds between chimes
+chime_volume: 40        # 0–100, absolute — not a fraction of current volume
+chime_debounce_s: 6.0   # must exceed the clip length; the bundled clip is 4.0 s
 ```
 
-3. Restart the add-on. On startup you should see:
+3. Restart. The startup line tells you which route it took — **add-on**:
+
    ```
-   Chime: installed chime.wav → /media/endora_chime.wav
+   Chime: installed chime.wav → /media/endora_chime_5192bb79.wav
    Chime ready — entity=media_player.living_room
    ```
 
-The chime sound is bundled with the add-on and automatically installed to HA's `/media` folder on startup.
+   **Standalone**:
+
+   ```
+   Chime: serving from the debug server at http://10.0.0.141:8765/chime.wav?v=5192bb79
+   ```
+
+   If a standalone host reports the `/media` line instead, it has written the
+   clip into its own container and handed HA a URL only the HA machine can
+   serve — that was a real bug, fixed in v1.9.161.
+
+The filename carries a hash of the audio's own bytes. A fixed URL let HA's
+media proxy and the speaker both keep playing a replaced clip from cache
+indefinitely; a content-derived one changes exactly when the audio does.
+
+> On a standalone host the chime is delivered by the debug server, so
+> **`debug_port: 0` silences the chime as well as the debug page.**
 
 ---
 
@@ -316,9 +350,12 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | Problem | Fix |
 |---|---|
 | No skeleton / tracking furniture | Raise `pose_visibility_min` toward `0.5`; centre yourself with `dewarp_pan` |
-| Arm raise not detected | Lower `arm_above_head_tolerance` toward `0.10` |
-| Arm raise triggers too easily | Raise `arm_above_head_tolerance` toward `0.20` |
-| SNAP not firing | Lower `snap_forearm_min` toward `0.05`; watch `forearm_dy` in debug |
+| Arm raise not detected | Lower `raise_elevation_min` toward `0.60` |
+| Arm raise triggers too easily | Raise `raise_elevation_min` toward `0.80` |
+| SNAP not firing at all | Check the pose sample rate first — see the row below. Then lower `flourish_min_climb` / `flourish_min_rate`, or set `snap_require_flourish: false` to fall back to a held raise |
+| SNAP fires only occasionally, and the debug overlay shows an implausible `sweep` rate (10+/s) | The model is sampling too slowly to see the sweep: the log's `pose N sample/s` is the number that matters, not the camera fps. Raise it (faster model, lower `yolo_imgsz`, better hardware) rather than loosening thresholds |
+| CPU pegged whenever someone is in the room | `yolo_max_skip_active` is `1` — every frame while a person is tracked. Correct on a GPU; on a Pi try `3` |
+| Two events per gesture (a second chime ~1.5 s later) | That is HOLD. Set `gesture_hold_enable: false`, or adjust `hold_duration_s` |
 | HOLD fires too soon / too late | Adjust `hold_duration_s` |
 | T-pose fires when raising both arms | Raise `sustain_s` toward `1.0` |
 | Cross-arms not detecting | Wrists need to be quite close to opposite shoulders; pose must be clean |
@@ -327,8 +364,15 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `yolo_imgsz` change has no effect | Only `320`/`480`/`640` are bundled — any other value silently falls back to `640` on a Pi (no runtime ONNX export on aarch64) |
 | SNAP fires with nobody in frame (framed pictures, mirrors, TV) | Raise `bg_subtract_min_foreground` toward `0.20`; check `/captures` on the debug page to confirm the ghost source |
 | Real gesture rejected as a "ghost" | Lower `bg_subtract_min_foreground` toward `0.05`, or disable `bg_subtract_enable` |
-| SNAP fires from resting a hand near your own face (glasses, phone, scratching) | Raise `wrist_head_exclude_dist` toward `0.12` |
-| Genuine raise near your head gets rejected | Lower `wrist_head_exclude_dist` toward `0.05` |
+| SNAP fires from resting a hand near your own face (glasses, phone, scratching) | Raise `arm_extension_min` toward `0.85` — a hand at the face bends the elbow, so it fails on straightness |
+| Genuine raise near your head gets rejected | Lower `arm_extension_min` toward `0.75` |
+
+> Settings marked **Deprecated** in the configuration reference are read by
+> nothing: the v1.9.121 geometry rewrite replaced the forearm-angle and
+> head-distance routes with `elevation` and `extension`. Changing
+> `arm_above_head_tolerance`, `snap_forearm_min`, `forearm_vertical_min` or
+> `wrist_head_exclude_dist` has no effect at all, and this table used to
+> recommend three of them.
 
 ---
 
