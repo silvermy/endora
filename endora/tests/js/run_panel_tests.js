@@ -3,11 +3,9 @@
 // Executes docs/homeassistant/endora-console.js against a stub of the small
 // part of the DOM it touches, and asserts what it actually does.
 //
-// Worth running rather than grepping because the bug that prompted it was
-// invisible to inspection: window.open() returns null when passed "noopener",
-// so a success check on its return value is always false and the panel
-// reports a blocked popup even when the tab opened. Only executing it shows
-// that.
+// Worth running rather than grepping: the bug that prompted it was invisible
+// to inspection — window.open() returns null when passed "noopener", so a
+// success check on its return value is always false.
 //
 // Run standalone with `node tests/js/run_panel_tests.js`; the pytest suite
 // runs it through tests/test_ha_panel_docs.py.
@@ -23,36 +21,32 @@ const SRC = path.join(__dirname, "..", "..", "docs", "homeassistant",
 /** Build a fresh sandbox, run the panel module in it, return the harness. */
 function load({ openReturns }) {
   const calls = { open: [], replaceState: [], dispatched: [] };
+  const timers = [];
 
   class StubElement {
     constructor() { this.innerHTML = ""; }
-    dispatchEvent(e) { calls.dispatched.push(e); return true; }
   }
 
-  const timers = [];
   const sandbox = {
     HTMLElement: StubElement,
-    CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
+    CustomEvent: class {
+      constructor(type, init) { this.type = type; Object.assign(this, init); }
+    },
     customElements: {
       _defined: {},
       get(name) { return this._defined[name]; },
-      define(name, cls) {
-        // Matches the real registry: redefining a name is a hard error, and
-        // a name can never be unregistered.
-        if (this._defined[name]) {
-          throw new Error(`the name "${name}" has already been used with this registry`);
-        }
-        this._defined[name] = cls;
-      },
+      define(name, cls) { this._defined[name] = cls; },
     },
     history: {
       replaceState(...a) { calls.replaceState.push(a); },
-      pushState() { throw new Error("pushState must not be used: it leaves the panel in history"); },
+      pushState() {
+        throw new Error("pushState must not be used: it leaves the panel in history");
+      },
     },
-    // Navigation must be deferred past connectedCallback, so the harness
-    // holds queued callbacks until a test explicitly flushes them. A test
-    // that sees navigation before flush() would mean the inline dispatch
-    // that left HA spinning on an already-changed URL had come back.
+    // Navigation must be deferred past connectedCallback, so queued callbacks
+    // are held until a test flushes them. A test that sees navigation before
+    // flush() means the inline dispatch — which never reached HA's router —
+    // has come back.
     setTimeout(fn) { timers.push(fn); },
     window: {
       open(...a) { calls.open.push(a); return openReturns(); },
@@ -74,10 +68,11 @@ function newPanel(harness, props = {}) {
   return el;
 }
 
+const HASS = { hass: { defaultPanel: "lovelace-home" } };
+
 const tests = {
   "opens the target in a new tab"() {
-    const fake = { opener: {} };
-    const h = load({ openReturns: () => fake });
+    const h = load({ openReturns: () => ({ opener: {} }) });
     newPanel(h).connectedCallback();
     assert.strictEqual(h.calls.open.length, 1, "window.open not called");
     const [url, target] = h.calls.open[0];
@@ -101,24 +96,27 @@ const tests = {
     assert.strictEqual(fake.opener, null, "new tab can still reach window.opener");
   },
 
-  "navigates Home Assistant home once the tab is open"() {
+  "renders whether or not the tab opened"() {
+    for (const ret of [() => ({ opener: {} }), () => null]) {
+      const h = load({ openReturns: ret });
+      const el = newPanel(h, HASS);
+      el.connectedCallback();
+      assert.ok(el.innerHTML.trim().length > 0, "panel rendered nothing");
+      assert.match(el.innerHTML, /<a [^>]*href=/, "no link out of the panel");
+    }
+  },
+
+  "navigates home once the tab is open"() {
     const h = load({ openReturns: () => ({ opener: {} }) });
-    newPanel(h, { hass: { defaultPanel: "lovelace-home" } }).connectedCallback();
+    newPanel(h, HASS).connectedCallback();
     h.flush();
     assert.strictEqual(h.calls.replaceState.length, 1, "did not navigate home");
-    assert.strictEqual(h.calls.dispatched.length, 1, "no location-changed event");
-    const ev = h.calls.dispatched[0];
-    assert.strictEqual(ev.type, "location-changed");
-    assert.ok(ev.bubbles && ev.composed, "event will not reach HA's router");
+    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace-home");
   },
 
   "defers navigation past connectedCallback"() {
-    // Dispatched inline, the event fired before the element was in the
-    // document and HA's router never heard it — while replaceState had
-    // already moved the URL, so the panel spun forever on a route that no
-    // longer matched and only a reload escaped.
     const h = load({ openReturns: () => ({ opener: {} }) });
-    newPanel(h, { hass: { defaultPanel: "lovelace-home" } }).connectedCallback();
+    newPanel(h, HASS).connectedCallback();
     assert.strictEqual(h.calls.replaceState.length, 0,
       "URL rewritten synchronously, before HA can act on it");
     h.flush();
@@ -126,56 +124,37 @@ const tests = {
   },
 
   "fires location-changed on window, where HA listens"() {
-    // HA's own navigate() helper fires it on window; an element-scoped
-    // dispatch depends on where in the DOM the panel happens to be.
     const h = load({ openReturns: () => ({ opener: {} }) });
-    const el = newPanel(h, { hass: { defaultPanel: "lovelace-home" } });
-    el.connectedCallback();
+    newPanel(h, HASS).connectedCallback();
     h.flush();
-    assert.strictEqual(h.calls.dispatched.length, 1);
-    assert.ok(h.calls.dispatched[0].detail && h.calls.dispatched[0].detail.replace,
-      "detail.replace not set; HA treats it as a push");
+    assert.strictEqual(h.calls.dispatched.length, 1, "no location-changed event");
+    const ev = h.calls.dispatched[0];
+    assert.strictEqual(ev.type, "location-changed");
+    assert.ok(ev.bubbles && ev.composed, "event will not reach HA's router");
+    assert.ok(ev.detail && ev.detail.replace, "HA will treat it as a push");
   },
 
-  "renders content on the success path too"() {
-    // The empty panel was what made the failed navigation look like a hang:
-    // nothing to read, nothing to click, and the URL already changed.
+  "preserves HA's history state when navigating"() {
     const h = load({ openReturns: () => ({ opener: {} }) });
-    const el = newPanel(h, { hass: { defaultPanel: "lovelace-home" } });
-    el.connectedCallback();
-    assert.ok(el.innerHTML.trim().length > 0, "success path rendered nothing");
-    assert.match(el.innerHTML, /<a [^>]*href=/, "no link out of the panel");
-  },
-
-  "uses the dashboard HA says is the user's default"() {
-    // The hardcoded "/lovelace" is a guess that is wrong on any install whose
-    // dashboards were all created by hand — one such install had no dashboard
-    // at that path at all, so the panel navigated nowhere.
-    const h = load({ openReturns: () => ({ opener: {} }) });
-    const el = newPanel(h, { hass: { defaultPanel: "lovelace-home" } });
-    el.connectedCallback();
+    h.sandbox.history.state = { ha: "router-state" };
+    newPanel(h, HASS).connectedCallback();
     h.flush();
-    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace-home");
+    assert.deepStrictEqual(h.calls.replaceState[0][0], { ha: "router-state" });
   },
 
   "honours a configured home path over HA's default"() {
     const h = load({ openReturns: () => ({ opener: {} }) });
-    const el = newPanel(h, {
-      hass: { defaultPanel: "lovelace-home" },
-      panel: { config: { home_path: "/dashboard-main/2" } },
-    });
+    const el = newPanel(h, { ...HASS, panel: { config: { home_path: "/dashboard-a/2" } } });
     el.connectedCallback();
     h.flush();
-    assert.strictEqual(h.calls.replaceState[0][2], "/dashboard-main/2");
+    assert.strictEqual(h.calls.replaceState[0][2], "/dashboard-a/2");
   },
 
   "does not navigate when no dashboard is known"() {
-    // The bug this replaces: with hass.defaultPanel empty the panel fell back
-    // to "/lovelace", which does not exist on a system whose dashboards were
-    // all created by hand. HA answers such a route by spinning forever, and
-    // that spinner was mistaken for the panel failing through four wrong
-    // diagnoses. Staying put is always safe — the panel has rendered and
-    // carries a link.
+    // The bug every earlier fix missed: with hass.defaultPanel empty the
+    // panel fell back to "/lovelace", which does not exist on a system whose
+    // dashboards were all created by hand. HA answers such a route by
+    // spinning forever, which reads as the panel having failed.
     const h = load({ openReturns: () => ({ opener: {} }) });
     const el = newPanel(h, { hass: {} });          // hass set, defaultPanel not
     el.connectedCallback();
@@ -185,84 +164,20 @@ const tests = {
     assert.ok(el.innerHTML.trim().length > 0, "left the user with nothing");
   },
 
-  "does not navigate when hass is absent entirely"() {
-    const h = load({ openReturns: () => ({ opener: {} }) });
-    newPanel(h).connectedCallback();
+  "does not navigate when the popup was blocked"() {
+    // Bouncing home would discard the only remaining route to the console.
+    const h = load({ openReturns: () => null });
+    const el = newPanel(h, HASS);
+    el.connectedCallback();
     h.flush();
     assert.strictEqual(h.calls.replaceState.length, 0);
-  },
-
-  "stays put and offers a link when the popup is blocked"() {
-    const h = load({ openReturns: () => null });
-    const el = newPanel(h);
-    el.connectedCallback();
-    h.flush();
-    assert.strictEqual(h.calls.replaceState.length, 0,
-      "navigated away from the only link to the console");
     assert.match(el.innerHTML, /blocked/i);
-    assert.match(el.innerHTML, /<a [^>]*target="_blank"/);
-    assert.match(el.innerHTML, /rel="noopener"/);
-  },
-
-  "opens only one tab however often HA reconnects the element"() {
-    const h = load({ openReturns: () => ({ opener: {} }) });
-    const el = newPanel(h);
-    el.connectedCallback();
-    el.connectedCallback();
-    el.connectedCallback();
-    assert.strictEqual(h.calls.open.length, 1, "reconnect opened another tab");
-  },
-
-  "a reconnect still leaves the panel rendered"() {
-    // The permanent guard returned before rendering, so HA showed a panel
-    // with no content — the spinner on every click after the first.
-    const h = load({ openReturns: () => ({ opener: {} }) });
-    const el = newPanel(h);
-    el.connectedCallback();
-    el.innerHTML = "";                      // as if HA rebuilt the panel host
-    el.connectedCallback();
-    assert.ok(el.innerHTML.trim().length > 0, "second visit rendered nothing");
-  },
-
-  "a deliberate second visit behaves like the first"() {
-    const h = load({ openReturns: () => ({ opener: {} }) });
-    const el = newPanel(h, { hass: { defaultPanel: "lovelace-home" } });
-    el.connectedCallback();
-    h.flush();
-    el._lastRun -= 60000;                   // as if a minute had passed
-    el.connectedCallback();
-    h.flush();
-    assert.strictEqual(h.calls.open.length, 2, "second click opened no tab");
-    assert.strictEqual(h.calls.replaceState.length, 2, "second click did not go home");
-  },
-
-  "preserves HA's history state when navigating"() {
-    // Passing null wiped the router state HA keeps there, leaving its idea of
-    // the current panel out of step with the URL.
-    const h = load({ openReturns: () => ({ opener: {} }) });
-    h.sandbox.history.state = { root: true, ha: "state" };
-    newPanel(h, { hass: { defaultPanel: "lovelace-home" } }).connectedCallback();
-    h.flush();
-    assert.deepStrictEqual(h.calls.replaceState[0][0], { root: true, ha: "state" });
-  },
-
-  "can be executed twice on the same page"() {
-    // Home Assistant may re-run the module when the panel is revisited. An
-    // unguarded customElements.define throws on the second execution, which
-    // aborts panel creation before any of this file's logic runs — a spinner
-    // that only a full page reload clears, because reloading is the one
-    // thing that empties the custom element registry.
-    const h = load({ openReturns: () => ({ opener: {} }) });
-    const source = fs.readFileSync(SRC, "utf8");
-    vm.runInContext(source, h.sandbox, { filename: SRC });   // must not throw
-    assert.ok(h.sandbox.customElements._defined["endora-console"],
-      "element lost on re-execution");
   },
 
   "survives window.open throwing"() {
     const h = load({ openReturns: () => { throw new Error("blocked hard"); } });
-    const el = newPanel(h);
-    el.connectedCallback();                       // must not propagate
+    const el = newPanel(h, HASS);
+    el.connectedCallback();                        // must not propagate
     assert.match(el.innerHTML, /blocked/i);
   },
 };

@@ -64,17 +64,20 @@ Once the console opens, the panel sends Home Assistant back to the dashboard
 so it never rests on this route — otherwise every later reload that restores
 it opens another tab.
 
-It goes to whichever dashboard HA reports as your default, so there is
-usually nothing to configure. To send it somewhere specific instead:
+Set where it goes with `home_path`, using a real `url_path` from
+**Settings → Dashboards**:
 
 ```yaml
     config:
       home_path: /lovelace-home
 ```
 
-Use a real `url_path` from **Settings → Dashboards**. Do not assume
-`/lovelace` exists: on an install whose dashboards were all created by hand
-there may be no dashboard at that path at all.
+Without it the panel uses whichever dashboard HA reports as your default,
+and if HA does not say, it stays on the panel rather than guessing. That is
+deliberate: `hass.defaultPanel` is not always populated, `/lovelace` does not
+exist on an install whose dashboards were all created by hand, and Home
+Assistant answers a route with no dashboard behind it by spinning
+forever — which looks exactly like the panel itself having failed.
 
 ### 3. Restart Home Assistant
 
