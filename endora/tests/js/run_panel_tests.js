@@ -189,6 +189,39 @@ const tests = {
     assert.strictEqual(h.calls.open.length, 1, "reconnect opened another tab");
   },
 
+  "a reconnect still leaves the panel rendered"() {
+    // The permanent guard returned before rendering, so HA showed a panel
+    // with no content — the spinner on every click after the first.
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    const el = newPanel(h);
+    el.connectedCallback();
+    el.innerHTML = "";                      // as if HA rebuilt the panel host
+    el.connectedCallback();
+    assert.ok(el.innerHTML.trim().length > 0, "second visit rendered nothing");
+  },
+
+  "a deliberate second visit behaves like the first"() {
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    const el = newPanel(h, { hass: { defaultPanel: "lovelace-home" } });
+    el.connectedCallback();
+    h.flush();
+    el._lastRun -= 60000;                   // as if a minute had passed
+    el.connectedCallback();
+    h.flush();
+    assert.strictEqual(h.calls.open.length, 2, "second click opened no tab");
+    assert.strictEqual(h.calls.replaceState.length, 2, "second click did not go home");
+  },
+
+  "preserves HA's history state when navigating"() {
+    // Passing null wiped the router state HA keeps there, leaving its idea of
+    // the current panel out of step with the URL.
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    h.sandbox.history.state = { root: true, ha: "state" };
+    newPanel(h, { hass: { defaultPanel: "lovelace-home" } }).connectedCallback();
+    h.flush();
+    assert.deepStrictEqual(h.calls.replaceState[0][0], { root: true, ha: "state" });
+  },
+
   "survives window.open throwing"() {
     const h = load({ openReturns: () => { throw new Error("blocked hard"); } });
     const el = newPanel(h);

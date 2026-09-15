@@ -25,6 +25,12 @@ const TARGET = "http://10.0.0.142:8765/";
 // panel_custom block.
 const HOME_PATH = "/lovelace";
 
+// How long a reconnect counts as the same visit rather than a new click.
+// Long enough to absorb HA disconnecting and reconnecting the element around
+// a navigation, short enough that clicking the sidebar item again does what
+// it did the first time.
+const RECONNECT_GUARD_MS = 1500;
+
 // Why a custom panel rather than a link or an iframe:
 //
 // Home Assistant hardwires sidebar entries to open in-page, so no sidebar
@@ -39,10 +45,18 @@ const HOME_PATH = "/lovelace";
 // opening a tab and the fallback link below are both fine.
 class EndoraConsole extends HTMLElement {
   connectedCallback() {
-    // HA can connect and disconnect a panel element more than once; without
-    // this guard, returning to the panel opens another tab each time.
-    if (this._ran) return;
-    this._ran = true;
+    // HA can disconnect and reconnect this element around a navigation, and
+    // each reconnect must not open another tab. But the guard has to expire:
+    // when it was permanent, the first click worked and every later one
+    // returned here immediately, leaving Home Assistant on a panel that
+    // never rendered — a spinner. A deliberate second visit, seconds later,
+    // should behave exactly like the first.
+    const now = Date.now();
+    if (this._lastRun && now - this._lastRun < RECONNECT_GUARD_MS) {
+      this._render(this._lastOpened);
+      return;
+    }
+    this._lastRun = now;
 
     // The sidebar click is still a live user activation at this point, so
     // the popup blocker normally allows this. "Normally" is not "always" —
@@ -68,6 +82,13 @@ class EndoraConsole extends HTMLElement {
     // empty, so when the navigation below did not take, Home Assistant sat on
     // a spinner with nothing to click — and the URL had already been
     // rewritten, so only a reload escaped it.
+    this._lastOpened = !!opened;
+    this._render(this._lastOpened);
+
+    if (opened) this._goHome();
+  }
+
+  _render(opened) {
     this.innerHTML = `
       <div style="padding:24px;font-family:var(--paper-font-body1_-_font-family,sans-serif);
                   color:var(--primary-text-color,#212121)">
@@ -77,8 +98,6 @@ class EndoraConsole extends HTMLElement {
               style="color:var(--primary-color,#03a9f4)">
           Open the Endora debug console &#8599;</a></p>
       </div>`;
-
-    if (opened) this._goHome();
   }
 
   // Send Home Assistant back to the dashboard once the console is open, so
@@ -104,7 +123,12 @@ class EndoraConsole extends HTMLElement {
     setTimeout(() => {
       // replaceState, not pushState: this panel must not stay in history, or
       // the browser's Back button returns to it and opens a further tab.
-      history.replaceState(null, "", home);
+      //
+      // Carry history.state across rather than passing null. HA keeps its own
+      // routing state in there, and wiping it leaves the router's idea of the
+      // current panel out of step with the URL — which is what its own
+      // navigate() helper avoids by preserving it here.
+      history.replaceState(history.state, "", home);
       window.dispatchEvent(new CustomEvent("location-changed", {
         detail: { replace: true }, bubbles: true, composed: true,
       }));
