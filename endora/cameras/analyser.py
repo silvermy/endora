@@ -141,6 +141,17 @@ _PERSON_MATCH_DIST = 0.30  # max centroid displacement (fraction of frame diagon
 # unrecognisable through no fault of the geometry.
 _PERSON_PRUNE_MISSES = 3
 
+# ...and the mirror-image failure at the other end of the rate range. Counting
+# only missed runs assumes runs are slow. On a Jetson sampling at 17.6/s,
+# three misses is 0.17 s, so any momentary detection dropout destroyed the
+# person and rebuilt them as a new pid — ~0.6 new pids per second, each with
+# the empty history a sweep is measured against. Worse, the confidence
+# hysteresis drops to the permissive "maintain" threshold whenever anyone is
+# tracked, so constant churn kept the door open for junk detections: a 0.25
+# box on a reclining person fired a false snap. Require both conditions, so
+# the rule is right whether the model runs twice a second or twenty times.
+_PERSON_PRUNE_MIN_S = 1.5
+
 # How close a detection must be to an already-tracked person's last position
 # to be trusted as "probably that same real person, just briefly still" and
 # skip the wrist-liveness check. Deliberately much tighter than
@@ -714,8 +725,12 @@ class CameraAnalyser(threading.Thread):
                          self.label, pid, *centroid)
 
     def _prune_persons(self, now: float) -> None:
+        # Both conditions, deliberately: missed runs alone is wrong when the
+        # model runs fast, elapsed time alone is wrong when it runs slowly,
+        # and this project has now been bitten by each in turn.
         stale = [pid for pid, e in self._persons.items()
-                 if self._yolo_runs - e.last_seen_run >= _PERSON_PRUNE_MISSES]
+                 if self._yolo_runs - e.last_seen_run >= _PERSON_PRUNE_MISSES
+                 and now - e.last_seen >= _PERSON_PRUNE_MIN_S]
         for pid in stale:
             log.info("[%s] Lost person pid=%d", self.label, pid)
             del self._persons[pid]

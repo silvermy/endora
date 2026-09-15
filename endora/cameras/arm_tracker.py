@@ -157,6 +157,13 @@ RIGHT_KNEE     = 26
 
 _Pt = Tuple[float, float]
 
+# Smallest share of an arm's total length that either segment (shoulder-elbow
+# or elbow-wrist) may occupy before the elbow is treated as collapsed rather
+# than merely straight. A real elbow sits near the middle, so both segments
+# are around 0.5; this only rejects a keypoint sitting essentially on top of
+# the shoulder or the wrist.
+_ELBOW_MIN_SEGMENT_FRAC = 0.20
+
 
 def _hand_snap_roll(hand_lm: np.ndarray) -> float:
     """Palm-orientation signal from a flat grlib hand-landmark array
@@ -184,6 +191,33 @@ def _hand_snap_roll(hand_lm: np.ndarray) -> float:
 
 def _dist(a: _Pt, b: _Pt) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+def _elbow_is_articulated(shoulder: _Pt, elbow: _Pt, wrist: _Pt,
+                          min_frac: float = _ELBOW_MIN_SEGMENT_FRAC) -> bool:
+    """Does the elbow carry real information about this arm?
+
+    extension is arm_len / (upper + fore), which the triangle inequality caps
+    at exactly 1.0 — reached when the elbow sits precisely on the
+    shoulder-wrist line, and in particular when it *coincides* with the
+    shoulder or the wrist. A pose model that has no idea where the elbow is
+    tends to put it on top of one of them, so the least informative reading
+    possible scores as the straightest arm possible, and the gate is a floor
+    with no ceiling.
+
+    That is not hypothetical: a reclining person produced a tangled skeleton
+    with `extension: 1.00` and fired a snap, while every genuine raise
+    measured 0.86-0.92. Rather than capping extension — a truly straight arm
+    with well-placed keypoints legitimately approaches 1.0 — require each
+    segment to be a real fraction of the arm. A human elbow sits near the
+    middle; at under a fifth of the way along, the keypoint is collapsed.
+    """
+    upper = _dist(shoulder, elbow)
+    fore = _dist(elbow, wrist)
+    segments = upper + fore
+    if segments < 1e-6:
+        return False
+    return min(upper, fore) / segments >= min_frac
 
 
 def _arm_metrics(shoulder: _Pt, elbow: _Pt, wrist: _Pt) -> Tuple[float, float, float]:
@@ -620,8 +654,15 @@ class ArmTracker:
                 return ArmReading(state=ArmState.DOWN, upright=bool(upright))
 
         # ── Per-arm metrics ───────────────────────────────────────────────
-        l_ok = ls_ok and vis(LEFT_WRIST) >= KV and vis(LEFT_ELBOW) >= KV
-        r_ok = rs_ok and vis(RIGHT_WRIST) >= KV and vis(RIGHT_ELBOW) >= KV
+        # An arm whose elbow has collapsed onto the shoulder or the wrist is
+        # not a straight arm, it is a keypoint the model could not place —
+        # and it scores extension 1.00, better than any real arm. Treat the
+        # side as unreadable rather than as perfect (see
+        # _elbow_is_articulated).
+        l_ok = (ls_ok and vis(LEFT_WRIST) >= KV and vis(LEFT_ELBOW) >= KV
+                and _elbow_is_articulated(ls, le, lw))
+        r_ok = (rs_ok and vis(RIGHT_WRIST) >= KV and vis(RIGHT_ELBOW) >= KV
+                and _elbow_is_articulated(rs, re, rw))
 
         l_elev, l_ext, l_len = _arm_metrics(ls, le, lw) if l_ok else (0.0, 0.0, 0.0)
         r_elev, r_ext, r_len = _arm_metrics(rs, re, rw) if r_ok else (0.0, 0.0, 0.0)
