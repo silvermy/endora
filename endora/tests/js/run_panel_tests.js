@@ -29,6 +29,7 @@ function load({ openReturns }) {
     dispatchEvent(e) { calls.dispatched.push(e); return true; }
   }
 
+  const timers = [];
   const sandbox = {
     HTMLElement: StubElement,
     CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
@@ -40,15 +41,21 @@ function load({ openReturns }) {
       replaceState(...a) { calls.replaceState.push(a); },
       pushState() { throw new Error("pushState must not be used: it leaves the panel in history"); },
     },
+    // Navigation must be deferred past connectedCallback, so the harness
+    // holds queued callbacks until a test explicitly flushes them. A test
+    // that sees navigation before flush() would mean the inline dispatch
+    // that left HA spinning on an already-changed URL had come back.
+    setTimeout(fn) { timers.push(fn); },
     window: {
       open(...a) { calls.open.push(a); return openReturns(); },
+      dispatchEvent(e) { calls.dispatched.push(e); return true; },
     },
   };
   sandbox.window.window = sandbox.window;
 
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(SRC, "utf8"), sandbox, { filename: SRC });
-  return { sandbox, calls };
+  return { sandbox, calls, flush: () => { while (timers.length) timers.shift()(); } };
 }
 
 function newPanel(harness, props = {}) {
@@ -89,11 +96,47 @@ const tests = {
   "navigates Home Assistant home once the tab is open"() {
     const h = load({ openReturns: () => ({ opener: {} }) });
     newPanel(h, { hass: { defaultPanel: "lovelace-home" } }).connectedCallback();
+    h.flush();
     assert.strictEqual(h.calls.replaceState.length, 1, "did not navigate home");
     assert.strictEqual(h.calls.dispatched.length, 1, "no location-changed event");
     const ev = h.calls.dispatched[0];
     assert.strictEqual(ev.type, "location-changed");
     assert.ok(ev.bubbles && ev.composed, "event will not reach HA's router");
+  },
+
+  "defers navigation past connectedCallback"() {
+    // Dispatched inline, the event fired before the element was in the
+    // document and HA's router never heard it — while replaceState had
+    // already moved the URL, so the panel spun forever on a route that no
+    // longer matched and only a reload escaped.
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    newPanel(h, { hass: { defaultPanel: "lovelace-home" } }).connectedCallback();
+    assert.strictEqual(h.calls.replaceState.length, 0,
+      "URL rewritten synchronously, before HA can act on it");
+    h.flush();
+    assert.strictEqual(h.calls.replaceState.length, 1);
+  },
+
+  "fires location-changed on window, where HA listens"() {
+    // HA's own navigate() helper fires it on window; an element-scoped
+    // dispatch depends on where in the DOM the panel happens to be.
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    const el = newPanel(h, { hass: { defaultPanel: "lovelace-home" } });
+    el.connectedCallback();
+    h.flush();
+    assert.strictEqual(h.calls.dispatched.length, 1);
+    assert.ok(h.calls.dispatched[0].detail && h.calls.dispatched[0].detail.replace,
+      "detail.replace not set; HA treats it as a push");
+  },
+
+  "renders content on the success path too"() {
+    // The empty panel was what made the failed navigation look like a hang:
+    // nothing to read, nothing to click, and the URL already changed.
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    const el = newPanel(h, { hass: { defaultPanel: "lovelace-home" } });
+    el.connectedCallback();
+    assert.ok(el.innerHTML.trim().length > 0, "success path rendered nothing");
+    assert.match(el.innerHTML, /<a [^>]*href=/, "no link out of the panel");
   },
 
   "uses the dashboard HA says is the user's default"() {
@@ -103,6 +146,7 @@ const tests = {
     const h = load({ openReturns: () => ({ opener: {} }) });
     const el = newPanel(h, { hass: { defaultPanel: "lovelace-home" } });
     el.connectedCallback();
+    h.flush();
     assert.strictEqual(h.calls.replaceState[0][2], "/lovelace-home");
   },
 
@@ -113,12 +157,14 @@ const tests = {
       panel: { config: { home_path: "/dashboard-main/2" } },
     });
     el.connectedCallback();
+    h.flush();
     assert.strictEqual(h.calls.replaceState[0][2], "/dashboard-main/2");
   },
 
   "falls back when HA offers no default panel"() {
     const h = load({ openReturns: () => ({ opener: {} }) });
     newPanel(h).connectedCallback();               // no hass property at all
+    h.flush();
     assert.strictEqual(h.calls.replaceState[0][2], "/lovelace");
   },
 
@@ -126,6 +172,7 @@ const tests = {
     const h = load({ openReturns: () => null });
     const el = newPanel(h);
     el.connectedCallback();
+    h.flush();
     assert.strictEqual(h.calls.replaceState.length, 0,
       "navigated away from the only link to the console");
     assert.match(el.innerHTML, /blocked/i);

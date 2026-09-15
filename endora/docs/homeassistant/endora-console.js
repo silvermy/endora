@@ -64,19 +64,21 @@ class EndoraConsole extends HTMLElement {
       opened = null;
     }
 
-    if (opened) {
-      this._goHome();
-      return;
-    }
-
+    // Always render something. Returning early on success left the panel
+    // empty, so when the navigation below did not take, Home Assistant sat on
+    // a spinner with nothing to click — and the URL had already been
+    // rewritten, so only a reload escaped it.
     this.innerHTML = `
       <div style="padding:24px;font-family:var(--paper-font-body1_-_font-family,sans-serif);
                   color:var(--primary-text-color,#212121)">
-        <p>Your browser blocked the new tab.</p>
+        <p>${opened ? "Endora opened in a new tab."
+                    : "Your browser blocked the new tab."}</p>
         <p><a href="${TARGET}" target="_blank" rel="noopener"
               style="color:var(--primary-color,#03a9f4)">
           Open the Endora debug console &#8599;</a></p>
       </div>`;
+
+    if (opened) this._goHome();
   }
 
   // Send Home Assistant back to the dashboard once the console is open, so
@@ -92,11 +94,21 @@ class EndoraConsole extends HTMLElement {
     // their default, and only guess if it will not say.
     const preferred = this.hass && this.hass.defaultPanel;
     const home = cfg.home_path || (preferred ? "/" + preferred : HOME_PATH);
-    // replaceState, not pushState: this panel must not stay in history, or
-    // the browser's Back button returns to it and opens a further tab.
-    history.replaceState(null, "", home);
-    this.dispatchEvent(
-      new CustomEvent("location-changed", { bubbles: true, composed: true }));
+
+    // Deferred by a tick, and fired on window rather than on this element.
+    // Dispatched inline from connectedCallback the event never reached HA's
+    // router — the element is not reliably in the document yet — while
+    // replaceState changed the URL anyway, leaving a panel spinning forever
+    // on a route that had already moved. HA's own navigate() helper fires
+    // this on window too.
+    setTimeout(() => {
+      // replaceState, not pushState: this panel must not stay in history, or
+      // the browser's Back button returns to it and opens a further tab.
+      history.replaceState(null, "", home);
+      window.dispatchEvent(new CustomEvent("location-changed", {
+        detail: { replace: true }, bubbles: true, composed: true,
+      }));
+    }, 0);
   }
 }
 
