@@ -11,7 +11,11 @@ nothing at all — no error, just an empty page — and there is no way to tell
 from the HA side what went wrong.
 """
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 DOCS = Path(__file__).resolve().parent.parent / "docs" / "homeassistant"
 JS = DOCS / "endora-console.js"
@@ -62,7 +66,17 @@ def test_target_is_an_absolute_http_url():
     assert re.match(r"^https?://[^/]+:\d+/$", m.group(1)), m.group(1)
 
 
-def test_the_new_tab_is_opened_with_noopener():
-    src = JS.read_text()
-    assert 'window.open(TARGET, "_blank", "noopener")' in src
-    assert 'rel="noopener"' in src, "fallback link missing rel=noopener"
+def test_the_panel_behaves_correctly_when_executed():
+    """Run docs/homeassistant/endora-console.js against a stub DOM.
+
+    Static checks cannot see the bug that motivated this: window.open()
+    returns null when passed "noopener", so testing its return value for
+    success is always false and the panel claims the popup was blocked even
+    when the tab opened. Only executing it shows that.
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not installed; JS panel behaviour unverified")
+    runner = Path(__file__).resolve().parent / "js" / "run_panel_tests.js"
+    proc = subprocess.run([node, str(runner)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr

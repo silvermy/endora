@@ -60,6 +60,16 @@ panel_custom:
 call in the JS, hyphen included. `require_admin` is deliberate: the console
 can change detection settings and restart behaviour.
 
+Once the console opens, the panel sends Home Assistant back to the dashboard
+so it never rests on this route — otherwise every later reload that restores
+it opens another tab. The default is HA's stock `/lovelace/0`; if your
+dashboard has been renamed, set it:
+
+```yaml
+    config:
+      home_path: /dashboard-main/0
+```
+
 ### 3. Restart Home Assistant
 
 ## Notes
@@ -72,5 +82,10 @@ can change detection settings and restart behaviour.
   (`module_url: /local/endora-console.js?v=2`) or the browser will keep
   serving the old copy.
 - **If the tab does not open**, the browser's popup blocker stopped
-  `window.open`. The panel detects this and renders a link instead, so it is
-  one click rather than a failure.
+  `window.open`. The panel detects this, stays where it is and renders a link
+  instead, so it is one click rather than a failure. To let it through, allow
+  pop-ups for your HA origin: in Chrome and Edge, click the blocked-popup
+  icon at the right of the address bar and choose "Always allow"; in Safari,
+  Settings → Websites → Pop-up Windows; in Firefox, the notification bar's
+  Options button. That is per browser, so repeat it on a phone or another
+  machine.
