@@ -10,6 +10,16 @@
 //
 // Change TARGET below to wherever Endora's debug server is listening. It is
 // logged at startup as "Debug stream: http://<host>:<port>/".
+//
+// Everything lives inside this guard so the file is safe to execute more than
+// once on the same page. Two separate things break otherwise, and both
+// present identically as a panel that spins until the page is reloaded:
+// top-level `const` declarations collide on the second execution, and
+// customElements.define() throws on a name that is already registered. A
+// custom element can never be redefined or unregistered, so a page reload is
+// the only thing that clears either — which is exactly the symptom reported.
+if (!customElements.get("endora-console")) {
+
 const TARGET = "http://10.0.0.142:8765/";
 
 // Where Home Assistant should land after the console opens in its own tab.
@@ -139,3 +149,5 @@ class EndoraConsole extends HTMLElement {
 // The element tag must match the panel_custom `name:` option, and — being a
 // custom element — must contain a hyphen.
 customElements.define("endora-console", EndoraConsole);
+
+}  // end of the define-once guard opened at the top of the file

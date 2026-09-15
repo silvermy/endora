@@ -35,7 +35,15 @@ function load({ openReturns }) {
     CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
     customElements: {
       _defined: {},
-      define(name, cls) { this._defined[name] = cls; },
+      get(name) { return this._defined[name]; },
+      define(name, cls) {
+        // Matches the real registry: redefining a name is a hard error, and
+        // a name can never be unregistered.
+        if (this._defined[name]) {
+          throw new Error(`the name "${name}" has already been used with this registry`);
+        }
+        this._defined[name] = cls;
+      },
     },
     history: {
       replaceState(...a) { calls.replaceState.push(a); },
@@ -220,6 +228,19 @@ const tests = {
     newPanel(h, { hass: { defaultPanel: "lovelace-home" } }).connectedCallback();
     h.flush();
     assert.deepStrictEqual(h.calls.replaceState[0][0], { root: true, ha: "state" });
+  },
+
+  "can be executed twice on the same page"() {
+    // Home Assistant may re-run the module when the panel is revisited. An
+    // unguarded customElements.define throws on the second execution, which
+    // aborts panel creation before any of this file's logic runs — a spinner
+    // that only a full page reload clears, because reloading is the one
+    // thing that empties the custom element registry.
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    const source = fs.readFileSync(SRC, "utf8");
+    vm.runInContext(source, h.sandbox, { filename: SRC });   // must not throw
+    assert.ok(h.sandbox.customElements._defined["endora-console"],
+      "element lost on re-execution");
   },
 
   "survives window.open throwing"() {
