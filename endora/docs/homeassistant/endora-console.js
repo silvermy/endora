@@ -25,20 +25,48 @@ class EndoraConsole extends HTMLElement {
       if (win) win.opener = null;
     } catch (e) { /* treat as blocked */ }
 
-    this.innerHTML = `
-      <div style="padding:24px;color:var(--primary-text-color,#212121)">
-        <p>${win ? "Endora opened in a new tab."
-                 : "Your browser blocked the new tab."}</p>
-        <p><a href="${TARGET}" target="_blank" rel="noopener"
-              style="color:var(--primary-color,#03a9f4)"
-          >Open the Endora debug console &#8599;</a></p>
-      </div>`;
-
+    this._render(!!win);
     if (win) this._goHome();
   }
 
+  // Both actions are always offered, and "back" comes first.
+  //
+  // This panel draws its own content with no Home Assistant toolbar, so it
+  // has no menu button. On a desktop the sidebar is on screen anyway; in the
+  // iOS app it is hidden behind that missing button, which left no way out
+  // of this page at all. On mobile window.open is also usually refused, so
+  // the panel takes the "blocked" branch and deliberately does not navigate
+  // away — correct on a desktop, a dead end on a phone.
+  _render(opened) {
+    const btn = "display:inline-block;padding:12px 18px;margin:0 12px 12px 0;" +
+                "border-radius:8px;text-decoration:none;font-size:15px";
+    this.innerHTML = `
+      <div style="padding:24px;color:var(--primary-text-color,#212121)">
+        <p>${opened ? "Endora opened in a new tab."
+                    : "Open the Endora debug console:"}</p>
+        <p>
+          <a href="#" id="endora-back"
+             style="${btn};background:var(--primary-color,#03a9f4);color:#fff"
+            >&#8592; Home Assistant</a>
+          <a href="${TARGET}" target="_blank" rel="noopener"
+             style="${btn};border:1px solid var(--primary-color,#03a9f4);
+                    color:var(--primary-color,#03a9f4)"
+            >Endora console &#8599;</a>
+        </p>
+      </div>`;
+
+    this.querySelector("#endora-back").addEventListener("click", (e) => {
+      e.preventDefault();
+      // history.back() is the fallback rather than the first choice: it
+      // leaves Home Assistant entirely if this panel was opened from a cold
+      // start, where there is nothing to go back to.
+      if (!this._goHome()) history.back();
+    });
+  }
+
   // Send HA to a dashboard so it never rests on this panel; otherwise every
-  // reload that restores this route opens another tab.
+  // reload that restores this route opens another tab. Returns whether it
+  // navigated, so the Back button can fall back to history.back().
   _goHome() {
     const cfg = (this.panel && this.panel.config) || {};
     const fallback = this.hass && this.hass.defaultPanel;
@@ -48,7 +76,7 @@ class EndoraConsole extends HTMLElement {
     // is set, and HA answers a route with no dashboard behind it by spinning
     // forever — which reads as this panel having failed. Staying put is
     // always safe: it has rendered, and it carries a link.
-    if (!home) return;
+    if (!home) return false;
 
     // Deferred, and fired on window. Dispatched inline from
     // connectedCallback the event does not reach HA's router; window is
@@ -60,6 +88,7 @@ class EndoraConsole extends HTMLElement {
       window.dispatchEvent(new CustomEvent("location-changed",
         { detail: { replace: true }, bubbles: true, composed: true }));
     }, 0);
+    return true;
   }
 }
 

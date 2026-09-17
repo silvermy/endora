@@ -24,7 +24,21 @@ function load({ openReturns }) {
   const timers = [];
 
   class StubElement {
-    constructor() { this.innerHTML = ""; }
+    constructor() { this.innerHTML = ""; this._handlers = {}; }
+    // Enough of the DOM to wire the panel's own buttons: the module looks up
+    // one id and attaches a click handler to it.
+    querySelector(sel) {
+      if (!new RegExp(`id="${sel.replace("#", "")}"`).test(this.innerHTML)) return null;
+      const el = this._handlers[sel] || (this._handlers[sel] = {
+        addEventListener(type, fn) { this[type] = fn; },
+      });
+      return el;
+    }
+    click(sel) {
+      const el = this._handlers[sel];
+      assert.ok(el && el.click, `nothing listening on ${sel}`);
+      el.click({ preventDefault() {} });
+    }
   }
 
   const sandbox = {
@@ -39,6 +53,7 @@ function load({ openReturns }) {
     },
     history: {
       replaceState(...a) { calls.replaceState.push(a); },
+      back() { calls.back = (calls.back || 0) + 1; },
       pushState() {
         throw new Error("pushState must not be used: it leaves the panel in history");
       },
@@ -70,6 +85,12 @@ function newPanel(harness, props = {}) {
 
 const HASS = { hass: { defaultPanel: "lovelace-home" } };
 
+// The module's own TARGET, read from source so the tests do not hardcode an
+// address that changes per install.
+const TARGET_RE = fs.readFileSync(SRC, "utf8")
+  .match(/const TARGET = "([^"]+)"/)[1]
+  .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const tests = {
   "opens the target in a new tab"() {
     const h = load({ openReturns: () => ({ opener: {} }) });
@@ -94,6 +115,40 @@ const tests = {
     const h = load({ openReturns: () => fake });
     newPanel(h).connectedCallback();
     assert.strictEqual(fake.opener, null, "new tab can still reach window.opener");
+  },
+
+  "always offers a way back to Home Assistant"() {
+    // The panel draws its own content with no HA toolbar, so it has no menu
+    // button. In the iOS app the sidebar is hidden behind that button, which
+    // left no way off this page at all — and on mobile window.open is
+    // usually refused, so it takes the branch that deliberately stays put.
+    for (const ret of [() => ({ opener: {} }), () => null]) {
+      const h = load({ openReturns: ret });
+      const el = newPanel(h, HASS);
+      el.connectedCallback();
+      assert.match(el.innerHTML, /id="endora-back"/, "no way back rendered");
+    }
+  },
+
+  "the back button navigates home"() {
+    const h = load({ openReturns: () => null });   // blocked, as on iOS
+    const el = newPanel(h, HASS);
+    el.connectedCallback();
+    h.flush();
+    assert.strictEqual(h.calls.replaceState.length, 0, "navigated unasked");
+    el.click("#endora-back");
+    h.flush();
+    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace-home");
+  },
+
+  "the back button falls back to history when no dashboard is known"() {
+    const h = load({ openReturns: () => null });
+    const el = newPanel(h, { hass: {} });
+    el.connectedCallback();
+    el.click("#endora-back");
+    h.flush();
+    assert.strictEqual(h.calls.replaceState.length, 0);
+    assert.strictEqual(h.calls.back, 1, "no fallback out of the panel");
   },
 
   "renders whether or not the tab opened"() {
@@ -171,14 +226,18 @@ const tests = {
     el.connectedCallback();
     h.flush();
     assert.strictEqual(h.calls.replaceState.length, 0);
-    assert.match(el.innerHTML, /blocked/i);
+    // Assert the way out, not the wording: the copy is deliberately not
+    // alarming, because on mobile a refused popup is the normal case.
+    assert.match(el.innerHTML, new RegExp(`href="${TARGET_RE}"`),
+      "no link to the console when the popup was refused");
   },
 
   "survives window.open throwing"() {
     const h = load({ openReturns: () => { throw new Error("blocked hard"); } });
     const el = newPanel(h, HASS);
     el.connectedCallback();                        // must not propagate
-    assert.match(el.innerHTML, /blocked/i);
+    assert.match(el.innerHTML, new RegExp(`href="${TARGET_RE}"`));
+    assert.match(el.innerHTML, /id="endora-back"/);
   },
 };
 
