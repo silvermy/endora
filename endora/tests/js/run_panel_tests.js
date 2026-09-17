@@ -75,9 +75,11 @@ function load({ openReturns }) {
       addEventListener(type, fn) { this._listeners[type] = fn; },
       createElement(tag) { return { tagName: tag, style: {}, appendChild() {} }; },
     },
+    location: { pathname: "/endora-console" },
     window: {
       open(...a) { calls.open.push(a); return openReturns(); },
       dispatchEvent(e) { calls.dispatched.push(e); return true; },
+      navigator: { standalone: false },
       _listeners: {},
       addEventListener(type, fn) { this._listeners[type] = fn; },
     },
@@ -159,14 +161,17 @@ const tests = {
   },
 
   "the back button navigates home"() {
-    const h = load({ openReturns: () => null });   // blocked, as on iOS
+    // The fallback path: if the automatic navigation ever fails to take, the
+    // user is still on the panel and this is what gets them out.
+    const h = load({ openReturns: () => null });
     const el = newPanel(h, HASS);
     el.connectedCallback();
     h.flush();
-    assert.strictEqual(h.calls.replaceState.length, 0, "navigated unasked");
+    const before = h.calls.replaceState.length;
     el.click("#endora-back");
     h.flush();
-    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace-home");
+    assert.ok(h.calls.replaceState.length > before, "the button did nothing");
+    assert.ok(h.calls.replaceState.every(r => r[2] === "/lovelace-home"));
   },
 
   "the back button falls back to history when no dashboard is known"() {
@@ -250,17 +255,20 @@ const tests = {
     assert.ok(el.innerHTML.trim().length > 0, "left the user with nothing");
   },
 
-  "does not navigate when the popup was blocked"() {
-    // Bouncing home would discard the only remaining route to the console.
+  "navigates even when window.open returns null"() {
+    // Measured in the Home Assistant iOS app: window.open returns null and
+    // throws nothing while Safari opens the console, because the WKWebView
+    // hands the URL to the OS and has no Window to give back. Gating on that
+    // value made every iOS visit take the "refused" branch and sit on the
+    // panel next to a tab that had already opened.
     const h = load({ openReturns: () => null });
     const el = newPanel(h, HASS);
     el.connectedCallback();
-    h.flush();
-    assert.strictEqual(h.calls.replaceState.length, 0);
-    // Assert the way out, not the wording: the copy is deliberately not
-    // alarming, because on mobile a refused popup is the normal case.
+    assert.ok(h.calls.replaceState.length >= 1,
+      "a null return was read as failure; iOS always returns null");
+    assert.ok(h.calls.replaceState.every(r => r[2] === "/lovelace-home"));
     assert.match(el.innerHTML, new RegExp(`href="${TARGET_RE}"`),
-      "no link to the console when the popup was refused");
+      "no link to the console in the fallback markup");
   },
 
   "survives window.open throwing"() {
@@ -269,6 +277,7 @@ const tests = {
     el.connectedCallback();                        // must not propagate
     assert.match(el.innerHTML, new RegExp(`href="${TARGET_RE}"`));
     assert.match(el.innerHTML, /id="endora-back"/);
+    assert.ok(h.calls.replaceState.length >= 1, "a throw should not strand the panel");
   },
 };
 

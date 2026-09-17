@@ -16,34 +16,45 @@ const TARGET = "http://10.0.0.141:8765/";
 // not reject top-level navigation, which is what this is.
 class EndoraConsole extends HTMLElement {
   connectedCallback() {
-    // "noopener" is deliberately absent: passed, window.open() returns null
-    // whether or not it succeeded, so the branch below becomes a coin flip.
-    // Clearing .opener gives the same isolation and a usable return value.
-    let win = null;
+    // A null return does NOT mean the tab was refused.
+    //
+    // Measured in the Home Assistant iOS app: window.open returns null,
+    // throws nothing, and Safari opens the console anyway — the WKWebView
+    // hands the URL to the OS and has no Window object to give back. A
+    // desktop popup blocker also returns null without throwing, so the two
+    // are indistinguishable from here.
+    //
+    // Gating the navigation on this value meant every iOS visit took the
+    // "refused" branch and stayed on the panel while the tab it had just
+    // opened sat waiting in Safari. So don't gate it: leave, either way.
+    // The cost is that a genuinely blocked popup also leaves — the user
+    // lands on their dashboard with nothing having happened, which their
+    // browser's own blocked-popup indicator explains better than this panel
+    // could.
     try {
-      win = window.open(TARGET, "_blank");
+      const win = window.open(TARGET, "_blank");
       if (win) win.opener = null;
-    } catch (e) { /* treat as blocked */ }
+    } catch (e) { /* nothing useful to distinguish here either */ }
 
-    this._render(!!win);
-    if (win) this._goHome();
+    this._render();
+    this._goHome();
   }
 
-  // Both actions are always offered, and "back" comes first.
-  //
-  // This panel draws its own content with no Home Assistant toolbar, so it
-  // has no menu button. On a desktop the sidebar is on screen anyway; in the
-  // iOS app it is hidden behind that missing button, which left no way out
-  // of this page at all. On mobile window.open is also usually refused, so
-  // the panel takes the "blocked" branch and deliberately does not navigate
-  // away — correct on a desktop, a dead end on a phone.
-  _render(opened) {
+  // A fallback, not the normal path: the navigation below should leave
+  // before any of this is read. It exists because this panel draws its own
+  // markup with no Home Assistant toolbar, so it has no menu button — which
+  // on a desktop is invisible (the sidebar is always on screen) but on a
+  // phone means the sidebar cannot be opened at all. If the navigation ever
+  // fails again, that turns a nuisance into a trap.
+  _render() {
     const btn = "display:inline-block;padding:12px 18px;margin:0 12px 12px 0;" +
                 "border-radius:8px;text-decoration:none;font-size:15px";
+    // Deliberately does not claim the tab opened or didn't: that is exactly
+    // what cannot be known here. In normal use this markup is never seen —
+    // the navigation below leaves before it can be read.
     this.innerHTML = `
       <div style="padding:24px;color:var(--primary-text-color,#212121)">
-        <p>${opened ? "Endora opened in a new tab."
-                    : "Open the Endora debug console:"}</p>
+        <p>Endora debug console:</p>
         <p>
           <a href="#" id="endora-back"
              style="${btn};background:var(--primary-color,#03a9f4);color:#fff"
