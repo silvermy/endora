@@ -62,6 +62,29 @@ class EndoraConsole extends HTMLElement {
       // start, where there is nothing to go back to.
       if (!this._goHome()) history.back();
     });
+
+    this._addMenuButton();
+  }
+
+  // Home Assistant's own hamburger, so the sidebar is reachable from here.
+  //
+  // Built-in panels render a toolbar containing it; this one draws its own
+  // markup and had none, which on a desktop is invisible (the sidebar is
+  // always on screen) and on a phone means the sidebar cannot be opened at
+  // all. Best-effort: the element belongs to the frontend, not to us, so if
+  // it is not registered under this name we simply do without — the button
+  // above is the guaranteed way out either way.
+  _addMenuButton() {
+    if (!customElements.get("ha-menu-button")) return;
+    try {
+      const bar = document.createElement("div");
+      bar.style.cssText = "padding:8px 8px 0";
+      const menu = document.createElement("ha-menu-button");
+      menu.hass = this.hass;
+      menu.narrow = this.narrow !== undefined ? this.narrow : true;
+      bar.appendChild(menu);
+      this.insertBefore(bar, this.firstChild);
+    } catch (e) { /* cosmetic only */ }
   }
 
   // Send HA to a dashboard so it never rests on this panel; otherwise every
@@ -83,11 +106,26 @@ class EndoraConsole extends HTMLElement {
     // where HA's own navigate() helper fires it. replaceState rather than
     // push, so Back does not land here and open another tab, and
     // history.state carries HA's routing state across.
-    setTimeout(() => {
+    const go = () => {
       history.replaceState(history.state, "", home);
       window.dispatchEvent(new CustomEvent("location-changed",
         { detail: { replace: true }, bubbles: true, composed: true }));
-    }, 0);
+    };
+    setTimeout(go, 0);
+
+    // …and again when the app comes back to the foreground.
+    //
+    // On iOS, window.open hands off to Safari and the Home Assistant app's
+    // webview is backgrounded immediately — which suspends JavaScript, so
+    // the timer above never fires. Returning to the app then shows a panel
+    // that should have navigated away and did not. Re-running when the page
+    // becomes visible completes the hop that was dropped; doing it twice is
+    // harmless, since replaceState to the same path is idempotent.
+    const onReturn = () => {
+      if (!document.hidden) go();
+    };
+    document.addEventListener("visibilitychange", onReturn, { once: true });
+    window.addEventListener("pageshow", go, { once: true });
     return true;
   }
 }

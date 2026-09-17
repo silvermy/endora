@@ -39,6 +39,8 @@ function load({ openReturns }) {
       assert.ok(el && el.click, `nothing listening on ${sel}`);
       el.click({ preventDefault() {} });
     }
+    insertBefore(node) { this._inserted = node; }
+    get firstChild() { return null; }
   }
 
   const sandbox = {
@@ -63,9 +65,21 @@ function load({ openReturns }) {
     // flush() means the inline dispatch — which never reached HA's router —
     // has come back.
     setTimeout(fn) { timers.push(fn); },
+    // iOS suspends JavaScript in a backgrounded webview, so the deferred
+    // navigation can be dropped entirely. The panel re-runs it when the page
+    // becomes visible again; these capture those listeners so a test can
+    // simulate coming back from Safari.
+    document: {
+      hidden: false,
+      _listeners: {},
+      addEventListener(type, fn) { this._listeners[type] = fn; },
+      createElement(tag) { return { tagName: tag, style: {}, appendChild() {} }; },
+    },
     window: {
       open(...a) { calls.open.push(a); return openReturns(); },
       dispatchEvent(e) { calls.dispatched.push(e); return true; },
+      _listeners: {},
+      addEventListener(type, fn) { this._listeners[type] = fn; },
     },
   };
   sandbox.window.window = sandbox.window;
@@ -128,6 +142,41 @@ const tests = {
       el.connectedCallback();
       assert.match(el.innerHTML, /id="endora-back"/, "no way back rendered");
     }
+  },
+
+  "completes the navigation when the app returns from Safari"() {
+    // The iOS failure: window.open succeeds, Safari takes over, the HA
+    // webview is suspended and the deferred navigation never runs. The user
+    // comes back to a panel that should have navigated away.
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    newPanel(h, HASS).connectedCallback();
+
+    // Do NOT flush: the timer is suspended, exactly as iOS leaves it.
+    assert.strictEqual(h.calls.replaceState.length, 0);
+
+    const onVisible = h.sandbox.document._listeners["visibilitychange"];
+    assert.ok(onVisible, "nothing listens for the app coming back");
+    onVisible();
+    assert.strictEqual(h.calls.replaceState.length, 1,
+      "still on the panel after returning to the app");
+    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace-home");
+  },
+
+  "a suspended timer that later fires is harmless"() {
+    // Both paths can run; replaceState to the same path is idempotent.
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    newPanel(h, HASS).connectedCallback();
+    h.sandbox.document._listeners["visibilitychange"]();
+    h.flush();
+    assert.ok(h.calls.replaceState.every(r => r[2] === "/lovelace-home"));
+  },
+
+  "does not navigate while the page is still hidden"() {
+    const h = load({ openReturns: () => ({ opener: {} }) });
+    newPanel(h, HASS).connectedCallback();
+    h.sandbox.document.hidden = true;
+    h.sandbox.document._listeners["visibilitychange"]();
+    assert.strictEqual(h.calls.replaceState.length, 0);
   },
 
   "the back button navigates home"() {
