@@ -111,6 +111,21 @@ class EndoraConsole extends HTMLElement {
       window.dispatchEvent(new CustomEvent("location-changed",
         { detail: { replace: true }, bubbles: true, composed: true }));
     };
+
+    // Immediately, in the same tick as the window.open that triggered it.
+    //
+    // This used to be deferred by a tick and nothing else, on the theory
+    // that an inline dispatch does not reach Home Assistant's router. That
+    // theory came from debugging a spinner whose real cause turned out to be
+    // a dashboard path that did not exist, so it was never the reason — and
+    // deferring is precisely what breaks iOS, where window.open hands off to
+    // Safari and the webview is suspended before the timer can run. Going
+    // now, while the page is still in the foreground, is what makes the
+    // panel vanish instead of sitting there waiting to be dismissed.
+    go();
+
+    // Backstops, in case a host does need the deferral after all. Every path
+    // is idempotent: replaceState to the same path changes nothing.
     setTimeout(go, 0);
 
     // …and again when the app comes back to the foreground.

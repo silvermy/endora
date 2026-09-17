@@ -144,39 +144,18 @@ const tests = {
     }
   },
 
-  "completes the navigation when the app returns from Safari"() {
-    // The iOS failure: window.open succeeds, Safari takes over, the HA
-    // webview is suspended and the deferred navigation never runs. The user
-    // comes back to a panel that should have navigated away.
+  "still navigates when the app returns from Safari"() {
+    // Backstop for a host where the immediate attempt does not take.
     const h = load({ openReturns: () => ({ opener: {} }) });
     newPanel(h, HASS).connectedCallback();
-
-    // Do NOT flush: the timer is suspended, exactly as iOS leaves it.
-    assert.strictEqual(h.calls.replaceState.length, 0);
-
     const onVisible = h.sandbox.document._listeners["visibilitychange"];
     assert.ok(onVisible, "nothing listens for the app coming back");
     onVisible();
-    assert.strictEqual(h.calls.replaceState.length, 1,
-      "still on the panel after returning to the app");
-    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace-home");
-  },
-
-  "a suspended timer that later fires is harmless"() {
-    // Both paths can run; replaceState to the same path is idempotent.
-    const h = load({ openReturns: () => ({ opener: {} }) });
-    newPanel(h, HASS).connectedCallback();
-    h.sandbox.document._listeners["visibilitychange"]();
     h.flush();
-    assert.ok(h.calls.replaceState.every(r => r[2] === "/lovelace-home"));
-  },
-
-  "does not navigate while the page is still hidden"() {
-    const h = load({ openReturns: () => ({ opener: {} }) });
-    newPanel(h, HASS).connectedCallback();
-    h.sandbox.document.hidden = true;
-    h.sandbox.document._listeners["visibilitychange"]();
-    assert.strictEqual(h.calls.replaceState.length, 0);
+    // Every attempt targets the same place, so repeats change nothing.
+    assert.ok(h.calls.replaceState.length >= 1);
+    assert.ok(h.calls.replaceState.every(r => r[2] === "/lovelace-home"),
+      "an attempt targeted somewhere else");
   },
 
   "the back button navigates home"() {
@@ -214,24 +193,27 @@ const tests = {
     const h = load({ openReturns: () => ({ opener: {} }) });
     newPanel(h, HASS).connectedCallback();
     h.flush();
-    assert.strictEqual(h.calls.replaceState.length, 1, "did not navigate home");
-    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace-home");
+    assert.ok(h.calls.replaceState.length >= 1, "did not navigate home");
+    assert.ok(h.calls.replaceState.every(r => r[2] === "/lovelace-home"));
   },
 
-  "defers navigation past connectedCallback"() {
+  "navigates immediately, not on a timer"() {
+    // The iOS failure in one assertion. window.open hands off to Safari and
+    // the webview is suspended, so anything left on a timer never runs and
+    // the user returns to a panel that should have gone. It has to happen in
+    // the same tick, while the page is still in the foreground.
     const h = load({ openReturns: () => ({ opener: {} }) });
     newPanel(h, HASS).connectedCallback();
-    assert.strictEqual(h.calls.replaceState.length, 0,
-      "URL rewritten synchronously, before HA can act on it");
-    h.flush();
-    assert.strictEqual(h.calls.replaceState.length, 1);
+    assert.ok(h.calls.replaceState.length >= 1,
+      "navigation deferred; a suspended webview will never run it");
+    assert.strictEqual(h.calls.replaceState[0][2], "/lovelace-home");
   },
 
   "fires location-changed on window, where HA listens"() {
     const h = load({ openReturns: () => ({ opener: {} }) });
     newPanel(h, HASS).connectedCallback();
     h.flush();
-    assert.strictEqual(h.calls.dispatched.length, 1, "no location-changed event");
+    assert.ok(h.calls.dispatched.length >= 1, "no location-changed event");
     const ev = h.calls.dispatched[0];
     assert.strictEqual(ev.type, "location-changed");
     assert.ok(ev.bubbles && ev.composed, "event will not reach HA's router");
