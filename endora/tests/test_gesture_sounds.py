@@ -162,3 +162,41 @@ def test_the_analyser_defers_to_the_callback():
     assert "self._gesture_sound_cb(gesture)" in block
     assert "elif self._chime is not None" in block, \
         "the chime path must be an ELSE, not a second unconditional play"
+
+
+# ── head start ────────────────────────────────────────────────────────────────
+
+def test_every_sustained_pose_maps_to_a_gesture():
+    """The analyser plays a pose's sound at onset and looks the gesture up
+    here. A pose missing from the map is simply silent until it fires."""
+    from core.state_machine import POSE_GESTURE, ArmState
+    sustained = {ArmState.BOTH_UP, ArmState.T_POSE,
+                 ArmState.CROSS_ARMS, ArmState.FOLDED_ARMS}
+    assert sustained <= set(POSE_GESTURE)
+
+
+def test_the_state_machine_and_analyser_share_one_map():
+    # They used to be the same literal in two places for GESTURE_CRITICAL and
+    # it drifted for twenty versions. Not again.
+    import re
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parent.parent
+    literals = [
+        py for py in root.rglob("*.py")
+        if ".venv" not in py.parts and py.parent.name != "tests"
+        and re.search(r"^POSE_GESTURE\b.*=\s*\{", py.read_text(), re.M)
+    ]
+    assert len(literals) == 1, f"defined in {[str(p) for p in literals]}"
+
+
+def test_the_pose_sound_fires_on_entering_the_pose():
+    """Measured before this change: state_confirm_s (0.2 s) plus sustain_s
+    (0.5 s) elapsed before the sound was even sent, and the speaker's own
+    latency came after that. SNAP never had the problem because its chime
+    fires at sweep onset."""
+    import inspect
+    from cameras import analyser
+    src = inspect.getsource(analyser.CameraAnalyser._run)
+    block = src.split("head\n                    # start SNAP has always had")[1][:900]
+    assert "reading.state != prev_state" in block, "not gated on a transition"
+    assert "POSE_GESTURE.get(reading.state)" in block

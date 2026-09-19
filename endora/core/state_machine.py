@@ -150,6 +150,17 @@ class _SustainState:
 
 # ── State Machine ────────────────────────────────────────────────────────────
 
+# Which gesture each sustained pose fires. Module level so the analyser can
+# read it too — it plays a pose's sound at onset rather than waiting for the
+# hold to complete, and needs to know which sound that is.
+POSE_GESTURE = {
+    ArmState.BOTH_UP:     Gesture.RAISE_BOTH,
+    ArmState.T_POSE:      Gesture.T_POSE,
+    ArmState.CROSS_ARMS:  Gesture.CROSS_ARMS,
+    ArmState.FOLDED_ARMS: Gesture.FOLDED_ARMS,
+}
+
+
 class GestureStateMachine:
     def __init__(self, config: StateMachineConfig,
                  on_near_miss: Optional[Callable[[str, str, ArmReading], None]] = None):
@@ -336,12 +347,7 @@ class GestureStateMachine:
 
         # Held long enough — fire once and latch until the pose is released
         # for sustained_rearm_s (see tick()).
-        gesture = {
-            ArmState.BOTH_UP:    Gesture.RAISE_BOTH,
-            ArmState.T_POSE:     Gesture.T_POSE,
-            ArmState.CROSS_ARMS: Gesture.CROSS_ARMS,
-            ArmState.FOLDED_ARMS: Gesture.FOLDED_ARMS,
-        }[state]
+        gesture = POSE_GESTURE[state]
         self._sustain.entered_at.clear()
         self._pose_latch[state] = now
         return self._fire(gesture, now)
