@@ -20,7 +20,7 @@ from urllib.parse import urlparse, parse_qs
 import cv2
 import numpy as np
 
-from config.registry import REGISTRY
+from config.registry import GESTURE_CRITICAL, REGISTRY
 
 log = logging.getLogger(__name__)
 
@@ -268,20 +268,6 @@ def _current_values() -> dict:
 # Settings that decide whether a gesture fires — shown on the debug page
 # with the file each value came from, so "what is actually running?" is
 # answerable at a glance instead of by reading three files by hand.
-_GESTURE_CRITICAL = [
-    "yolo_pose_model", "yolo_imgsz", "yolo_conf",
-    "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
-    "snap_elevation_min", "snap_sustain_s",
-    "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
-    "gesture_snap_enable", "gesture_cross_arms_enable",
-    "gesture_t_pose_enable", "gesture_raise_both_enable",
-    "cross_gesture_cooldown_s",
-    "snap_require_rise", "snap_require_still",
-    "rise_elevation_delta", "rise_start_elevation_max",
-    "wrist_still_max_travel_arm",
-    "state_confirm_s", "state_release_s", "cooldown_s", "sustained_rearm_s",
-    "pose_visibility_min", "keypoint_visibility_min",
-]
 
 
 def _effective_settings() -> list:
@@ -292,7 +278,7 @@ def _effective_settings() -> list:
     if _settings is None:
         return []
     out = []
-    for key in _GESTURE_CRITICAL:
+    for key in GESTURE_CRITICAL:
         if not hasattr(_settings, key):
             continue
         src = (_settings.source_of(key)

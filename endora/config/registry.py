@@ -418,3 +418,43 @@ REGISTRY: list[SettingField] = [
 ]
 
 REGISTRY_BY_KEY: dict[str, SettingField] = {f.key: f for f in REGISTRY}
+
+
+# Settings that decide whether a gesture fires. Logged at startup with the
+# file each value came from: a stale entry in settings.yaml or
+# runtime_overrides.yaml silently outranks a shipped default, and with
+# nothing reporting that, three separate debugging sessions were spent
+# chasing behaviour that no longer matched the code.
+GESTURE_CRITICAL: list[str] = [
+    "yolo_pose_model", "yolo_imgsz", "yolo_conf",
+    "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
+    "snap_elevation_min", "snap_sustain_s",
+    "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
+    "gesture_snap_enable", "gesture_cross_arms_enable",
+    "gesture_t_pose_enable", "gesture_raise_both_enable",
+    "gesture_folded_arms_enable", "facing_shoulder_min",
+    # HOLD was missing here while every other gesture flag was listed, and
+    # it is the one that most visibly surprises: it fires hold_duration_s
+    # after a successful SNAP, from the same raised arm, with its own HA
+    # event and its own chime. Someone who left their arm up reads that as
+    # the detector firing twice for one gesture, and nothing in the startup
+    # diagnostic said HOLD was enabled.
+    "gesture_hold_enable", "hold_duration_s",
+    "gesture_double_snap_enable", "double_snap_window_s",
+    "cross_gesture_cooldown_s",
+    "snap_require_rise", "snap_require_still",
+    "rise_elevation_delta", "rise_start_elevation_max",
+    "wrist_still_max_travel_arm",
+    "state_confirm_s", "state_release_s", "cooldown_s", "sustained_rearm_s",
+    "pose_visibility_min", "keypoint_visibility_min",
+    # The pose sample rate ceiling (see _StageTimer): a sweep is only
+    # measurable if several samples land inside flourish_window_s, and
+    # these two decide how often the model looks.
+    "yolo_max_skip", "yolo_max_skip_active",
+]
+
+# Two copies of this list existed — one for the startup log, one for the
+# debug page's /effective endpoint — and they drifted: HOLD was added to the
+# first in v1.9.149 "so the log can explain HOLD" and never reached the
+# second, so the page a user actually reads went on omitting it. The test
+# that was supposed to guard the list checked only one copy.
