@@ -315,7 +315,15 @@ class ArmTrackerConfig:
     # folded_midline_max stays below cross_arms_min_crossing.
     folded_wrist_proximity: float = 0.50   # wrist gap, in shoulder widths
     folded_midline_max: float = 0.35       # each wrist's distance from midline
-    folded_chest_pad: float = 0.15         # vertical "chest" band, torso lengths
+    folded_chest_pad: float = 0.15         # slack above the shoulder line
+    # How far below the shoulder line the hands may sit, as a fraction of
+    # torso length. "At the chest" has to mean the chest: the first version
+    # accepted anywhere between the shoulder and hip lines, which is the
+    # whole torso — and hands resting on a laptop are inside that, at roughly
+    # 0.6-0.9 down. Folding your hands at your chest puts them near the
+    # sternum. This is the measurement that separates the gesture from the
+    # default posture on that couch.
+    folded_chest_depth: float = 0.45
     # Folded arms are bent arms: hands at the chest with the elbows out puts
     # extension well under a straight arm's 0.80. Requiring the bend keeps a
     # pair of hands resting low and straight from qualifying.
@@ -752,7 +760,8 @@ class ArmTracker:
             # than crossing past it, that the arms be bent, that the body be
             # square to the camera, and that it be upright.
             if self.c.detect_folded_arms and shoulder_w > 1e-6 and torso_len > 1e-6:
-                fold_top, fold_bottom = _chest_band(self.c.folded_chest_pad)
+                fold_top = sh_mid[1] - self.c.folded_chest_pad * torso_len
+                fold_bottom = sh_mid[1] + self.c.folded_chest_depth * torso_len
                 near_mid = (self.c.folded_midline_max * shoulder_w)
                 hands_together = (
                     _dist(lw, rw) <= self.c.folded_wrist_proximity * shoulder_w

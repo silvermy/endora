@@ -629,6 +629,7 @@ class CameraAnalyser(threading.Thread):
             detect_folded_arms=bool(getattr(s, 'gesture_folded_arms_enable', True)),
             folded_wrist_proximity=float(getattr(s, 'folded_wrist_proximity', 0.50)),
             folded_midline_max=float(getattr(s, 'folded_midline_max', 0.35)),
+            folded_chest_depth=float(getattr(s, 'folded_chest_depth', 0.45)),
             folded_extension_max=float(getattr(s, 'folded_extension_max', 0.80)),
             facing_shoulder_min=float(getattr(s, 'facing_shoulder_min', 0.45)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),

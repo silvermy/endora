@@ -324,6 +324,13 @@ REGISTRY: list[SettingField] = [
                   "shoulder widths. Must stay below cross_arms_min_crossing or the two "
                   "poses overlap",
                   group="Gesture"),
+    SettingField("folded_chest_depth", float, 0.45,
+                  "FOLDED_ARMS: how far below the shoulder line the hands may sit, "
+                  "as a fraction of torso length. The whole torso was accepted at "
+                  "first, which includes hands resting on a laptop at roughly 0.6-0.9 "
+                  "down — the default posture on a couch, and the gesture's first "
+                  "false positive",
+                  group="Gesture"),
     SettingField("folded_extension_max", float, 0.80,
                   "FOLDED_ARMS: maximum arm straightness — folded arms are bent arms",
                   group="Gesture"),

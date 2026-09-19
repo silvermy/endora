@@ -314,6 +314,7 @@ class Settings:
     gesture_folded_arms_enable: bool = True
     folded_wrist_proximity: float = 0.50
     folded_midline_max: float = 0.35
+    folded_chest_depth: float = 0.45
     folded_extension_max: float = 0.80
     facing_shoulder_min: float = 0.45
 

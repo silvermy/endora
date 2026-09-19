@@ -189,3 +189,26 @@ def test_stays_distinct_from_cross_arms():
     crossed._points[LEFT_WRIST] = Point((400 - 45) / W, 395 / H)
     crossed._points[RIGHT_WRIST] = Point((400 + 45) / W, 395 / H)
     assert _state(crossed) is not ArmState.FOLDED_ARMS
+
+
+def test_hands_on_a_laptop_are_not_folded_arms():
+    """The gesture's first false positive, 13 seconds after it went live.
+
+    Sitting on the couch with a laptop: facing the camera, upright, hands
+    together in front of the body — every test the first version applied.
+    What it did not check was HEIGHT. "At the chest" accepted anywhere
+    between the shoulder and hip lines, which is the whole torso, and a
+    laptop sits near the bottom of it. Folding your hands at your chest puts
+    them near the sternum.
+    """
+    laptop = _pose(wrist_dy=TORSO * 0.75)          # hands low, over a lap
+    assert _state(laptop) is not ArmState.FOLDED_ARMS
+
+
+def test_the_chest_band_is_the_upper_torso_only():
+    c = ArmTrackerConfig()
+    assert c.folded_chest_depth < 1.0, \
+        "a band reaching the hip line admits hands resting in the lap"
+    # Hands at the sternum qualify; hands most of the way to the hips do not.
+    assert _state(_pose(wrist_dy=TORSO * 0.30)) is ArmState.FOLDED_ARMS
+    assert _state(_pose(wrist_dy=TORSO * 0.70)) is not ArmState.FOLDED_ARMS
