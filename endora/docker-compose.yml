@@ -32,6 +32,7 @@ services:
       # debug_port ships as 0 (off) for the add-on, whose users set it in
       # the Configuration tab. There is no such tab here, so default it on.
       - DEBUG_PORT=${DEBUG_PORT:-8765}
+      - ENDORA_RECORD_TESTS=${ENDORA_RECORD_TESTS:-0}
     volumes:
       # Optional: mount a local settings file to override defaults
       # - ./config/settings.yaml:/data/settings.yaml:ro

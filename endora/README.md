@@ -191,6 +191,23 @@ record from *before* you noticed something was wrong.
 For a sidebar entry that opens this page in its own tab, see
 **[docs/homeassistant/](docs/homeassistant/README.md)**.
 
+### 7. Recording real gestures for tuning
+
+Set `ENDORA_RECORD_TESTS=1` in `.env` and restart. Every fired gesture then
+writes the preceding seconds of raw keypoints to `/data/test_captures` as a
+`.npz`, and the debug page grows a **Capture test case** button for poses
+that *fail* to fire — which is the more useful half.
+
+This matters more than it looks. Every threshold in this project was first
+set against a synthetic fixture, and every one of them needed a live
+correction afterwards: the motion gate measured the wrong statistic, the
+flourish window was shorter than the sample rate could fill, and FOLDED_ARMS
+fired at someone holding a laptop within thirteen seconds. A recorded trace
+is the difference between tuning a threshold and guessing at it.
+
+Replay them through the real pipeline with `tests/test_captured.py`. Turn it
+off when you are done — it writes a file per gesture.
+
 ---
 
 ## HA Automation examples

@@ -440,6 +440,8 @@ GESTURE_CRITICAL: list[str] = [
     "gesture_snap_enable", "gesture_cross_arms_enable",
     "gesture_t_pose_enable", "gesture_raise_both_enable",
     "gesture_folded_arms_enable", "facing_shoulder_min",
+    "folded_wrist_proximity", "folded_midline_max",
+    "folded_chest_depth", "folded_extension_max",
     # HOLD was missing here while every other gesture flag was listed, and
     # it is the one that most visibly surprises: it fires hold_duration_s
     # after a successful SNAP, from the same raised arm, with its own HA

@@ -44,6 +44,13 @@ services:
       # "cpu" to A/B the GPU against the old Pi behaviour, or to "cuda" if
       # a TensorRT engine build turns out to be misbehaving for your model.
       - YOLO_EXECUTION_PROVIDER=${YOLO_EXECUTION_PROVIDER:-auto}
+      # Record real keypoint traces for regression tests. Off by default: it
+      # writes a .npz per gesture into /data/test_captures, which grows. Turn
+      # it on to tune a threshold against what the camera actually sees
+      # rather than against a synthetic fixture — every gesture in this
+      # project has been tuned the second way, and each one needed a live
+      # correction afterwards.
+      - ENDORA_RECORD_TESTS=${ENDORA_RECORD_TESTS:-0}
     volumes:
       # Persistent: settings.yaml, runtime_overrides.yaml, feedback.jsonl,
       # and trt_cache/ — losing the last one costs minutes on every restart.
