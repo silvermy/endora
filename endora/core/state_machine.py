@@ -32,6 +32,7 @@ class Gesture(Enum):
     CROSS_ARMS  = auto()
     T_POSE      = auto()
     RAISE_BOTH  = auto()
+    FOLDED_ARMS = auto()
 
     @property
     def event_name(self) -> str:
@@ -116,6 +117,7 @@ class StateMachineConfig:
     enable_cross_arms: bool = True
     enable_t_pose: bool = True
     enable_raise_both: bool = True
+    enable_folded_arms: bool = True
 
 
 # ── Internal per-arm-raise state ──────────────────────────────────────────────
@@ -219,7 +221,8 @@ class GestureStateMachine:
             self._sustain.entered_at.clear()  # no sustained state active
             return self._tick_single_up(reading, now)
 
-        if state in (ArmState.BOTH_UP, ArmState.T_POSE, ArmState.CROSS_ARMS):
+        if state in (ArmState.BOTH_UP, ArmState.T_POSE, ArmState.CROSS_ARMS,
+                     ArmState.FOLDED_ARMS):
             self._reset_raise()
             return self._tick_sustained(state, now)
 
@@ -337,6 +340,7 @@ class GestureStateMachine:
             ArmState.BOTH_UP:    Gesture.RAISE_BOTH,
             ArmState.T_POSE:     Gesture.T_POSE,
             ArmState.CROSS_ARMS: Gesture.CROSS_ARMS,
+            ArmState.FOLDED_ARMS: Gesture.FOLDED_ARMS,
         }[state]
         self._sustain.entered_at.clear()
         self._pose_latch[state] = now
@@ -372,6 +376,7 @@ class GestureStateMachine:
         Gesture.CROSS_ARMS:  "enable_cross_arms",
         Gesture.T_POSE:      "enable_t_pose",
         Gesture.RAISE_BOTH:  "enable_raise_both",
+        Gesture.FOLDED_ARMS: "enable_folded_arms",
     }
 
     def is_enabled(self, gesture: Gesture) -> bool:

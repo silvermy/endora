@@ -56,6 +56,7 @@ _GESTURE_CRITICAL = [
     "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
     "gesture_snap_enable", "gesture_cross_arms_enable",
     "gesture_t_pose_enable", "gesture_raise_both_enable",
+    "gesture_folded_arms_enable", "facing_shoulder_min",
     # HOLD was missing here while every other gesture flag was listed, and
     # it is the one that most visibly surprises: it fires hold_duration_s
     # after a successful SNAP, from the same raised arm, with its own HA

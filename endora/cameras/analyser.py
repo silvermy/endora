@@ -620,6 +620,11 @@ class CameraAnalyser(threading.Thread):
             detect_cross_arms=bool(getattr(s, 'gesture_cross_arms_enable', True)),
             detect_t_pose=bool(getattr(s, 'gesture_t_pose_enable', True)),
             detect_both_up=bool(getattr(s, 'gesture_raise_both_enable', True)),
+            detect_folded_arms=bool(getattr(s, 'gesture_folded_arms_enable', True)),
+            folded_wrist_proximity=float(getattr(s, 'folded_wrist_proximity', 0.50)),
+            folded_midline_max=float(getattr(s, 'folded_midline_max', 0.35)),
+            folded_extension_max=float(getattr(s, 'folded_extension_max', 0.80)),
+            facing_shoulder_min=float(getattr(s, 'facing_shoulder_min', 0.45)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),
             rise_elevation_delta=float(getattr(s, 'rise_elevation_delta', 0.35)),
@@ -646,6 +651,7 @@ class CameraAnalyser(threading.Thread):
             enable_cross_arms=bool(getattr(s, 'gesture_cross_arms_enable', True)),
             enable_t_pose=bool(getattr(s, 'gesture_t_pose_enable', True)),
             enable_raise_both=bool(getattr(s, 'gesture_raise_both_enable', True)),
+            enable_folded_arms=bool(getattr(s, 'gesture_folded_arms_enable', True)),
         ), on_near_miss=self._near_miss_cb)
         # A brand-new pid can only be created from a candidate that didn't
         # match any existing tracked pid (see _match_persons) — and since

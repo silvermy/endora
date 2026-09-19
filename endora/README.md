@@ -24,6 +24,14 @@ All gestures are detected from body pose alone — no hand detection required. T
 | `endora-raise-both` | Raise both arms straight up and hold for `sustain_s` (default 0.5s) |
 | `endora-t-pose` | Extend both arms horizontally to the sides, hold for `sustain_s` |
 | `endora-cross-arms` | Cross arms in front of chest (each wrist near opposite shoulder), hold for `sustain_s` |
+| `endora-folded-arms` | Fold your hands together at your chest, facing the camera, sitting or standing — hold for `sustain_s` |
+
+FOLDED_ARMS is the only gesture with posture and orientation requirements,
+and both are deliberate. Turned side-on, the two wrists overlap in the image
+whatever the hands are doing, so the pose would be trivially satisfied by
+anyone sitting sideways. Reclining is excluded because lying down with
+forearms resting on the chest *is* this shape — and a couch-facing camera
+sees that for hours at a time.
 
 **Priority:** SNAP fires with a small delay to let competing gestures (RAISE_BOTH, T_POSE, CROSS_ARMS) supersede it — if you raise one arm straight up and hold, SNAP fires first, then HOLD fires. If you raise both, RAISE_BOTH fires instead.
 
@@ -355,6 +363,8 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | SNAP not firing at all | Check the pose sample rate first — see the row below. Then lower `flourish_min_climb` / `flourish_min_rate`, or set `snap_require_flourish: false` to fall back to a held raise |
 | SNAP fires only occasionally, and the debug overlay shows an implausible `sweep` rate (10+/s) | The model is sampling too slowly to see the sweep: the log's `pose N sample/s` is the number that matters, not the camera fps. Raise it (faster model, lower `yolo_imgsz`, better hardware) rather than loosening thresholds |
 | CPU pegged whenever someone is in the room | `yolo_max_skip_active` is `1` — every frame while a person is tracked. Correct on a GPU; on a Pi try `3` |
+| FOLDED_ARMS not firing | You must be square to the camera and upright — turned side-on fails `facing_shoulder_min`, and reclining is excluded by design (lying down with forearms on the chest is the same shape). Then loosen `folded_wrist_proximity` |
+| FOLDED_ARMS fires when you did not mean it | Tighten `folded_midline_max` toward `0.25` — keep it below `cross_arms_min_crossing` or it overlaps CROSS_ARMS |
 | Two events per gesture (a second chime ~1.5 s later) | That is HOLD. Set `gesture_hold_enable: false`, or adjust `hold_duration_s` |
 | HOLD fires too soon / too late | Adjust `hold_duration_s` |
 | T-pose fires when raising both arms | Raise `sustain_s` toward `1.0` |

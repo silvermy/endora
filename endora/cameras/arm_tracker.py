@@ -60,6 +60,7 @@ class ArmState(Enum):
     BOTH_UP     = auto()  # both arms raised above head
     T_POSE      = auto()  # both arms extended horizontal
     CROSS_ARMS  = auto()  # arms crossed in front of chest
+    FOLDED_ARMS = auto()  # hands folded together at the chest, facing the camera
 
 
 class Side(Enum):
@@ -306,6 +307,27 @@ class ArmTrackerConfig:
     # beyond the shoulder line and the hip line respectively.
     cross_arms_chest_pad: float = 0.15
 
+    # ── Folded arms ("I Dream of Jeannie") ────────────────────────────────
+    # Hands brought TOGETHER at the centre of the chest, rather than each
+    # carried across to the opposite side — which is what separates this from
+    # CROSS_ARMS. Both wrists stay near the body midline instead of passing
+    # it, so the two tests are mutually exclusive by construction as long as
+    # folded_midline_max stays below cross_arms_min_crossing.
+    folded_wrist_proximity: float = 0.50   # wrist gap, in shoulder widths
+    folded_midline_max: float = 0.35       # each wrist's distance from midline
+    folded_chest_pad: float = 0.15         # vertical "chest" band, torso lengths
+    # Folded arms are bent arms: hands at the chest with the elbows out puts
+    # extension well under a straight arm's 0.80. Requiring the bend keeps a
+    # pair of hands resting low and straight from qualifying.
+    folded_extension_max: float = 0.80
+    # Shoulder width as a fraction of torso length, below which the person is
+    # not square to the camera. Facing matters here in a way it does not for
+    # a raised arm: in profile the two wrists overlap in the image whatever
+    # the hands are actually doing, so "hands together at the chest" becomes
+    # trivially true. Measured on a real seated frame from the target room:
+    # 0.81 square to the camera, and it collapses toward 0.2 in profile.
+    facing_shoulder_min: float = 0.45
+
     # ── Leg-raise guard ───────────────────────────────────────────────────
     # If both knees rise this far above shoulder level (frame fraction of
     # height — this one stays frame-relative because it is a coarse
@@ -322,6 +344,7 @@ class ArmTrackerConfig:
     detect_cross_arms: bool = True
     detect_t_pose: bool = True
     detect_both_up: bool = True
+    detect_folded_arms: bool = True
 
     # ── Detection quality ─────────────────────────────────────────────────
     # At least ONE shoulder must exceed this confidence. Uses max (not
@@ -712,6 +735,44 @@ class ArmTracker:
                 axis: positive = toward this person's left shoulder."""
                 return ((p[0] - sh_mid[0]) * axis[0]
                         + (p[1] - sh_mid[1]) * axis[1])
+
+            # Chest band, shared by the two folded-style poses: between the
+            # shoulder line and the hip line, with a little slack at each end.
+            def _chest_band(pad_frac: float):
+                pad = pad_frac * (torso_len or shoulder_w)
+                bottom = (hip_mid[1] if hip_mid is not None
+                          else sh_mid[1] + 1.2 * shoulder_w)
+                return sh_mid[1] - pad, bottom + pad
+
+            # FOLDED_ARMS: hands brought together at the centre of the chest,
+            # facing the camera, sitting or standing.
+            #
+            # Tested before CROSS_ARMS because it is the stricter pose: it
+            # additionally demands the wrists stay NEAR the midline rather
+            # than crossing past it, that the arms be bent, that the body be
+            # square to the camera, and that it be upright.
+            if self.c.detect_folded_arms and shoulder_w > 1e-6 and torso_len > 1e-6:
+                fold_top, fold_bottom = _chest_band(self.c.folded_chest_pad)
+                near_mid = (self.c.folded_midline_max * shoulder_w)
+                hands_together = (
+                    _dist(lw, rw) <= self.c.folded_wrist_proximity * shoulder_w
+                    and abs(_toward_left(lw)) <= near_mid
+                    and abs(_toward_left(rw)) <= near_mid)
+                at_chest = (fold_top < lw[1] < fold_bottom
+                            and fold_top < rw[1] < fold_bottom)
+                bent = (l_ext <= self.c.folded_extension_max
+                        and r_ext <= self.c.folded_extension_max)
+                # Square to the camera. In profile the wrists overlap in the
+                # image whatever the hands are doing, so without this the
+                # pose is trivially satisfied by someone turned side-on.
+                facing = shoulder_w >= self.c.facing_shoulder_min * torso_len
+                # Sitting or standing only. Reclining is deliberately
+                # excluded: lying down, forearms resting on the chest are
+                # indistinguishable from this pose, and that is most of what
+                # a couch-facing camera sees at night.
+                if hands_together and at_chest and bent and facing and upright:
+                    return ArmReading(state=ArmState.FOLDED_ARMS,
+                                      upright=bool(upright))
 
             # CROSS_ARMS: each wrist past the body midline onto the OTHER
             # side, at chest height, wrists close together. Distances are

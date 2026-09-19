@@ -311,6 +311,27 @@ REGISTRY: list[SettingField] = [
     SettingField("gesture_raise_both_enable", bool, True,
                   "Fire the RAISE_BOTH gesture. Turn off gestures you do not use — they still send HA events and can suppress ones you do use",
                   group="Gesture", user_facing=True),
+    SettingField("gesture_folded_arms_enable", bool, True,
+                  "Fire the FOLDED_ARMS gesture — hands folded together at the chest, "
+                  "facing the camera, sitting or standing. Reclining is excluded on "
+                  "purpose: lying down, forearms on the chest look identical",
+                  group="Gesture", user_facing=True),
+    SettingField("folded_wrist_proximity", float, 0.50,
+                  "FOLDED_ARMS: how close the wrists must be, in shoulder widths",
+                  group="Gesture"),
+    SettingField("folded_midline_max", float, 0.35,
+                  "FOLDED_ARMS: how far each wrist may sit from the body midline, in "
+                  "shoulder widths. Must stay below cross_arms_min_crossing or the two "
+                  "poses overlap",
+                  group="Gesture"),
+    SettingField("folded_extension_max", float, 0.80,
+                  "FOLDED_ARMS: maximum arm straightness — folded arms are bent arms",
+                  group="Gesture"),
+    SettingField("facing_shoulder_min", float, 0.45,
+                  "FOLDED_ARMS: minimum shoulder width as a fraction of torso length, "
+                  "below which the body is not square to the camera. In profile the "
+                  "wrists overlap in the image whatever the hands are doing",
+                  group="Gesture"),
     SettingField("cross_gesture_cooldown_s", float, 0.5,
                   "Minimum seconds before a DIFFERENT gesture type may fire. Deliberately "
                   "short — its only job is to stop one gesture's residual motion triggering "

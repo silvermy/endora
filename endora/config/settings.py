@@ -311,6 +311,11 @@ class Settings:
     gesture_cross_arms_enable: bool = True
     gesture_t_pose_enable: bool = True
     gesture_raise_both_enable: bool = True
+    gesture_folded_arms_enable: bool = True
+    folded_wrist_proximity: float = 0.50
+    folded_midline_max: float = 0.35
+    folded_extension_max: float = 0.80
+    facing_shoulder_min: float = 0.45
 
     # ── Fusion ────────────────────────────────────────────────────────────
     # Advanced: override in settings.yaml if needed
