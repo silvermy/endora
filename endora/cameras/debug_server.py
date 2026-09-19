@@ -56,6 +56,10 @@ _debug_port: int = 8765
 # Frames are rendered only while someone is actually looking. Generous enough
 # to span a slow poll or a browser tab briefly backgrounded, short enough that
 # a closed page stops costing anything within seconds.
+_AUDIO_TYPES = {".wav": "audio/wav", ".mp3": "audio/mpeg",
+                ".ogg": "audio/ogg", ".flac": "audio/flac",
+                ".m4a": "audio/mp4", ".aac": "audio/aac"}
+
 _VIEWER_TIMEOUT_S = 5.0
 _last_viewed: float = 0.0
 
@@ -1319,19 +1323,29 @@ class _Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(msg)
 
-        elif parsed.path == "/chime.wav":
+        elif parsed.path == "/chime.wav" or parsed.path.startswith("/sound/"):
+            # /chime.wav is the original single-sound path, kept because
+            # installs carry that URL in Home Assistant's saved media player
+            # config. /sound/<name> serves any bundled clip — a gesture with
+            # its own sound needs more than one.
             from pathlib import Path as _Path
-            _wav = _Path(__file__).parent / "static" / "chime.wav"
-            if _wav.exists():
-                body = _wav.read_bytes()
+            name = ("chime.wav" if parsed.path == "/chime.wav"
+                    else parsed.path[len("/sound/"):])
+            static = _Path(__file__).parent / "static"
+            clip = (static / name).resolve()
+            # Confine to the static directory: the name arrives from a URL,
+            # and "../" in it would otherwise read any file on the host.
+            if clip.parent != static.resolve() or not clip.is_file():
+                self.send_response(404); self.end_headers()
+            else:
+                body = clip.read_bytes()
                 self.send_response(200)
-                self.send_header("Content-Type", "audio/wav")
+                self.send_header("Content-Type", _AUDIO_TYPES.get(
+                    clip.suffix.lower(), "application/octet-stream"))
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "public, max-age=86400")
                 self.end_headers()
                 self.wfile.write(body)
-            else:
-                self.send_response(404); self.end_headers()
 
         elif parsed.path == "/log":
             since = float(qs.get("since", ["0"])[0])

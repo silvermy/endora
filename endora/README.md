@@ -24,7 +24,7 @@ All gestures are detected from body pose alone — no hand detection required. T
 | `endora-raise-both` | Raise both arms straight up and hold for `sustain_s` (default 0.5s) |
 | `endora-t-pose` | Extend both arms horizontally to the sides, hold for `sustain_s` |
 | `endora-cross-arms` | Cross arms in front of chest (each wrist near opposite shoulder), hold for `sustain_s` |
-| `endora-folded-arms` | Fold your hands together at your chest, facing the camera, sitting or standing — hold for `sustain_s` |
+| `endora-folded-arms` | Fold your hands together at your chest, facing the camera, sitting or standing — hold for `sustain_s`. Plays its own sound rather than the arm-raise chime |
 
 FOLDED_ARMS is the only gesture with posture and orientation requirements,
 and both are deliberate. Turned side-on, the two wrists overlap in the image

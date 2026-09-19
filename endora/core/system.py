@@ -25,6 +25,13 @@ from output.chime import make_chime_notifier
 
 log = logging.getLogger(__name__)
 
+# Gestures that get their own sound, distinct from the arm-raise chime.
+# Keyed by Gesture so the mapping is checked by the type system rather than
+# by a string that could drift from the enum.
+_GESTURE_SOUNDS = {
+    Gesture.FOLDED_ARMS: "folded_arms.mp3",
+}
+
 
 class GestureSystem:
 
@@ -73,10 +80,21 @@ class GestureSystem:
 
         # Optional chime on arm-up transitions
         self._chime = None
+        # Per-gesture sounds, played when the gesture itself fires rather than
+        # on the arm-raise that precedes it. FOLDED_ARMS raises no arm, so the
+        # confirmation chime never reaches it — without this the gesture is
+        # silent. Each notifier keeps its own debounce clock, so one sound
+        # cannot mute another.
+        self._gesture_chimes: dict = {}
         chime_on = getattr(settings, "chime_enable", False)
         if chime_on:
             chime_url = _install_chime_wav(self._host_ip, settings.debug_port)
             self._chime = make_chime_notifier(settings, chime_url)
+            for gesture, filename in _GESTURE_SOUNDS.items():
+                url = _install_sound(filename, self._host_ip, settings.debug_port)
+                notifier = make_chime_notifier(settings, url) if url else None
+                if notifier is not None:
+                    self._gesture_chimes[gesture] = notifier
 
         dbg_cb = debug_server.update_frame if self._debug_enabled else None
         # Only render the live overlay while someone is watching it — see
@@ -173,6 +191,9 @@ class GestureSystem:
         # Update UI immediately — don't wait for the HTTP round-trip to HA
         if self._debug_enabled:
             debug_server.notify_gesture(str(gesture))
+        sound = self._gesture_chimes.get(gesture)
+        if sound is not None:
+            sound.notify()
         self.feedback.on_gesture_fired(gesture.name, confidence, reading=None)
         # Fire HA event in a background thread so it never stalls the pipeline
         threading.Thread(
@@ -206,7 +227,13 @@ class GestureSystem:
 
 def _install_chime_wav(host_ip: str = "", debug_port: int = 0,
                        media_dir: "Path | None" = None) -> str:
-    """Return a URL Home Assistant can hand to a speaker for the chime.
+    """The arm-raise confirmation chime. See _install_sound."""
+    return _install_sound("chime.wav", host_ip, debug_port, media_dir)
+
+
+def _install_sound(filename: str, host_ip: str = "", debug_port: int = 0,
+                   media_dir: "Path | None" = None) -> str:
+    """Return a URL Home Assistant can hand to a speaker for *filename*.
 
     Two routes, because the two deployments have different access to HA:
 
@@ -227,11 +254,12 @@ def _install_chime_wav(host_ip: str = "", debug_port: int = 0,
     import hashlib
     import shutil
     from pathlib import Path
-    src = Path(__file__).parent.parent / "cameras" / "static" / "chime.wav"
+    src = Path(__file__).parent.parent / "cameras" / "static" / filename
     if not src.exists():
-        log.error("Chime: bundled chime.wav not found at %s", src)
+        log.error("Sound: bundled %s not found at %s", filename, src)
         return ""
     digest = hashlib.sha256(src.read_bytes()).hexdigest()[:8]
+    stem, suffix = src.stem, src.suffix
 
     # Injectable so the two routes can be tested without a real /media.
     media_dir = Path("/media") if media_dir is None else media_dir
@@ -244,39 +272,41 @@ def _install_chime_wav(host_ip: str = "", debug_port: int = 0,
     # until someone cleaned up, then would have failed with nothing in the
     # log to explain why.
     if deployment.is_addon() and media_dir.is_dir():
-        dest = media_dir / f"endora_chime_{digest}.wav"
+        dest = media_dir / f"endora_{stem}_{digest}{suffix}"
         try:
             shutil.copy2(src, dest)
             # Drop clips we installed for previous versions of the sound.
-            for stale in media_dir.glob("endora_chime*.wav"):
+            # Scoped to THIS sound's stem: a shared glob would have each
+            # sound delete the others every startup.
+            for stale in media_dir.glob(f"endora_{stem}_*{suffix}"):
                 if stale != dest:
                     try:
                         stale.unlink()
-                        log.info("Chime: removed superseded %s", stale.name)
+                        log.info("Sound: removed superseded %s", stale.name)
                     except Exception as e:
-                        log.debug("Chime: could not remove %s: %s", stale.name, e)
-            log.info("Chime: installed %s → %s", src.name, dest)
+                        log.debug("Sound: could not remove %s: %s", stale.name, e)
+            log.info("Sound: installed %s → %s", src.name, dest)
             return f"media-source://media_source/local/{dest.name}"
         except PermissionError:
             log.warning(
-                "Chime: cannot write to /media (uid=%d permissions=%s) — "
+                "Sound: cannot write to /media (uid=%d permissions=%s) — "
                 "try adding 'full_access: true' to the add-on config",
                 os.getuid(), oct(media_dir.stat().st_mode),
             )
         except Exception as e:
-            log.warning("Chime: copy to /media failed: %s", e)
+            log.warning("Sound: copy to /media failed: %s", e)
         # Fall through — the HTTP route below may still work.
 
     # Standalone route. The query string is what carries the digest; the
     # debug server matches on path alone, so /chime.wav serves it unchanged
     # while the URL a cache keys on still moves with the audio.
     if debug_port > 0 and host_ip:
-        url = f"http://{host_ip}:{debug_port}/chime.wav?v={digest}"
-        log.info("Chime: serving from the debug server at %s", url)
+        url = f"http://{host_ip}:{debug_port}/sound/{src.name}?v={digest}"
+        log.info("Sound: serving %s from the debug server at %s", src.name, url)
         return url
 
     log.warning(
-        "Chime: no way to serve the audio — /media is not mounted (expected "
+        "Sound: no way to serve the audio — /media is not mounted (expected "
         "outside the HA add-on) and the debug server is disabled. Set "
         "debug_port to a real port so the speaker can fetch the clip from "
         "this host.")
