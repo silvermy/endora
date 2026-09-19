@@ -109,3 +109,56 @@ def test_path_traversal_is_refused(attack):
     static = STATIC.resolve()
     clip = (STATIC / attack).resolve()
     assert clip.parent != static or not clip.is_file()
+
+
+# ── exactly one sound per gesture ─────────────────────────────────────────────
+
+class _Notifier:
+    def __init__(self, name): self.name, self.plays = name, 0
+    def notify(self): self.plays += 1
+
+
+def _system_with(gesture_sounds):
+    """A GestureSystem stub carrying just the sound-selection logic."""
+    sysobj = sys_mod.GestureSystem.__new__(sys_mod.GestureSystem)
+    sysobj._chime = _Notifier("chime")
+    sysobj._gesture_chimes = gesture_sounds
+    return sysobj
+
+
+def test_a_mapped_gesture_plays_only_its_own_sound():
+    """The bug this replaces: the analyser played the chime for every gesture
+    and the per-gesture sound was played somewhere else, so both reached the
+    speaker a millisecond apart. With announce:true the second replaces the
+    first, and the gesture's own sound was audible only if it won that race —
+    reported as "I got a bewitched sound, not genie".
+    """
+    jeannie = _Notifier("jeannie")
+    s = _system_with({Gesture.FOLDED_ARMS: jeannie})
+    s._play_gesture_sound(Gesture.FOLDED_ARMS)
+    assert (jeannie.plays, s._chime.plays) == (1, 0)
+
+
+def test_an_unmapped_gesture_still_gets_the_chime():
+    jeannie = _Notifier("jeannie")
+    s = _system_with({Gesture.FOLDED_ARMS: jeannie})
+    s._play_gesture_sound(Gesture.SNAP)
+    assert (jeannie.plays, s._chime.plays) == (0, 1)
+
+
+def test_no_chime_configured_is_harmless():
+    s = _system_with({})
+    s._chime = None
+    s._play_gesture_sound(Gesture.SNAP)          # must not raise
+
+
+def test_the_analyser_defers_to_the_callback():
+    """The analyser must not also fire its own chime when a callback is set,
+    or the two sounds race again."""
+    import inspect
+    from cameras import analyser
+    src = inspect.getsource(analyser.CameraAnalyser._run)
+    block = src.split("Guarantee the sound accompanies a real gesture")[1][:1600]
+    assert "self._gesture_sound_cb(gesture)" in block
+    assert "elif self._chime is not None" in block, \
+        "the chime path must be an ELSE, not a second unconditional play"

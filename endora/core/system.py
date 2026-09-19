@@ -121,6 +121,7 @@ class GestureSystem:
             debug_wanted_cb=dbg_wanted,
             feedback_logger=self.feedback,
             chime_notifier=self._chime,
+            gesture_sound_cb=self._play_gesture_sound,
             num_threads=model_threads,
         )
         self.analyser_a._recorder = self._recorder
@@ -134,6 +135,7 @@ class GestureSystem:
             debug_wanted_cb=dbg_wanted,
             feedback_logger=self.feedback,
             chime_notifier=self._chime,
+            gesture_sound_cb=self._play_gesture_sound,
             num_threads=model_threads,
         )
         if self.analyser_b:
@@ -182,6 +184,12 @@ class GestureSystem:
             self.cam_b.stop()
         self.backend.close()
 
+    def _play_gesture_sound(self, gesture: Gesture) -> None:
+        """One sound per gesture: its own if it has one, else the chime."""
+        notifier = self._gesture_chimes.get(gesture) or self._chime
+        if notifier is not None:
+            notifier.notify()
+
     def _on_suppressed(self, gesture_name: str, reason: str) -> None:
         """A gesture fired in the analyser but never reached Home Assistant."""
         if self.feedback:
@@ -191,9 +199,6 @@ class GestureSystem:
         # Update UI immediately — don't wait for the HTTP round-trip to HA
         if self._debug_enabled:
             debug_server.notify_gesture(str(gesture))
-        sound = self._gesture_chimes.get(gesture)
-        if sound is not None:
-            sound.notify()
         self.feedback.on_gesture_fired(gesture.name, confidence, reading=None)
         # Fire HA event in a background thread so it never stalls the pipeline
         threading.Thread(

@@ -559,6 +559,7 @@ class CameraAnalyser(threading.Thread):
         debug_wanted_cb=None,
         feedback_logger=None,
         chime_notifier=None,
+        gesture_sound_cb=None,
         num_threads: int = 0,
     ):
         super().__init__(daemon=True, name=f"Analyser-{label}")
@@ -574,6 +575,11 @@ class CameraAnalyser(threading.Thread):
         self._stop_evt = threading.Event()
         self._feedback = feedback_logger
         self._chime = chime_notifier
+        # Picks the sound for a fired gesture — some have their own, the rest
+        # get the confirmation chime. Owned by GestureSystem, which holds the
+        # mapping; the analyser must not play both, which is what happened
+        # when the two were decided in different places.
+        self._gesture_sound_cb = gesture_sound_cb
         self._near_miss_cb = feedback_logger.on_near_miss if feedback_logger else None
 
         # CLAHE cache — object is expensive; recreate only when clip changes.
@@ -1118,7 +1124,17 @@ class CameraAnalyser(threading.Thread):
                     # sweep-onset chime above is only a head start on speaker
                     # latency and may not have fired (a sustained pose has no
                     # sweep at all); chime_debounce_s dedupes when it did.
-                    if self._chime is not None:
+                    #
+                    # Exactly one sound per gesture: the callback decides
+                    # which. Firing the chime here AND a per-gesture sound
+                    # elsewhere sent two clips to the speaker a millisecond
+                    # apart, where announce:true makes the second replace the
+                    # first — so the gesture's own sound was audible only if
+                    # it happened to win the race.
+                    if self._gesture_sound_cb is not None:
+                        entry.chimed_this_sweep = True
+                        self._gesture_sound_cb(gesture)
+                    elif self._chime is not None:
                         entry.chimed_this_sweep = True
                         self._chime.notify()
                     self.on_candidate(gesture, 1.0, self.label)
