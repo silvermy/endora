@@ -293,6 +293,18 @@ REGISTRY: list[SettingField] = [
     SettingField("cooldown_s", float, 2.0,
                   "Minimum seconds between any two gestures", group="Fusion", user_facing=True,
                   ui=UIMeta("Cooldown (s)", "slider", 0, 10, 0.25, "Gesture", order=3)),
+    SettingField("flourish_max_rate", float, 4.00,
+                  "Upper bound on sweep rate. The minimum alone rewards nonsense: "
+                  "rate is climb over the interval it happened in, so a keypoint "
+                  "jumping between two adjacent samples reports an enormous one. "
+                  "Recorded false snaps measured 8.82/s and 15.25/s; every genuine "
+                  "one sat between 0.89 and 1.85",
+                  group="Gesture", user_facing=True),
+    SettingField("folded_hip_visibility_min", float, 0.50,
+                  "FOLDED_ARMS: minimum hip keypoint confidence. Every threshold for "
+                  "this gesture is a fraction of torso length, measured shoulder to "
+                  "hip — invisible hips mean thresholds scaled by a guess",
+                  group="Gesture"),
     SettingField("gesture_snap_enable", bool, True,
                   "Fire the SNAP gesture. Turn off gestures you do not use — they still send HA events and can suppress ones you do use",
                   group="Gesture", user_facing=True),
@@ -437,6 +449,7 @@ GESTURE_CRITICAL: list[str] = [
     "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
     "snap_elevation_min", "snap_sustain_s",
     "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
+    "flourish_max_rate", "folded_hip_visibility_min",
     "gesture_snap_enable", "gesture_cross_arms_enable",
     "gesture_t_pose_enable", "gesture_raise_both_enable",
     "gesture_folded_arms_enable", "facing_shoulder_min",

@@ -62,8 +62,16 @@ def _run(angles, fps=10.0, **cfg):
     return fired
 
 
-SWEEP_UP = [0, 25, 55, 90, 120, 150, 170, 178]
-SWEEP_DOWN = [178, 165, 140, 100, 60, 25, 0]
+# Sampled twice as finely as the first version, because the first version
+# was not physically possible. Recorded traces from the deployed camera put a
+# real snap's sweep rate between 0.89 and 1.85 elevation units per second;
+# the old eight-sample arc produced 3.00-5.62 depending on frame rate. Every
+# flourish threshold here was therefore validated against an arm moving two
+# to three times faster than a human one — which is how a rate CEILING, the
+# thing that separates a gesture from keypoint flicker at 8.82/s, went
+# eleven months unnoticed.
+SWEEP_UP = [0, 12, 25, 40, 55, 72, 90, 105, 120, 135, 150, 160, 170, 174, 178]
+SWEEP_DOWN = [178, 172, 165, 152, 140, 120, 100, 80, 60, 42, 25, 12, 0]
 
 
 def test_flourish_fires():
@@ -203,7 +211,13 @@ def test_holding_the_arm_up_does_not_dilute_the_rate():
     """
     tr = ArmTracker(ArmTrackerConfig())
     rates = []
-    seq = SWEEP_UP + [178] * 20
+    # Held for a second, not two: the ascent itself now takes 1.5 s (the
+    # fixture was made physical — see SWEEP_UP), and flourish_window_s is
+    # 2.5 s, so a longer hold pushes the ascent's starting point out of the
+    # window entirely. That is the window expiring by design, not the rate
+    # being diluted, and conflating the two is what this test exists to
+    # avoid.
+    seq = SWEEP_UP + [178] * 10
     for i, ang in enumerate(seq):
         r = tr.classify(_pose(ang), W, H, None, now=i / 10.0)
         if r is not None and r.state == ArmState.SINGLE_UP:
@@ -306,3 +320,27 @@ def test_a_blocked_gesture_is_reported_even_without_a_feedback_logger():
 
     msgs = " ".join(r.getMessage() for r in records)
     assert "no_flourish" in msgs, f"blocked reason was not logged: {msgs!r}"
+
+
+def test_an_impossible_sweep_rate_is_rejected():
+    """The false snaps, from recorded traces on the deployed camera.
+
+    rate is a climb divided by the interval it happened in, so a keypoint
+    that jumps between two adjacent samples reports an enormous one. One
+    false snap measured 8.82/s and an earlier one 15.25/s, while the genuine
+    snaps in the same recordings sit between 0.89 and 1.85. flourish_min_rate
+    was a floor with no ceiling, so the more impossible the reading, the more
+    convincingly it passed — the same shape of bug as extension scoring 1.00
+    for a collapsed elbow.
+    """
+    from cameras.analyser import _sweep_meets_flourish
+    from cameras.arm_tracker import ArmReading, ArmState
+
+    def r(rate):
+        return ArmReading(state=ArmState.SINGLE_UP, sweep_climb=1.70,
+                          sweep_rate=rate)
+
+    for real in (0.89, 1.19, 1.85, 2.85):          # measured, plus fixture peak
+        assert _sweep_meets_flourish(r(real), 0.60, 0.80), real
+    for impossible in (8.82, 15.25, 31.0):         # measured false positives
+        assert not _sweep_meets_flourish(r(impossible), 0.60, 0.80), impossible

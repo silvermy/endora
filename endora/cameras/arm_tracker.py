@@ -324,6 +324,13 @@ class ArmTrackerConfig:
     # sternum. This is the measurement that separates the gesture from the
     # default posture on that couch.
     folded_chest_depth: float = 0.45
+    # Every folded-arms threshold is a fraction of TORSO length, which is
+    # measured shoulder-to-hip — so a person whose hips the model cannot see
+    # gets thresholds scaled by a guess. A false positive recorded at 14:46
+    # had hip confidence 0.29 and shoulders 40 px against 80-108 px for the
+    # real ones; its hands read as ABOVE the shoulder line. No other gesture
+    # divides by torso, which is why this guard lives here and not globally.
+    folded_hip_visibility_min: float = 0.50
     # Folded arms are bent arms: hands at the chest with the elbows out puts
     # extension well under a straight arm's 0.80. Requiring the bend keeps a
     # pair of hands resting low and straight from qualifying.
@@ -759,7 +766,9 @@ class ArmTracker:
             # additionally demands the wrists stay NEAR the midline rather
             # than crossing past it, that the arms be bent, that the body be
             # square to the camera, and that it be upright.
-            if self.c.detect_folded_arms and shoulder_w > 1e-6 and torso_len > 1e-6:
+            if (self.c.detect_folded_arms and shoulder_w > 1e-6
+                    and torso_len > 1e-6
+                    and hip_vis >= self.c.folded_hip_visibility_min):
                 fold_top = sh_mid[1] - self.c.folded_chest_pad * torso_len
                 fold_bottom = sh_mid[1] + self.c.folded_chest_depth * torso_len
                 near_mid = (self.c.folded_midline_max * shoulder_w)

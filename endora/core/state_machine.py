@@ -94,6 +94,13 @@ class StateMachineConfig:
     # 0; a deliberate flourish runs 2-3. 0.80 leaves room for a slow,
     # unhurried sweep without admitting drift.
     flourish_min_rate: float = 0.80
+    # …and an upper bound, because the minimum alone rewards nonsense. The
+    # rate is a climb divided by the interval it happened in, so a keypoint
+    # that jumps between two adjacent samples reports an enormous one. A
+    # false snap measured 8.82/s and an earlier one 15.25/s, while every
+    # genuine snap recorded here sits between 0.89 and 1.85. An arm does not
+    # sweep faster than this; a detector glitch does.
+    flourish_max_rate: float = 4.00
 
     # Legacy hold-style gating, used only when snap_require_flourish is off:
     # require the arm to have risen, and to be held still, before firing.
@@ -269,7 +276,8 @@ class GestureStateMachine:
         # weaker "did it rise, and is it being held?".
         if self.c.snap_require_flourish:
             if (reading.sweep_climb >= self.c.flourish_min_climb
-                    and reading.sweep_rate >= self.c.flourish_min_rate):
+                    and self.c.flourish_min_rate <= reading.sweep_rate
+                        <= self.c.flourish_max_rate):
                 r.flourish_seen = True
             gate_ok = r.flourish_seen
             rise_ok = still_ok = True
@@ -314,7 +322,8 @@ class GestureStateMachine:
                             f"climb={reading.sweep_climb:.2f} "
                             f"(need {self.c.flourish_min_climb:.2f}), "
                             f"rate={reading.sweep_rate:.2f}/s "
-                            f"(need {self.c.flourish_min_rate:.2f})",
+                            f"(need {self.c.flourish_min_rate:.2f}"
+                            f"-{self.c.flourish_max_rate:.2f})",
                             reading)
                 elif not rise_ok:
                     if "no_rise" not in r.gates_logged:

@@ -525,7 +525,8 @@ class _StageTimer:
         self._started = time.monotonic()
 
 
-def _sweep_meets_flourish(reading, climb_min: float, rate_min: float) -> bool:
+def _sweep_meets_flourish(reading, climb_min: float, rate_min: float,
+                          rate_max: float = 4.00) -> bool:
     """Does this reading show a sweep worth chiming for?
 
     Requires BOTH terms of the gesture gate, and that the arm actually
@@ -546,7 +547,7 @@ def _sweep_meets_flourish(reading, climb_min: float, rate_min: float) -> bool:
     if getattr(reading, 'state', None) is not ArmState.SINGLE_UP:
         return False
     return (float(getattr(reading, 'sweep_climb', 0.0)) >= climb_min
-            and float(getattr(reading, 'sweep_rate', 0.0)) >= rate_min)
+            and rate_min <= float(getattr(reading, 'sweep_rate', 0.0)) <= rate_max)
 
 
 class CameraAnalyser(threading.Thread):
@@ -631,6 +632,7 @@ class CameraAnalyser(threading.Thread):
             folded_wrist_proximity=float(getattr(s, 'folded_wrist_proximity', 0.50)),
             folded_midline_max=float(getattr(s, 'folded_midline_max', 0.35)),
             folded_chest_depth=float(getattr(s, 'folded_chest_depth', 0.45)),
+            folded_hip_visibility_min=float(getattr(s, 'folded_hip_visibility_min', 0.50)),
             folded_extension_max=float(getattr(s, 'folded_extension_max', 0.80)),
             facing_shoulder_min=float(getattr(s, 'facing_shoulder_min', 0.45)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
@@ -650,6 +652,7 @@ class CameraAnalyser(threading.Thread):
             snap_require_flourish=bool(getattr(s, 'snap_require_flourish', True)),
             flourish_min_climb=float(getattr(s, 'flourish_min_climb', 0.60)),
             flourish_min_rate=float(getattr(s, 'flourish_min_rate', 0.80)),
+            flourish_max_rate=float(getattr(s, 'flourish_max_rate', 4.00)),
             snap_require_rise=bool(getattr(s, 'snap_require_rise', True)),
             snap_require_still=bool(getattr(s, 'snap_require_still', False)),
             sustained_rearm_s=float(getattr(s, 'sustained_rearm_s', 2.0)),
@@ -1121,7 +1124,8 @@ class CameraAnalyser(threading.Thread):
                     _sweeping = _sweep_meets_flourish(
                         reading,
                         float(getattr(self.s, 'flourish_min_climb', 0.60)),
-                        float(getattr(self.s, 'flourish_min_rate', 0.80)))
+                        float(getattr(self.s, 'flourish_min_rate', 0.80)),
+                        float(getattr(self.s, 'flourish_max_rate', 4.00)))
                     if self._chime is not None:
                         if _sweeping and not entry.chimed_this_sweep:
                             entry.chimed_this_sweep = True

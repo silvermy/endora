@@ -260,6 +260,7 @@ class Settings:
     # 0, a deliberate flourish runs 2–3. 0.80 leaves room for an unhurried
     # sweep without admitting slow drift.
     flourish_min_rate: float = 0.80
+    flourish_max_rate: float = 4.00
     # Legacy hold-style gates — used only when snap_require_flourish is off.
     snap_require_rise: bool = True
     snap_require_still: bool = False
@@ -315,6 +316,7 @@ class Settings:
     folded_wrist_proximity: float = 0.50
     folded_midline_max: float = 0.35
     folded_chest_depth: float = 0.45
+    folded_hip_visibility_min: float = 0.50
     folded_extension_max: float = 0.80
     facing_shoulder_min: float = 0.45
 
