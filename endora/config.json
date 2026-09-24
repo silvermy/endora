@@ -1,6 +1,6 @@
 {
   "name": "Endora",
-  "version": "1.9.178",
+  "version": "1.9.179",
   "slug": "endora",
   "description": "Pose-based gesture detection — SNAP, HOLD, DOUBLE_SNAP, CROSS_ARMS, T_POSE, RAISE_BOTH.",
   "url": "https://github.com/silvermy/endora",
@@ -42,7 +42,7 @@
     "rise_elevation_delta": 0.35,
     "rise_start_elevation_max": 0.35,
     "state_confirm_s": 0.2,
-    "state_release_s": 0.3,
+    "state_release_s": 0.45,
     "cooldown_s": 2.0,
     "flourish_max_rate": 4.0,
     "gesture_snap_enable": true,
@@ -72,6 +72,7 @@
     "debug_port": 0,
     "hold_duration_s": 1.5,
     "double_snap_window_s": 3.0,
+    "sustain_gap_s": 0.85,
     "sustain_s": 0.5,
     "sustained_rearm_s": 2.0
   },
@@ -139,6 +140,7 @@
     "debug_port": "int",
     "hold_duration_s": "float",
     "double_snap_window_s": "float",
+    "sustain_gap_s": "float",
     "sustain_s": "float",
     "sustained_rearm_s": "float"
   },

@@ -323,14 +323,31 @@ class ArmTrackerConfig:
     # 0.6-0.9 down. Folding your hands at your chest puts them near the
     # sternum. This is the measurement that separates the gesture from the
     # default posture on that couch.
-    folded_chest_depth: float = 0.45
+    # …measured in SHOULDER WIDTHS, not torso lengths. Folding your arms in
+    # front of your body hides your own hips: recorded traces of the real
+    # gesture show hip confidence collapsing to 0.06-0.44, and with it the
+    # torso length every threshold here used to divide by. In the worst
+    # frames "shoulder width over torso" read 1.29-1.78 — wider than the
+    # torso is long — which is not a body, it is a guessed hip. Shoulders
+    # stay visible throughout, so they are the scale this gesture measures
+    # against.
+    folded_chest_depth: float = 0.55
     # Every folded-arms threshold is a fraction of TORSO length, which is
     # measured shoulder-to-hip — so a person whose hips the model cannot see
     # gets thresholds scaled by a guess. A false positive recorded at 14:46
     # had hip confidence 0.29 and shoulders 40 px against 80-108 px for the
     # real ones; its hands read as ABOVE the shoulder line. No other gesture
     # divides by torso, which is why this guard lives here and not globally.
-    folded_hip_visibility_min: float = 0.50
+    # Under-resolution guard, replacing a hip-visibility one that rejected
+    # the real gesture for the same reason it rejected the false positive.
+    # Shoulder width over head height separates them cleanly on recorded
+    # data: 2.52-4.56 for genuine folded arms, 1.05 for the under-resolved
+    # detection that fired at a laptop. Both are upper-body measurements, so
+    # neither depends on hips the pose itself conceals.
+    folded_resolution_min: float = 1.60
+    # Minimum confidence across the four keypoints this gesture actually
+    # reads. Genuine captures: 0.60-1.00. The false positive: 0.39.
+    folded_visibility_min: float = 0.50
     # Folded arms are bent arms: hands at the chest with the elbows out puts
     # extension well under a straight arm's 0.80. Requiring the bend keeps a
     # pair of hands resting low and straight from qualifying.
@@ -373,8 +390,21 @@ class ArmTrackerConfig:
     # ── Hysteresis ────────────────────────────────────────────────────────
     # Seconds a new non-DOWN state must be seen before being accepted.
     state_confirm_s: float = 0.20
+    # How long a candidate state may go unseen and still continue building
+    # toward state_confirm_s. Without this, ONE contradicting frame discards
+    # the whole accumulator — and recorded traces of folded arms show the
+    # wrist keypoints flickering every second or third frame, because two
+    # hands pressed together look like one blob to the model. The pose was
+    # held steadily for a second and the tracker confirmed it zero times.
+    confirm_gap_s: float = 0.40
     # Seconds of contradictory frames before releasing a stable state.
-    state_release_s: float = 0.30
+    # 0.45, not 0.30. Measured on a recorded hold: the tracker confirmed
+    # FOLDED_ARMS, accumulated 0.45 s of the 0.50 s sustain, and was then
+    # released 0.02 s before the gesture would have fired — because the
+    # wrist keypoints flicker while two folded hands occlude each other.
+    # Every genuine capture now fires and the under-resolved false positive
+    # still does not.
+    state_release_s: float = 0.45
 
     # ── Trajectory (rise / stillness evidence for SNAP) ───────────────────
     raise_travel_window_s: float = 2.5
@@ -414,6 +444,7 @@ class ArmTracker:
         self._stable_reading: Optional[ArmReading] = None
         self._pending_state: Optional[ArmState] = None
         self._pending_since: float = 0.0
+        self._pending_last: float = 0.0
         # Rolling per-arm history for the trajectory checks.
         self._hist: Deque[_HistSample] = deque()
 
@@ -580,6 +611,7 @@ class ArmTracker:
             if self._pending_state != raw_state:
                 self._pending_state = raw_state
                 self._pending_since = now
+            self._pending_last = now
 
             if (now - self._pending_since) >= self._confirm_needed(raw):
                 self._stable_reading = raw
@@ -591,12 +623,18 @@ class ArmTracker:
         stable_state = self._stable_reading.state
         if raw_state == stable_state:
             self._stable_reading = raw if raw is not None else self._stable_reading
-            self._pending_state = None
+            # Keep a candidate alive across a brief contradiction rather than
+            # discarding it: see confirm_gap_s. Clearing here unconditionally
+            # meant a pose only ever confirmed if every single frame agreed.
+            if (self._pending_state is None
+                    or now - self._pending_last > self.c.confirm_gap_s):
+                self._pending_state = None
             return self._stable_reading
 
         if self._pending_state != raw_state:
             self._pending_state = raw_state
             self._pending_since = now
+        self._pending_last = now
 
         needed = (self.c.state_release_s if raw_state == ArmState.DOWN
                   else self._confirm_needed(raw))
@@ -766,12 +804,12 @@ class ArmTracker:
             # additionally demands the wrists stay NEAR the midline rather
             # than crossing past it, that the arms be bent, that the body be
             # square to the camera, and that it be upright.
-            if (self.c.detect_folded_arms and shoulder_w > 1e-6
-                    and torso_len > 1e-6
-                    and hip_vis >= self.c.folded_hip_visibility_min):
-                fold_top = sh_mid[1] - self.c.folded_chest_pad * torso_len
-                fold_bottom = sh_mid[1] + self.c.folded_chest_depth * torso_len
-                near_mid = (self.c.folded_midline_max * shoulder_w)
+            if self.c.detect_folded_arms and shoulder_w > 1e-6:
+                # Everything below is scaled by shoulder width. See
+                # folded_chest_depth for why torso length cannot be used.
+                fold_top = sh_mid[1] - self.c.folded_chest_pad * shoulder_w
+                fold_bottom = sh_mid[1] + self.c.folded_chest_depth * shoulder_w
+                near_mid = self.c.folded_midline_max * shoulder_w
                 hands_together = (
                     _dist(lw, rw) <= self.c.folded_wrist_proximity * shoulder_w
                     and abs(_toward_left(lw)) <= near_mid
@@ -780,15 +818,26 @@ class ArmTracker:
                             and fold_top < rw[1] < fold_bottom)
                 bent = (l_ext <= self.c.folded_extension_max
                         and r_ext <= self.c.folded_extension_max)
-                # Square to the camera. In profile the wrists overlap in the
-                # image whatever the hands are doing, so without this the
-                # pose is trivially satisfied by someone turned side-on.
-                facing = shoulder_w >= self.c.facing_shoulder_min * torso_len
-                # Sitting or standing only. Reclining is deliberately
-                # excluded: lying down, forearms resting on the chest are
-                # indistinguishable from this pose, and that is most of what
-                # a couch-facing camera sees at night.
-                if hands_together and at_chest and bent and facing and upright:
+                # Resolved well enough to trust. A person too small or too
+                # poorly detected to measure produces plausible-looking
+                # ratios out of noise — the laptop false positive had
+                # 40 px shoulders against 80-108 for the real gesture.
+                head_len = _dist(sh_mid, px(NOSE))
+                resolved = (head_len > 1e-6
+                            and shoulder_w / head_len >= self.c.folded_resolution_min
+                            and min(vis(LEFT_SHOULDER), vis(RIGHT_SHOULDER),
+                                    vis(LEFT_WRIST), vis(RIGHT_WRIST))
+                                >= self.c.folded_visibility_min)
+                # Square to the camera, and upright — both from the head and
+                # shoulders alone. Turned side-on the wrists overlap in the
+                # image whatever the hands are doing; lying down, forearms on
+                # the chest are this exact shape, and a couch-facing camera
+                # sees that for hours. The nose sits above the shoulder line
+                # when seated or standing and beside it when reclined.
+                facing = resolved
+                head_up = (sh_mid[1] - px(NOSE)[1]) > 0
+                if (hands_together and at_chest and bent and facing
+                        and head_up and upright is not False):
                     return ArmReading(state=ArmState.FOLDED_ARMS,
                                       upright=bool(upright))
 

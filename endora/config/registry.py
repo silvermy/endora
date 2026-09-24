@@ -283,7 +283,7 @@ REGISTRY: list[SettingField] = [
     SettingField("state_confirm_s", float, 0.20,
                   "Seconds a new arm state must be seen before being accepted",
                   group="Hysteresis", user_facing=True),
-    SettingField("state_release_s", float, 0.30,
+    SettingField("state_release_s", float, 0.45,
                   "Seconds of contradictory frames before dropping a confirmed arm state",
                   group="Hysteresis", user_facing=True),
 
@@ -300,10 +300,16 @@ REGISTRY: list[SettingField] = [
                   "Recorded false snaps measured 8.82/s and 15.25/s; every genuine "
                   "one sat between 0.89 and 1.85",
                   group="Gesture", user_facing=True),
-    SettingField("folded_hip_visibility_min", float, 0.50,
-                  "FOLDED_ARMS: minimum hip keypoint confidence. Every threshold for "
-                  "this gesture is a fraction of torso length, measured shoulder to "
-                  "hip — invisible hips mean thresholds scaled by a guess",
+    SettingField("folded_resolution_min", float, 1.60,
+                  "FOLDED_ARMS: minimum shoulder width over head height. Separates a "
+                  "properly resolved person (2.52-4.56 measured) from a detection too "
+                  "small to measure (1.05 on the one that fired at a laptop), using "
+                  "only upper-body points the pose does not conceal",
+                  group="Gesture"),
+    SettingField("folded_visibility_min", float, 0.50,
+                  "FOLDED_ARMS: minimum confidence across the shoulders and wrists "
+                  "this gesture reads. Genuine captures 0.60-1.00; the false positive "
+                  "0.39",
                   group="Gesture"),
     SettingField("gesture_snap_enable", bool, True,
                   "Fire the SNAP gesture. Turn off gestures you do not use — they still send HA events and can suppress ones you do use",
@@ -336,7 +342,7 @@ REGISTRY: list[SettingField] = [
                   "shoulder widths. Must stay below cross_arms_min_crossing or the two "
                   "poses overlap",
                   group="Gesture"),
-    SettingField("folded_chest_depth", float, 0.45,
+    SettingField("folded_chest_depth", float, 0.55,
                   "FOLDED_ARMS: how far below the shoulder line the hands may sit, "
                   "as a fraction of torso length. The whole torso was accepted at "
                   "first, which includes hands resting on a laptop at roughly 0.6-0.9 "
@@ -429,6 +435,13 @@ REGISTRY: list[SettingField] = [
                   "Seconds after SNAP that arm must stay up to fire HOLD", group="Hysteresis", user_facing=True),
     SettingField("double_snap_window_s", float, 3.0,
                   "Seconds within which two snaps count as DOUBLE_SNAP", group="Hysteresis", user_facing=True),
+    SettingField("sustain_gap_s", float, 0.85,
+                  "How long a sustained pose may go unmatched and still count as held. "
+                  "Folded hands mutually occlude, so the measured wrist gap swings "
+                  "between 0.06 and 0.85 shoulder widths in adjacent frames while the "
+                  "person has not moved — demanding an unbroken run meant firing only "
+                  "when a good frame happened to land under the timer",
+                  group="Hysteresis", user_facing=True),
     SettingField("sustain_s", float, 0.5,
                   "Seconds held for CROSS_ARMS / T_POSE / RAISE_BOTH", group="Hysteresis", user_facing=True),
     SettingField("sustained_rearm_s", float, 2.0,
@@ -449,12 +462,13 @@ GESTURE_CRITICAL: list[str] = [
     "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
     "snap_elevation_min", "snap_sustain_s",
     "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
-    "flourish_max_rate", "folded_hip_visibility_min",
+    "flourish_max_rate", "folded_visibility_min",
     "gesture_snap_enable", "gesture_cross_arms_enable",
     "gesture_t_pose_enable", "gesture_raise_both_enable",
     "gesture_folded_arms_enable", "facing_shoulder_min",
     "folded_wrist_proximity", "folded_midline_max",
     "folded_chest_depth", "folded_extension_max",
+    "folded_resolution_min", "sustain_gap_s",
     # HOLD was missing here while every other gesture flag was listed, and
     # it is the one that most visibly surprises: it fires hold_duration_s
     # after a successful SNAP, from the same raised arm, with its own HA

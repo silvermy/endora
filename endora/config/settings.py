@@ -289,13 +289,14 @@ class Settings:
     # Higher = more stable mid-gesture but slower to release after arm down.
     # 0.60 bridges YOLO pose-detection dropouts that occur when the arm is
     # raised and temporarily changes the body silhouette.
-    state_release_s: float = 0.30
+    state_release_s: float = 0.45
     # Seconds after SNAP that the arm must stay up to also fire HOLD.
     hold_duration_s: float = 1.5
     # Seconds within which two SNAPs count as DOUBLE_SNAP instead of two SNAPs.
     double_snap_window_s: float = 3.0
     # Seconds held for CROSS_ARMS / T_POSE / RAISE_BOTH before firing.
     sustain_s: float = 0.5
+    sustain_gap_s: float = 0.85
     # A sustained-pose gesture fires ONCE per pose entry, then can't re-fire
     # until the pose has been released for this many seconds. Stops sitting
     # with crossed arms from re-firing CROSS_ARMS every cooldown (~100 fires
@@ -315,8 +316,9 @@ class Settings:
     gesture_folded_arms_enable: bool = True
     folded_wrist_proximity: float = 0.50
     folded_midline_max: float = 0.35
-    folded_chest_depth: float = 0.45
-    folded_hip_visibility_min: float = 0.50
+    folded_chest_depth: float = 0.55
+    folded_resolution_min: float = 1.60
+    folded_visibility_min: float = 0.50
     folded_extension_max: float = 0.80
     facing_shoulder_min: float = 0.45
 

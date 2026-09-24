@@ -62,6 +62,9 @@ class StateMachineConfig:
     # This disambiguates transitional poses (e.g. briefly looking like T_POSE
     # while raising both arms).
     sustain_s: float = 0.5
+    # How long a sustained pose may go unmatched and still count as held.
+    # See _SustainState: the pose is steady, the keypoints are not.
+    sustain_gap_s: float = 0.85
 
     # Minimum time the arm must be held up before SNAP fires, measured from
     # the first confirmed SINGLE_UP frame.  ArmTracker already adds state_confirm_s
@@ -151,8 +154,24 @@ class _RaiseState:
 
 @dataclass
 class _SustainState:
-    """How long each sustained-state gesture has been held continuously."""
-    entered_at: dict = field(default_factory=dict)  # ArmState → monotonic time
+    """How long each sustained-state gesture has been held.
+
+    "Held" is deliberately not "matched on every frame". Recorded traces of
+    someone holding folded arms show the wrist keypoints flickering badly —
+    two hands pressed together look like one blob, so the model guesses
+    which wrist is where, and the measured gap swings between 0.06 and 0.85
+    shoulder widths in adjacent frames while the person has not moved. The
+    pose is steady; the measurement of it is not. Demanding an unbroken run
+    meant the gesture fired only when a good frame happened to land under
+    the timer, which reads as "it takes ages to recognise".
+
+    So a pose is tracked from when it was FIRST seen, and forgiven gaps
+    shorter than sustain_gap_s. Loosening the per-frame geometry instead
+    would have re-admitted the laptop pose, which sits inside the flicker.
+    """
+    entered_at: dict = field(default_factory=dict)  # ArmState → first seen
+    last_seen: dict = field(default_factory=dict)   # ArmState → most recent
+    samples: dict = field(default_factory=dict)     # ArmState → frames matched
 
 
 # ── State Machine ────────────────────────────────────────────────────────────
@@ -212,6 +231,8 @@ class GestureStateMachine:
         if reading is None or reading.state == ArmState.DOWN:
             self._reset_raise()
             self._sustain.entered_at.clear()
+            self._sustain.last_seen.clear()
+            self._sustain.samples.clear()
             return None
 
         state = reading.state
@@ -223,6 +244,8 @@ class GestureStateMachine:
         if state in self._pose_latch:
             self._pose_latch[state] = now
             self._sustain.entered_at.clear()
+            self._sustain.last_seen.clear()
+            self._sustain.samples.clear()
             return None
 
         # Cooldown gate for sustained-state gestures only — these need the
@@ -237,6 +260,8 @@ class GestureStateMachine:
         # Dispatch per state
         if state == ArmState.SINGLE_UP:
             self._sustain.entered_at.clear()  # no sustained state active
+            self._sustain.last_seen.clear()
+            self._sustain.samples.clear()
             return self._tick_single_up(reading, now)
 
         if state in (ArmState.BOTH_UP, ArmState.T_POSE, ArmState.CROSS_ARMS,
@@ -345,11 +370,21 @@ class GestureStateMachine:
         return None
 
     def _tick_sustained(self, state: ArmState, now: float) -> Optional[Gesture]:
-        # Track continuous time in this state
         entered = self._sustain.entered_at.get(state)
-        if entered is None:
-            self._sustain.entered_at = {state: now}  # reset others
+        last = self._sustain.last_seen.get(state)
+        # A gap longer than sustain_gap_s means the pose was actually
+        # released and re-formed, not merely mis-measured for a frame or two.
+        # The epsilon is not cosmetic: 4.2 - 3.6 is 0.6000000000000001, so a
+        # gap exactly equal to the limit compares as greater and resets a
+        # hold that never actually lapsed.
+        if entered is None or (last is not None
+                               and now - last > self.c.sustain_gap_s + 1e-6):
+            self._sustain.entered_at = {state: now}   # reset others
+            self._sustain.last_seen = {state: now}
+            self._sustain.samples = {state: 1}
             return None
+        self._sustain.last_seen[state] = now
+        self._sustain.samples[state] = self._sustain.samples.get(state, 0) + 1
 
         if (now - entered) < self.c.sustain_s:
             return None
@@ -358,6 +393,8 @@ class GestureStateMachine:
         # for sustained_rearm_s (see tick()).
         gesture = POSE_GESTURE[state]
         self._sustain.entered_at.clear()
+        self._sustain.last_seen.clear()
+        self._sustain.samples.clear()
         self._pose_latch[state] = now
         return self._fire(gesture, now)
 
