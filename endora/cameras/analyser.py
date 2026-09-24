@@ -33,7 +33,6 @@ from cameras.arm_tracker import (
 )
 from cameras.frame_capture import FrameCapture
 from core.state_machine import (
-    POSE_GESTURE,
     Gesture, GestureStateMachine, StateMachineConfig,
 )
 
@@ -1083,19 +1082,16 @@ class CameraAnalyser(threading.Thread):
                 )
 
                 if reading is not None:
-                    # A sustained pose with its own sound gets the same head
-                    # start SNAP has always had: its chime fires at sweep
-                    # onset, well before the gesture. A pose has no sweep, so
-                    # without this the sound waited out state_confirm_s AND
-                    # sustain_s — 0.78 s measured — and then the speaker's own
-                    # latency on top, which reads as the detector being slow
-                    # rather than deliberate. The gesture-time call still
-                    # happens; chime_debounce_s collapses the pair.
-                    if (self._gesture_sound_cb is not None
-                            and reading.state != prev_state):
-                        _pose_gesture = POSE_GESTURE.get(reading.state)
-                        if _pose_gesture is not None:
-                            self._gesture_sound_cb(_pose_gesture)
+                    # No head start for a sustained pose. v1.9.175 played the
+                    # sound the moment the pose was confirmed, to recover the
+                    # 0.58 s that state_confirm_s and sustain_s cost — and two
+                    # of every three sounds then had no gesture behind them,
+                    # because you pass THROUGH a folded-arms shape constantly
+                    # and only holding it means anything. The head start works
+                    # for SNAP because a sweep predicts a snap; "held this
+                    # shape for 0.2 s" predicts nothing. Latency is the price
+                    # of the hold, and the hold is the gesture — shorten
+                    # sustain_s if it matters, do not guess ahead of it.
                     entry.last_arm_state = reading.state
                     entry.last_reading = reading
                     if reading.state != entry.last_logged_state:

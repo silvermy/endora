@@ -189,14 +189,18 @@ def test_the_state_machine_and_analyser_share_one_map():
     assert len(literals) == 1, f"defined in {[str(p) for p in literals]}"
 
 
-def test_the_pose_sound_fires_on_entering_the_pose():
-    """Measured before this change: state_confirm_s (0.2 s) plus sustain_s
-    (0.5 s) elapsed before the sound was even sent, and the speaker's own
-    latency came after that. SNAP never had the problem because its chime
-    fires at sweep onset."""
+def test_no_sound_before_the_gesture_commits():
+    """v1.9.175 played a pose's sound the moment the pose was confirmed, to
+    recover the 0.58 s that state_confirm_s and sustain_s cost. Two of every
+    three sounds then had no gesture behind them: you pass through a
+    folded-arms shape constantly, and only holding it means anything.
+
+    The head start works for SNAP because a sweep predicts a snap. It does
+    not generalise to poses, and a sound that fires for something that never
+    happened is worse than a sound that is late.
+    """
     import inspect
     from cameras import analyser
     src = inspect.getsource(analyser.CameraAnalyser._run)
-    block = src.split("head\n                    # start SNAP has always had")[1][:900]
-    assert "reading.state != prev_state" in block, "not gated on a transition"
-    assert "POSE_GESTURE.get(reading.state)" in block
+    assert "POSE_GESTURE" not in src, \
+        "a pose sound is being chosen before the gesture fires again"
