@@ -14,3 +14,9 @@ __pycache__/
 # Data
 endora/data/
 *.jsonl
+
+# Stray device dumps and scratch files at the repo root — these have landed
+# in commits before via "git add -A" (two NanoStation JSON dumps from an
+# unrelated network job, in v1.9.177).
+/*.json
+.DS_Store
