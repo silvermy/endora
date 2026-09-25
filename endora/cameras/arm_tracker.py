@@ -353,6 +353,27 @@ class ArmTrackerConfig:
     # extension well under a straight arm's 0.80. Requiring the bend keeps a
     # pair of hands resting low and straight from qualifying.
     folded_extension_max: float = 0.80
+    # Ceiling on arm span — upper arm plus forearm — in shoulder widths.
+    #
+    # An occluded body reads LONG here, which is the opposite of what you
+    # might expect. Recorded 2026-09-25: sitting behind the coffee table with
+    # the hands hidden, the model placed both wrists in the only visible
+    # patch of chest and splayed the elbows wide, against shoulders that were
+    # narrow because only the top of the body was in view. Keypoint
+    # confidence gave no warning — the invented wrists scored 0.62 and 0.81.
+    #
+    # Per FRAME the two populations overlap badly (a 1.45 ceiling keeps just
+    # 52 per cent of genuine frames and still 13 per cent of false ones), so
+    # frame statistics are the wrong way to choose this. What matters is
+    # whether a gesture still FIRES, and sustain_s plus the tracker
+    # hysteresis carry a hold through losing half its frames. Swept
+    # end-to-end over the recorded captures, the usable window is 1.52-1.70:
+    # every genuine gesture still fires and neither surviving false positive
+    # does. Below 1.52 real captures start dropping out; at 1.72 both false
+    # ones return. 1.60 sits near the middle of that window.
+    #
+    # Fitted against two false captures, so the margin is real but not wide.
+    folded_arm_span_max: float = 1.60
     # Shoulder width as a fraction of torso length, below which the person is
     # not square to the camera. Facing matters here in a way it does not for
     # a raised arm: in profile the two wrists overlap in the image whatever
@@ -1005,6 +1026,16 @@ class ArmTracker:
                             and fold_top < rw[1] < fold_bottom)
                 bent = (l_ext <= self.c.folded_extension_max
                         and r_ext <= self.c.folded_extension_max)
+                # Arm span: upper arm plus forearm, in shoulder widths.
+                # extension is |shoulder-wrist| / (upper + fore), so the sum
+                # comes straight back out of the two numbers already
+                # computed. An occluded body reads long here — the model
+                # splays the elbows against narrow visible shoulders.
+                span = 0.0
+                for _len, _ext in ((l_len, l_ext), (r_len, r_ext)):
+                    if _ext > 1e-6:
+                        span = max(span, (_len / _ext) / shoulder_w)
+                proportioned = span <= self.c.folded_arm_span_max
                 # Resolved well enough to trust. A person too small or too
                 # poorly detected to measure produces plausible-looking
                 # ratios out of noise — the laptop false positive had
@@ -1023,7 +1054,8 @@ class ArmTracker:
                 # when seated or standing and beside it when reclined.
                 facing = resolved
                 head_up = (sh_mid[1] - px(NOSE)[1]) > 0
-                if (hands_together and at_chest and bent and facing
+                if (hands_together and at_chest and bent and proportioned
+                        and facing
                         and head_up
                         and not self._reclined_recently(now)
                         and self._folded_posture_ok(sh_mid, hip_mid,

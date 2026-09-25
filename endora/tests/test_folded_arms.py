@@ -501,3 +501,45 @@ def test_the_analyser_gives_every_person_the_same_witness():
         "every person's ArmTracker must be given it"
     assert len(re.findall(r"ReclineWitness\(\)", src)) == 1, \
         "a second witness means some tracker has private memory again"
+
+
+# ── occlusion: hidden hands read as a perfect fold ────────────────────────────
+
+def test_hands_hidden_behind_furniture_are_not_folded_arms():
+    """Recorded 2026-09-25, and the reason the posture work did not catch it.
+
+    Sitting upright behind the coffee table, visible from mid-chest up, with
+    both hands out of sight. The model put both wrists in the only visible
+    patch of chest — coincident, at the sternum — and splayed the elbows
+    wide. Upright, square to the camera, arms bent, wrists together near the
+    midline: every test the gesture had. Keypoint confidence gave no warning
+    either; the invented wrists scored 0.62 and 0.81.
+
+    What gives it away is proportion. Wide elbows against the narrow
+    shoulders of a half-visible body make the arms measure LONG.
+    """
+    # elbow_out 150 px against 87 px shoulders — the splayed-elbow shape.
+    assert _state(_pose(elbow_out=150.0, wrist_gap=8.0, wrist_dy=30.0)) \
+        is not ArmState.FOLDED_ARMS
+
+
+def test_a_normally_proportioned_fold_still_fires():
+    assert _state(_pose()) is ArmState.FOLDED_ARMS
+
+
+def test_the_span_ceiling_sits_in_the_measured_window():
+    """Swept end-to-end over the recorded captures: below 1.52 genuine
+    gestures start dropping out, at 1.72 both surviving false positives come
+    back. A value outside 1.52-1.70 is not supported by the data."""
+    c = ArmTrackerConfig()
+    assert 1.52 <= c.folded_arm_span_max <= 1.70
+
+
+def test_span_scales_with_the_body_not_the_frame():
+    # Same shape at half and double size must classify identically, or the
+    # ceiling becomes a distance threshold in disguise.
+    for scale in (0.5, 1.0, 1.8):
+        lm = _pose(elbow_out=150.0 * scale, wrist_gap=8.0 * scale,
+                   wrist_dy=30.0 * scale, shoulder_w=SHOULDER_W * scale,
+                   torso=TORSO * scale)
+        assert _state(lm) is not ArmState.FOLDED_ARMS, f"scale {scale}"

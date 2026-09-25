@@ -357,6 +357,13 @@ REGISTRY: list[SettingField] = [
                   "below which the body is not square to the camera. In profile the "
                   "wrists overlap in the image whatever the hands are doing",
                   group="Gesture"),
+    SettingField("folded_arm_span_max", float, 1.60,
+                  "FOLDED_ARMS: ceiling on arm span (upper arm + forearm) in shoulder "
+                  "widths. An occluded body reads LONG — hands hidden behind furniture "
+                  "make the model invent wrists in the visible chest and splay the "
+                  "elbows against narrow visible shoulders. Usable window measured "
+                  "end-to-end on recorded captures: 1.52-1.70",
+                  group="Gesture"),
     SettingField("folded_lean_max_deg", float, 22.0,
                   "FOLDED_ARMS: maximum torso lean off vertical, in degrees. Reclining "
                   "on a couch puts your forearms on your chest by itself, and the "
@@ -502,6 +509,7 @@ GESTURE_CRITICAL: list[str] = [
     "folded_resolution_min", "sustain_gap_s",
     "sustain_credit_ticks",
     "folded_lean_max_deg", "folded_knee_above_hip_max",
+    "folded_arm_span_max",
     "folded_recline_memory_s", "folded_posture_visibility_min",
     # HOLD was missing here while every other gesture flag was listed, and
     # it is the one that most visibly surprises: it fires hold_duration_s

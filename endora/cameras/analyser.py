@@ -73,7 +73,9 @@ class _YOLOLandmarks:
     """YOLO COCO keypoints wrapped to match ArmTracker's _Landmarks protocol."""
 
     def __init__(self, kps: np.ndarray, frame_w: int, frame_h: int) -> None:
-        # kps: shape [17, 3] — (x_px, y_px, conf)
+        # kps: shape [17, 3] — (x_px, y_px, conf). Kept as-is so the test
+        # recorder can save exactly what this person's tracker was given.
+        self.kps = kps
         self._pts: dict[int, _KP] = {
             mp_idx: _KP(
                 x=float(kps[coco_idx, 0]) / frame_w,
@@ -642,6 +644,7 @@ class CameraAnalyser(threading.Thread):
             folded_resolution_min=float(getattr(s, 'folded_resolution_min', 1.60)),
             folded_visibility_min=float(getattr(s, 'folded_visibility_min', 0.50)),
             folded_extension_max=float(getattr(s, 'folded_extension_max', 0.80)),
+            folded_arm_span_max=float(getattr(s, 'folded_arm_span_max', 1.60)),
             folded_lean_max_deg=float(getattr(s, 'folded_lean_max_deg', 22.0)),
             folded_knee_above_hip_max=float(
                 getattr(s, 'folded_knee_above_hip_max', 0.15)),
@@ -1028,15 +1031,18 @@ class CameraAnalyser(threading.Thread):
                 self._match_persons(detected, pw, ph, now)
                 self._prune_persons(now)
 
-                # Feed recorder if active (keypoints for regression tests)
+                # Feed the recorder one buffer per tracked person.
+                #
+                # This used to record a single buffer fed with valid[0] — the
+                # first detection by array index, which is not stable between
+                # frames and need not be the person who fires. One occupant
+                # regularly produces two concurrent detections here, so the
+                # saved trace interleaved two bodies and replayed as neither.
                 if self._recorder is not None:
-                    if _cached_kps is not None and _cached_kps.shape[0] > 0:
-                        valid = [i for i in range(_cached_kps.shape[0])
-                                 if _person_visible_kp_count(_cached_kps[i]) >= _MIN_VISIBLE_KPS]
-                        kps_rec = _cached_kps[valid[0]] if valid else np.zeros((17, 3), dtype=np.float32)
-                    else:
-                        kps_rec = np.zeros((17, 3), dtype=np.float32)
-                    self._recorder.on_frame(kps_rec, pw, ph, now)
+                    for pid, e in self._persons.items():
+                        kps_row = getattr(e.last_lm, "kps", None)
+                        if kps_row is not None and e.last_seen == now:
+                            self._recorder.on_frame(kps_row, pw, ph, now, pid=pid)
 
             # ── Hand landmarks (grlib / MediaPipe Hands) ──────────────────
             # Only run when at least one person has an arm raised — avoids
@@ -1177,7 +1183,9 @@ class CameraAnalyser(threading.Thread):
                         self._chime.notify()
                     self.on_candidate(gesture, 1.0, self.label)
                     if self._recorder is not None:
-                        self._recorder.on_gesture(gesture, self.label)
+                        # This person's buffer, so the trace and the gesture
+                        # describe the same body.
+                        self._recorder.on_gesture(gesture, self.label, pid=pid)
                     _primary_gesture = gesture
 
                 # Prefer the arm-up person's reading for the debug overlay
