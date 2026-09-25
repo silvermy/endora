@@ -320,6 +320,10 @@ class Settings:
     folded_resolution_min: float = 1.60
     folded_visibility_min: float = 0.50
     folded_extension_max: float = 0.80
+    folded_lean_max_deg: float = 22.0
+    folded_knee_above_hip_max: float = 0.15
+    folded_recline_memory_s: float = 1.5
+    folded_posture_visibility_min: float = 0.50
     facing_shoulder_min: float = 0.45
 
     # ── Fusion ────────────────────────────────────────────────────────────

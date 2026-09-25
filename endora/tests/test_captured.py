@@ -65,8 +65,13 @@ from core.state_machine import GestureStateMachine, StateMachineConfig, Gesture
 
 
 # ── Lightweight COCO→MediaPipe adapter (no cv2 / ultralytics needed) ──────────
-# Mirrors cameras/analyser.py:_YOLOLandmarks exactly.
-_COCO_TO_MP = {0: 0, 5: 11, 6: 12, 7: 13, 8: 14, 9: 15, 10: 16, 11: 23, 12: 24}
+# Mirrors cameras/analyser.py:_YOLOLandmarks exactly — and must, or a replay
+# tests something other than what runs on the camera. The knees (13, 14) were
+# missing here for as long as this file existed, so every replay ran with the
+# legs invisible: the leg-raise guard could never trigger, and neither could
+# the folded-arms knee test. test_coco_map_matches_the_analyser pins it now.
+_COCO_TO_MP = {0: 0, 5: 11, 6: 12, 7: 13, 8: 14, 9: 15, 10: 16,
+               11: 23, 12: 24, 13: 25, 14: 26}
 
 
 class _KP:
@@ -91,6 +96,27 @@ class _YOLOLandmarks:
 
     def __getitem__(self, idx: int) -> _KP:
         return self._pts[idx]
+
+
+def test_coco_map_matches_the_analyser():
+    """The adapter above is a copy of the analyser's, and a copy drifts.
+
+    It is parsed out of the source rather than imported because
+    cameras/analyser.py pulls in cv2 and the test suite deliberately runs
+    without it.
+    """
+    import ast
+    src = (Path(__file__).parent.parent / "cameras" / "analyser.py").read_text()
+    for node in ast.walk(ast.parse(src)):
+        target = None
+        if isinstance(node, ast.AnnAssign):
+            target = node.target
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        if isinstance(target, ast.Name) and target.id == "_COCO_TO_MP":
+            assert ast.literal_eval(node.value) == _COCO_TO_MP
+            return
+    raise AssertionError("_COCO_TO_MP not found in cameras/analyser.py")
 
 
 # ── Fixture discovery ─────────────────────────────────────────────────────────

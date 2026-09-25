@@ -634,6 +634,13 @@ class CameraAnalyser(threading.Thread):
             folded_resolution_min=float(getattr(s, 'folded_resolution_min', 1.60)),
             folded_visibility_min=float(getattr(s, 'folded_visibility_min', 0.50)),
             folded_extension_max=float(getattr(s, 'folded_extension_max', 0.80)),
+            folded_lean_max_deg=float(getattr(s, 'folded_lean_max_deg', 22.0)),
+            folded_knee_above_hip_max=float(
+                getattr(s, 'folded_knee_above_hip_max', 0.15)),
+            folded_recline_memory_s=float(
+                getattr(s, 'folded_recline_memory_s', 1.5)),
+            folded_posture_visibility_min=float(
+                getattr(s, 'folded_posture_visibility_min', 0.50)),
             facing_shoulder_min=float(getattr(s, 'facing_shoulder_min', 0.45)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),

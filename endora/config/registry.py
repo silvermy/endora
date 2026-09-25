@@ -357,6 +357,30 @@ REGISTRY: list[SettingField] = [
                   "below which the body is not square to the camera. In profile the "
                   "wrists overlap in the image whatever the hands are doing",
                   group="Gesture"),
+    SettingField("folded_lean_max_deg", float, 22.0,
+                  "FOLDED_ARMS: maximum torso lean off vertical, in degrees. Reclining "
+                  "on a couch puts your forearms on your chest by itself, and the "
+                  "generic upright test tolerates a 45 degree lean. Recorded traces: "
+                  "the real gesture never exceeded 17 degrees, reclining ran 25-56",
+                  group="Gesture"),
+    SettingField("folded_knee_above_hip_max", float, 0.15,
+                  "FOLDED_ARMS: how far the knees may rise above the hips, in shoulder "
+                  "widths, before the pose is read as feet-up rather than seated. "
+                  "Ignored when the knees are not visible — legs out of frame is normal "
+                  "for someone sitting close to the camera",
+                  group="Gesture"),
+    SettingField("folded_recline_memory_s", float, 1.5,
+                  "FOLDED_ARMS: for how long a confident sighting of a reclining body "
+                  "keeps suppressing the gesture. The pose model alternates between a "
+                  "correct reclined skeleton and a hallucinated upright one on the same "
+                  "body, so a per-frame posture test alone is outvoted by the bad frames",
+                  group="Gesture"),
+    SettingField("folded_posture_visibility_min", float, 0.50,
+                  "FOLDED_ARMS: confidence floor for the hips and knees before they may "
+                  "veto the gesture on posture. Higher than folded_visibility_min "
+                  "because a guessed hip that blocks a real gesture is worse than one "
+                  "that fails to block a false one",
+                  group="Gesture"),
     SettingField("cross_gesture_cooldown_s", float, 0.5,
                   "Minimum seconds before a DIFFERENT gesture type may fire. Deliberately "
                   "short — its only job is to stop one gesture's residual motion triggering "
@@ -469,6 +493,8 @@ GESTURE_CRITICAL: list[str] = [
     "folded_wrist_proximity", "folded_midline_max",
     "folded_chest_depth", "folded_extension_max",
     "folded_resolution_min", "sustain_gap_s",
+    "folded_lean_max_deg", "folded_knee_above_hip_max",
+    "folded_recline_memory_s", "folded_posture_visibility_min",
     # HOLD was missing here while every other gesture flag was listed, and
     # it is the one that most visibly surprises: it fires hold_duration_s
     # after a successful SNAP, from the same raised arm, with its own HA

@@ -22,6 +22,8 @@ the scale measured from a live capture: torso ~108 px, shoulders ~87 px.
 """
 import math
 
+import pytest
+
 from cameras.arm_tracker import ArmTracker, ArmTrackerConfig, ArmState
 from tests.fake_landmarks import Landmarks, Point
 from tests.fake_landmarks import (
@@ -35,7 +37,8 @@ TORSO, SHOULDER_W = 108.0, 87.0      # measured from a real frame
 
 def _pose(*, wrist_gap=30.0, wrist_dy=45.0, elbow_out=70.0,
           shoulder_w=SHOULDER_W, torso=TORSO, reclined=False,
-          midline_shift=0.0, straight=False,
+          midline_shift=0.0, straight=False, lean_deg=0.0, knee_rise=None,
+          hip_vis=1.0, knee_vis=1.0,
           cx=400.0, cy=350.0) -> Landmarks:
     """Hands folded at the chest, with knobs for each thing that should
     disqualify the pose.
@@ -49,6 +52,12 @@ def _pose(*, wrist_gap=30.0, wrist_dy=45.0, elbow_out=70.0,
     reclined      lay the torso down instead of standing it up
     midline_shift push both wrists off-centre together
     straight      put the elbow on the shoulder-wrist line (unbent arm)
+    lean_deg      tip the torso off vertical — a partial recline, which is
+                  what a couch actually produces
+    knee_rise     put the knees this many shoulder widths ABOVE the hips
+                  (feet up); None leaves them below, as when seated
+    hip_vis       confidence on the hip keypoints
+    knee_vis      confidence on the knee keypoints
     """
     sh_y = cy
     ls = (cx + shoulder_w / 2, sh_y)
@@ -57,9 +66,15 @@ def _pose(*, wrist_gap=30.0, wrist_dy=45.0, elbow_out=70.0,
         # Torso horizontal: hips beside the shoulders rather than below.
         lh = (cx + torso, sh_y + 10)
         rh = (cx + torso, sh_y - 10)
+        hx, hy = cx + torso, sh_y
     else:
-        lh = (cx + shoulder_w * 0.4, sh_y + torso)
-        rh = (cx - shoulder_w * 0.4, sh_y + torso)
+        hx = cx + torso * math.sin(math.radians(lean_deg))
+        hy = sh_y + torso * math.cos(math.radians(lean_deg))
+        lh = (hx + shoulder_w * 0.4, hy)
+        rh = (hx - shoulder_w * 0.4, hy)
+
+    knee_y = (hy - knee_rise * shoulder_w) if knee_rise is not None \
+        else hy + torso * 0.8
 
     wy = sh_y + wrist_dy
     lw = (cx + wrist_gap / 2 + midline_shift, wy)
@@ -73,14 +88,15 @@ def _pose(*, wrist_gap=30.0, wrist_dy=45.0, elbow_out=70.0,
         re = (cx - elbow_out, sh_y + wrist_dy * 0.6)
 
     P = lambda p: Point(p[0] / W, p[1] / H)
+    V = lambda p, v: Point(p[0] / W, p[1] / H, v)
     return Landmarks({
         NOSE: P((cx, sh_y - shoulder_w * 0.39)),
         LEFT_SHOULDER: P(ls), RIGHT_SHOULDER: P(rs),
         LEFT_ELBOW: P(le), RIGHT_ELBOW: P(re),
         LEFT_WRIST: P(lw), RIGHT_WRIST: P(rw),
-        LEFT_HIP: P(lh), RIGHT_HIP: P(rh),
-        LEFT_KNEE: P((cx + 20, sh_y + torso * 1.8)),
-        RIGHT_KNEE: P((cx - 20, sh_y + torso * 1.8)),
+        LEFT_HIP: V(lh, hip_vis), RIGHT_HIP: V(rh, hip_vis),
+        LEFT_KNEE: V((hx + 20, knee_y), knee_vis),
+        RIGHT_KNEE: V((hx - 20, knee_y), knee_vis),
     })
 
 
@@ -126,6 +142,145 @@ def test_reclining_is_excluded():
     # Lying on a couch with forearms on the chest is this pose geometrically.
     # A couch-facing camera sees that for hours at a time.
     assert _state(_pose(reclined=True)) is not ArmState.FOLDED_ARMS
+
+
+# ── posture: sitting or standing, not reclining ───────────────────────────────
+#
+# Fourteen false fires in one evening, all of them the user on the couch. The
+# original guard was the shared `upright` flag, which asks only whether the
+# torso is more vertical than horizontal — so it passes anything short of a 45
+# degree lean, and a couch is a 25-45 degree lean. Nobody lies flat on a sofa.
+
+@pytest.mark.parametrize("deg", [25, 30, 40, 44])
+def test_a_partial_recline_is_excluded(deg):
+    """The shape a couch actually produces. `upright` says True for all of
+    these, which is exactly why it was not enough on its own."""
+    assert _state(_pose(lean_deg=deg)) is not ArmState.FOLDED_ARMS
+
+
+@pytest.mark.parametrize("deg", [0, 8, 15])
+def test_sitting_at_a_normal_slouch_still_works(deg):
+    # Measured on recorded captures of the real gesture: 1.8-13.7 degrees of
+    # lean, never above 16.6. Nobody sits perfectly straight.
+    assert _state(_pose(lean_deg=deg)) is ArmState.FOLDED_ARMS
+
+
+def test_the_lean_limit_sits_between_the_two_populations():
+    c = ArmTrackerConfig()
+    assert 17.0 < c.folded_lean_max_deg < 25.0, (
+        "genuine captures reached 16.6 degrees and reclining started at 25 — "
+        "a threshold outside that gap drops real gestures or keeps false ones")
+
+
+def test_knees_above_the_hips_is_excluded():
+    """Feet up on the couch. The single cleanest signal in the recorded data:
+    every genuine capture has the knees at or below the hips (+0.02 to +1.51
+    shoulder widths below), and thirteen of the fourteen false fires have
+    them above (0.06 to 2.90 above)."""
+    assert _state(_pose(knee_rise=1.0)) is not ArmState.FOLDED_ARMS
+
+
+def test_knees_level_with_the_hips_is_still_seated():
+    # A normal chair posture, and one genuine capture measured +0.02 — so the
+    # threshold is deliberately slack rather than sitting at zero.
+    assert _state(_pose(knee_rise=0.0)) is ArmState.FOLDED_ARMS
+
+
+def test_invisible_knees_do_not_block_the_gesture():
+    # Legs out of frame is ordinary for someone seated close to the camera:
+    # four of the eight genuine captures have knee confidence below 0.4.
+    assert _state(_pose(knee_vis=0.05)) is ArmState.FOLDED_ARMS
+
+
+def test_invisible_hips_do_block_it():
+    """Posture is REQUIRED here, not merely "not contradicted".
+
+    A frame whose hips cannot be seen cannot be shown to be sitting, and this
+    is the one gesture whose false-positive mode is a posture. The confirm
+    accumulator already tolerates a few unreadable frames without discarding
+    a hold, so this costs nothing on a real gesture.
+    """
+    assert _state(_pose(hip_vis=0.05)) is not ArmState.FOLDED_ARMS
+
+
+# ── posture memory ────────────────────────────────────────────────────────────
+
+def _feed(tr, frames, fps=10.0, t0=0.0):
+    """Run frames through a tracker, returning the last state."""
+    state = None
+    for i, lm in enumerate(frames):
+        r = tr.classify(lm, W, H, None, now=t0 + i / fps)
+        state = r.state if r is not None else None
+    return state
+
+
+def test_a_recent_sighting_of_reclining_suppresses_the_gesture():
+    """Why a per-frame posture test is not enough on its own.
+
+    On the recorded false positives the model alternates, frame to frame,
+    between two skeletons of the same reclining body: one correct, and one
+    hallucinated — a short upright torso with the hips guessed partway up the
+    body and the knees essentially invisible. The correct frames are rejected
+    and the hallucinated ones sail through, so the gesture still fired. A
+    body does not sit up and lie down eight times a second.
+    """
+    tr = ArmTracker(ArmTrackerConfig())
+    lying = _pose(lean_deg=45, knee_rise=2.0)
+    upright_looking = _pose(knee_vis=0.05)
+    # Half a second of clearly lying down, then the hallucinated upright read.
+    assert _feed(tr, [lying] * 5 + [upright_looking] * 8) \
+        is not ArmState.FOLDED_ARMS
+
+
+def test_the_memory_expires():
+    """It suppresses, so it must not suppress forever — getting up off the
+    couch and performing the gesture has to work."""
+    tr = ArmTracker(ArmTrackerConfig())
+    c = ArmTrackerConfig()
+    _feed(tr, [_pose(lean_deg=45, knee_rise=2.0)] * 5)
+    later = c.folded_recline_memory_s + 0.5
+    assert _feed(tr, [_pose()] * 10, t0=later) is ArmState.FOLDED_ARMS
+
+
+def test_the_veto_outranks_the_hysteresis_hold():
+    """state_release_s lets a confirmed pose coast through half a second of
+    contradicting frames. On a recorded capture that was enough for the
+    sustain timer to complete on frames that plainly showed a reclining body
+    — 51 degrees of lean, knees two shoulder widths above the hips. Seeing
+    the person lying down is not the kind of contradiction to sit out.
+    """
+    tr = ArmTracker(ArmTrackerConfig())
+    assert _feed(tr, [_pose()] * 8) is ArmState.FOLDED_ARMS      # confirmed
+    lying = _pose(lean_deg=45, knee_rise=2.0)
+    r = tr.classify(lying, W, H, None, now=0.9)                  # one frame
+    assert r.state is not ArmState.FOLDED_ARMS, \
+        "the hold coasted through a frame showing the person lying down"
+
+
+def test_the_veto_needs_confident_keypoints():
+    """It can only suppress, so a guessed hip that blocks a real gesture is
+    worse than one that fails to block a false one. The hallucinated
+    skeletons carry hip confidence around 0.50 with the knees at 0.05-0.11.
+    """
+    c = ArmTrackerConfig()
+    assert c.folded_posture_visibility_min >= c.folded_visibility_min
+    tr = ArmTracker(ArmTrackerConfig())
+    # A low-confidence "lying down" reading must not veto what follows.
+    _feed(tr, [_pose(lean_deg=45, knee_rise=2.0, hip_vis=0.15, knee_vis=0.15)] * 5)
+    assert _feed(tr, [_pose()] * 10, t0=0.5) is ArmState.FOLDED_ARMS
+
+
+def test_no_other_gesture_gained_a_posture_requirement():
+    """A raised arm from a couch is still a raised arm — this whole guard is
+    scoped to the one gesture whose false-positive mode is a posture."""
+    tr = ArmTracker(ArmTrackerConfig())
+    # Lean only: knees high enough to clear the shoulder line would trip the
+    # unrelated leg-raise guard, which is a different question.
+    _feed(tr, [_pose(lean_deg=45)] * 5)          # arm the recline memory
+    raised = _pose(lean_deg=45)
+    raised._points[RIGHT_WRIST] = Point(400 / W, (350 - 150) / H)
+    raised._points[RIGHT_ELBOW] = Point(400 / W, (350 - 75) / H)
+    assert _feed(tr, [raised] * 10, t0=0.5) is ArmState.SINGLE_UP
 
 
 def test_turned_away_from_the_camera_is_excluded():

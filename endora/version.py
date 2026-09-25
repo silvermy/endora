@@ -1,3 +1,3 @@
 """Single source of truth for Endora's version."""
 
-__version__ = "1.9.179"
+__version__ = "1.9.180"

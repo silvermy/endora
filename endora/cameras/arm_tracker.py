@@ -45,6 +45,7 @@ covers every posture.
 from __future__ import annotations
 
 import dataclasses
+import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -359,6 +360,43 @@ class ArmTrackerConfig:
     # trivially true. Measured on a real seated frame from the target room:
     # 0.81 square to the camera, and it collapses toward 0.2 in profile.
     facing_shoulder_min: float = 0.45
+    # ── Posture: sitting or standing, not reclining ───────────────────────
+    # The generic `upright` flag asks only whether the torso is more vertical
+    # than horizontal, i.e. it tolerates a 45 degree lean — and reclining into
+    # a couch at 25-45 degrees is exactly how this gesture false-fired
+    # fourteen times in one evening. Measured on recorded traces, the torso
+    # lean (shoulder-mid to hip-mid, from image vertical) separates the two
+    # cases with room to spare:
+    #
+    #   genuine gesture      1.8 - 13.7 deg median, never above 16.6
+    #   reclined on a couch  7.4 - 56.3 deg median, most above 29
+    #
+    # 22 deg sits in the gap. Unlike `upright` this is REQUIRED, not merely
+    # "not contradicted": a frame whose hips cannot be seen cannot be shown
+    # to be sitting, and the tracker's confirm accumulator already tolerates
+    # a few such frames without discarding the hold.
+    folded_lean_max_deg: float = 22.0
+    # Knees above the hips means feet up — on a couch, a recliner, a bed.
+    # This is the single cleanest discriminator in the recorded data: every
+    # genuine capture has the knees at or below the hips (+0.02 to +1.51
+    # shoulder widths), and thirteen of the fourteen false fires have them
+    # above (-0.06 to -2.90). The threshold is deliberately slack rather than
+    # sitting at zero, because sitting with your knees up level with your
+    # hips is a normal chair posture and one genuine capture measured +0.02.
+    # Only applied when the knees are actually visible: legs out of frame is
+    # ordinary for someone seated close to the camera, and four of the eight
+    # genuine captures have knee confidence below 0.4.
+    folded_knee_above_hip_max: float = 0.15
+    # How long a confident sighting of a reclining body keeps suppressing the
+    # gesture. See _note_posture for why a per-frame test is not enough and
+    # for the measurements this sits between.
+    folded_recline_memory_s: float = 1.5
+    # Confidence floor for posture evidence. Higher than the gesture's own
+    # folded_visibility_min because this suppresses rather than triggers: a
+    # guessed hip that vetoes a real gesture is worse than one that fails to
+    # veto a false one, and the hallucinated skeletons carry hip confidence
+    # around 0.50 with the knees at 0.05-0.11.
+    folded_posture_visibility_min: float = 0.50
 
     # ── Leg-raise guard ───────────────────────────────────────────────────
     # If both knees rise this far above shoulder level (frame fraction of
@@ -445,6 +483,9 @@ class ArmTracker:
         self._pending_state: Optional[ArmState] = None
         self._pending_since: float = 0.0
         self._pending_last: float = 0.0
+        # Last moment this body was confidently seen reclining — see
+        # _note_posture.
+        self._reclined_at: Optional[float] = None
         # Rolling per-arm history for the trajectory checks.
         self._hist: Deque[_HistSample] = deque()
 
@@ -589,6 +630,18 @@ class ArmTracker:
         if now is None:
             now = time.monotonic()
         result = self._hyst_classify(landmarks, frame_w, frame_h, now)
+        # The recline veto has to outrank the hysteresis, not just the raw
+        # classification. state_release_s deliberately lets a confirmed pose
+        # coast through half a second of contradicting frames, and on a
+        # recorded false positive that was enough for the sustain timer to
+        # complete on frames that plainly showed a reclining body — 51
+        # degrees of lean, knees two shoulder-widths above the hips. Seeing
+        # the person lying down is not the kind of contradiction to sit out.
+        if (result is not None and result.state == ArmState.FOLDED_ARMS
+                and self._reclined_recently(now)):
+            self._stable_reading = ArmReading(state=ArmState.DOWN)
+            self._pending_state = None
+            return self._stable_reading
         if result is not None and result.state == ArmState.SINGLE_UP and hand_lm is not None:
             result = dataclasses.replace(result, snap_roll=_hand_snap_roll(hand_lm))
         return result
@@ -661,6 +714,102 @@ class ArmTracker:
             return 0.0
         return self.c.state_confirm_s
 
+    # ── Posture ───────────────────────────────────────────────────────────
+
+    def _note_posture(self, now: Optional[float], sh_mid: _Pt,
+                      hip_mid: Optional[_Pt], shoulder_w: float,
+                      lk: _Pt, rk: _Pt, hip_vis: float,
+                      knee_vis: float) -> None:
+        """Remember the last moment this body was clearly seen reclining.
+
+        A per-frame posture test is not enough on its own. On the recorded
+        false positives the model alternates, frame to frame, between two
+        skeletons of the same reclining body: one correct (knees visible,
+        torso leaning 45 degrees) and one hallucinated — a short, upright
+        torso with the hips guessed somewhere up the reclining body and the
+        knees essentially invisible. The correct frames are rejected and the
+        hallucinated ones sail through, so the gesture still fires.
+
+        Posture does not change in a third of a second. So a confident
+        sighting of a reclining body discredits the upright-looking frames
+        around it, rather than merely losing a vote to them. Measured as the
+        age of the most recent reclining frame at the moment of firing:
+
+            genuine gesture      2.5 s, 3.0 s, or never seen at all
+            reclining on a couch 0.0 s, 0.0 s, 0.0 s, 1.2 s, 1.2 s
+
+        Hence folded_recline_memory_s at 1.5 s, which sits in that gap.
+
+        Deliberately one-directional: this can only ever suppress the
+        gesture, and only on evidence confident enough to be worth trusting —
+        hence the visibility floors, which are higher than the ones the
+        gesture itself uses.
+        """
+        if now is None or hip_mid is None or shoulder_w <= 1e-6:
+            return
+        if hip_vis < self.c.folded_posture_visibility_min:
+            return
+
+        tdy = hip_mid[1] - sh_mid[1]
+        tdx = hip_mid[0] - sh_mid[0]
+        leaning = (tdy <= 0
+                   or math.degrees(math.atan2(abs(tdx), tdy))
+                   > self.c.folded_lean_max_deg)
+
+        knees_up = False
+        if knee_vis >= self.c.folded_posture_visibility_min:
+            knee_y = (lk[1] + rk[1]) / 2.0
+            knees_up = ((hip_mid[1] - knee_y) / shoulder_w
+                        > self.c.folded_knee_above_hip_max)
+
+        if leaning or knees_up:
+            self._reclined_at = now
+
+    def _reclined_recently(self, now: Optional[float]) -> bool:
+        if now is None or self._reclined_at is None:
+            return False
+        return (now - self._reclined_at) <= self.c.folded_recline_memory_s
+
+    def _folded_posture_ok(self, sh_mid: _Pt, hip_mid: Optional[_Pt],
+                           shoulder_w: float, lk: _Pt, rk: _Pt,
+                           vis) -> bool:
+        """Is this body sitting or standing, rather than lying down?
+
+        FOLDED_ARMS asks a stricter posture question than any other gesture,
+        because the pose it looks for is what a reclining body does by
+        default: forearms resting on the chest, hands meeting in the middle.
+        A couch-facing camera sees that for hours, and the generic `upright`
+        flag does not exclude it — it only asks whether the torso is more
+        vertical than horizontal, which a 40 degree recline satisfies.
+
+        Two independent measurements, either of which disqualifies:
+
+        * how far the torso leans off vertical, and
+        * whether the knees have come up above the hips.
+
+        See folded_lean_max_deg and folded_knee_above_hip_max for the
+        recorded distributions each threshold sits between.
+        """
+        # Torso lean. Required, not merely "not contradicted" — see
+        # folded_lean_max_deg.
+        if hip_mid is None or shoulder_w <= 1e-6:
+            return False
+        tdy = hip_mid[1] - sh_mid[1]
+        tdx = hip_mid[0] - sh_mid[0]
+        if tdy <= 0:                       # hips at or above the shoulders
+            return False
+        if math.degrees(math.atan2(abs(tdx), tdy)) > self.c.folded_lean_max_deg:
+            return False
+
+        # Knees, when they can be seen at all.
+        if (vis(LEFT_KNEE) + vis(RIGHT_KNEE)) / 2.0 >= 0.20:
+            knee_y = (lk[1] + rk[1]) / 2.0
+            rise = (hip_mid[1] - knee_y) / shoulder_w   # +ve = knees above hips
+            if rise > self.c.folded_knee_above_hip_max:
+                return False
+
+        return True
+
     # ── Classification ────────────────────────────────────────────────────
 
     def _classify_raw(self, landmarks: Optional[_Landmarks],
@@ -725,6 +874,8 @@ class ArmTracker:
         # air, not arms. Deliberately still frame-relative — a coarse
         # whole-body sanity check rather than a gesture measurement.
         lk, rk = px(LEFT_KNEE), px(RIGHT_KNEE)
+        self._note_posture(now, sh_mid, hip_mid, shoulder_w, lk, rk,
+                           hip_vis, (vis(LEFT_KNEE) + vis(RIGHT_KNEE)) / 2.0)
         if (vis(LEFT_KNEE) + vis(RIGHT_KNEE)) / 2.0 >= 0.20:
             if (lk[1] + rk[1]) / 2.0 < sh_mid[1] - self.c.leg_raise_margin * frame_h:
                 return ArmReading(state=ArmState.DOWN, upright=bool(upright))
@@ -837,7 +988,10 @@ class ArmTracker:
                 facing = resolved
                 head_up = (sh_mid[1] - px(NOSE)[1]) > 0
                 if (hands_together and at_chest and bent and facing
-                        and head_up and upright is not False):
+                        and head_up
+                        and not self._reclined_recently(now)
+                        and self._folded_posture_ok(sh_mid, hip_mid,
+                                                    shoulder_w, lk, rk, vis)):
                     return ArmReading(state=ArmState.FOLDED_ARMS,
                                       upright=bool(upright))
 
