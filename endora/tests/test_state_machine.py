@@ -192,8 +192,11 @@ def test_sustained_latch_survives_brief_dropout():
     assert Gesture.CROSS_ARMS not in fires
 
 
-def test_cooldown_blocks_sustained_refire():
-    """Cooldown prevents rapid re-fire of sustained gestures like RAISE_BOTH."""
+def test_a_held_pose_does_not_refire_after_a_brief_release():
+    """Named for the cooldown, but what actually holds the line here is the
+    sustained_rearm_s latch — the pose is still latched at 0.9 s and 1.5 s.
+    Verified by cutting the cooldown to nothing below.
+    """
     m = _machine(sustain_s=0.5, cooldown_s=2.0)
     assert m.tick(_state(ArmState.BOTH_UP), now=0.0) is None
     assert m.tick(_state(ArmState.BOTH_UP), now=0.6) == Gesture.RAISE_BOTH
@@ -201,6 +204,98 @@ def test_cooldown_blocks_sustained_refire():
     m.tick(_down(), now=0.7)
     assert m.tick(_state(ArmState.BOTH_UP), now=0.9) is None
     assert m.tick(_state(ArmState.BOTH_UP), now=1.5) is None
+
+
+def test_the_latch_not_the_cooldown_is_what_prevents_the_refire():
+    """The companion to the test above. With the cross-gesture cooldown at
+    zero the result is identical, which is what proves the latch owns this.
+    """
+    m = _machine(sustain_s=0.5, cross_gesture_cooldown_s=0.0,
+                 sustained_rearm_s=2.0)
+    assert m.tick(_state(ArmState.BOTH_UP), now=0.0) is None
+    assert m.tick(_state(ArmState.BOTH_UP), now=0.6) == Gesture.RAISE_BOTH
+    m.tick(_down(), now=0.7)
+    assert m.tick(_state(ArmState.BOTH_UP), now=0.9) is None
+    assert m.tick(_state(ArmState.BOTH_UP), now=1.5) is None
+
+
+def test_a_snap_does_not_hold_a_deliberate_pose_hostage():
+    """Snap, then deliberately fold your arms.
+
+    The gate used to be the full 2 s cooldown and it returned BEFORE the
+    sustain timer was seeded, so you paid the cooldown and then the whole of
+    sustain_s again: the fold landed 2.4 s late. That is the same fault
+    already fixed in core/fusion.py, where a spurious CROSS_ARMS was
+    swallowing a real SNAP for two seconds; the fix had not reached here.
+    """
+    m = _machine(snap_sustain_s=0.0, sustain_s=0.5)
+    assert m.tick(_vertical_up(), now=0.0) == Gesture.SNAP
+    fired = None
+    for i in range(1, 40):
+        t = i / 10.0
+        if m.tick(_state(ArmState.FOLDED_ARMS), now=t) == Gesture.FOLDED_ARMS:
+            fired = t
+            break
+    assert fired is not None, "the pose never fired at all"
+    assert fired <= 1.6, f"fold landed {fired:.1f}s after the snap"
+
+
+# ── Sustain: a forgiven gap is not a held gap ─────────────────────────────────
+
+def test_a_flickering_hold_is_forgiven():
+    """What sustain_gap_s is for, and did not do.
+
+    tick() used to clear the sustain timers on every DOWN frame — and every
+    gap this layer is meant to forgive arrives as a DOWN frame, so the timer
+    was wiped before the gap could ever be weighed. Measured before the fix:
+    one DOWN frame in three, a 0.1 s gap against a 0.85 s tolerance, and a
+    three-second hold never fired at all. The only flicker tolerance the
+    system actually had came from the tracker's state_release_s.
+    """
+    m = _machine(sustain_s=0.5)
+    fired = None
+    for i in range(30):
+        t = i / 10.0
+        r = _down() if i % 3 == 1 else _state(ArmState.FOLDED_ARMS)
+        if m.tick(r, now=t) == Gesture.FOLDED_ARMS:
+            fired = t
+            break
+    assert fired is not None, "a hold measured two frames in three never fired"
+    assert fired <= 0.8, f"took {fired:.1f}s"
+
+
+def test_a_gap_does_not_count_towards_the_hold():
+    """Forgiving a gap and crediting it are different questions.
+
+    Measuring elapsed wall-clock from the first sighting conflated them, so
+    two lone frames 0.6 s apart — with nothing whatsoever in between —
+    satisfied a 0.5 s sustain.
+    """
+    for gap in (0.3, 0.6, 0.8):
+        m = _machine(sustain_s=0.5)
+        m.tick(_state(ArmState.FOLDED_ARMS), now=0.0)
+        for i in range(1, int(gap * 10)):
+            m.tick(_down(), now=i / 10.0)
+        assert m.tick(_state(ArmState.FOLDED_ARMS), now=gap) is None, \
+            f"two frames {gap}s apart fired a {0.5}s sustain"
+
+
+def test_the_credit_cap_follows_the_tick_rate():
+    """sustain_credit_ticks is in TICKS, not seconds, because a constant in
+    seconds is a rate-dependent threshold — and this project has been bitten
+    by those at both ends (person pruning, the motion gate). A clean hold
+    must confirm in about sustain_s at any cadence.
+    """
+    for hz in (2.0, 10.0, 30.0):
+        m = _machine(sustain_s=0.5)
+        fired = None
+        for i in range(int(hz * 3)):
+            t = i / hz
+            if m.tick(_state(ArmState.T_POSE), now=t) == Gesture.T_POSE:
+                fired = t
+                break
+        assert fired is not None, f"never fired at {hz} Hz"
+        assert fired <= 0.5 + 2.0 / hz, f"{hz} Hz took {fired:.2f}s"
 
 
 def test_cooldown_does_not_block_double_snap():

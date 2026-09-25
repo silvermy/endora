@@ -53,7 +53,25 @@ class Gesture(Enum):
 @dataclass
 class StateMachineConfig:
     """Timing thresholds. All values in seconds unless noted."""
+    # Deprecated in this layer — the per-gesture repeat cooldown lives in
+    # core/fusion.py, which is what decides whether an event reaches Home
+    # Assistant. Kept so existing configs still load. See the module
+    # docstring for which layer owns which cooldown.
     cooldown_s: float = 2.0
+    # The one cooldown this layer keeps: after any gesture fires, how long
+    # before a SUSTAINED pose may fire. Its only job is to stop the residual
+    # motion of one gesture immediately reading as a different one, so it is
+    # sized like fusion's setting of the same name rather than like a repeat
+    # guard — repeats are already prevented by sustained_rearm_s for a pose
+    # and by the per-raise flags for a raise.
+    #
+    # At the old 2.0 s this gate did far more than it was meant to: snapping
+    # and then deliberately folding your arms produced the fold 2.4 s late,
+    # because the gate returns BEFORE the sustain timer is seeded, so you pay
+    # the cooldown and then the full sustain_s again. That is the same fault
+    # already fixed one layer up, where a spurious CROSS_ARMS was swallowing
+    # a real SNAP for two seconds; the fix never reached here.
+    cross_gesture_cooldown_s: float = 0.5
     # Minimum arm elevation for a raise to count as SNAP/HOLD. The tracker
     # has already applied its own raise_elevation_min to reach SINGLE_UP, so
     # this only bites when set higher — i.e. to demand a straighter-up arm
@@ -70,9 +88,22 @@ class StateMachineConfig:
     # This disambiguates transitional poses (e.g. briefly looking like T_POSE
     # while raising both arms).
     sustain_s: float = 0.5
-    # How long a sustained pose may go unmatched and still count as held.
-    # See _SustainState: the pose is steady, the keypoints are not.
+    # How long a sustained pose may go unmatched without the hold being
+    # considered released. See _SustainState: the pose is steady, the
+    # keypoints are not.
     sustain_gap_s: float = 0.85
+    # The most any single interval between two matched frames may contribute
+    # towards sustain_s, expressed in TICKS rather than seconds: an ordinary
+    # sampling step is one tick and is credited in full, while a forgiven gap
+    # spanning many ticks is credited only this much, so the gap cannot stand
+    # in for the hold it interrupted.
+    #
+    # Measured in ticks because a constant in seconds would be a rate
+    # -dependent threshold, and this project has been bitten by those at both
+    # ends already (person pruning, the motion gate). tick() is called on
+    # EVERY frame whatever the pose, so the machine can measure its own tick
+    # interval and needs no configured frame rate — see _tick_dt.
+    sustain_credit_ticks: float = 2.5
 
     # Minimum time the arm must be held up before SNAP fires, measured from
     # the first confirmed SINGLE_UP frame.  ArmTracker already adds state_confirm_s
@@ -180,12 +211,17 @@ class _SustainState:
     meant the gesture fired only when a good frame happened to land under
     the timer, which reads as "it takes ages to recognise".
 
-    So a pose is tracked from when it was FIRST seen, and forgiven gaps
-    shorter than sustain_gap_s. Loosening the per-frame geometry instead
-    would have re-admitted the laptop pose, which sits inside the flicker.
+    So a gap shorter than sustain_gap_s does not end the hold — but neither
+    does it COUNT as holding. Those are separate questions, and conflating
+    them is a hole: measuring elapsed wall-clock from the first sighting let
+    two lone frames 0.6 s apart, with nothing at all in between, satisfy a
+    0.5 s sustain. Instead each matched frame credits the interval since the
+    previous one, capped at sustain_credit_max_s, so an ordinary sampling
+    step is credited in full and a gap contributes almost nothing.
     """
     entered_at: dict = field(default_factory=dict)  # ArmState → first seen
     last_seen: dict = field(default_factory=dict)   # ArmState → most recent
+    held_s: dict = field(default_factory=dict)      # ArmState → credited time
 
 
 # ── State Machine ────────────────────────────────────────────────────────────
@@ -226,7 +262,40 @@ class GestureStateMachine:
         # written on every fire and read by nothing.
         self._last_fired_any: float = float('-inf')
 
+        # Observed interval between tick() calls — the analyser's real frame
+        # cadence, measured rather than configured. See sustain_credit_ticks.
+        self._tick_dt: Optional[float] = None
+        self._last_tick: Optional[float] = None
+
         self.total_emitted = 0
+
+    # ── Tick cadence ──────────────────────────────────────────────────────
+
+    # Intervals above this are a stall, a restart or a clock jump rather than
+    # a frame rate, and must not drag the estimate up with them.
+    _MAX_PLAUSIBLE_TICK_S = 1.0
+
+    def _note_tick(self, now: float) -> None:
+        last, self._last_tick = self._last_tick, now
+        if last is None:
+            return
+        dt = now - last
+        if not (0.0 < dt <= self._MAX_PLAUSIBLE_TICK_S):
+            return
+        self._tick_dt = dt if self._tick_dt is None else (
+            0.8 * self._tick_dt + 0.2 * dt)
+
+    def _credit_cap(self) -> float:
+        """Most that one interval may contribute towards sustain_s.
+
+        Falls back to sustain_gap_s — i.e. to crediting whatever the gap
+        logic already forgave, which is the old behaviour — until enough
+        ticks have been seen to know the cadence.
+        """
+        if self._tick_dt is None:
+            return self.c.sustain_gap_s
+        return min(self.c.sustain_credit_ticks * self._tick_dt,
+                   self.c.sustain_gap_s)
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -235,6 +304,8 @@ class GestureStateMachine:
         Advance one frame. Returns a gesture to fire, or None.
         `now` is a monotonic timestamp in seconds.
         """
+        self._note_tick(now)
+
         # Re-arm latched sustained poses that have gone unobserved long
         # enough. Must run every tick regardless of state — the pose stops
         # being observed precisely when its _tick_sustained stops running.
@@ -244,11 +315,21 @@ class GestureStateMachine:
                 if now - t <= self.c.sustained_rearm_s
             }
 
-        # No pose or arm down → reset raise state, clear sustain timers.
+        # No pose, or the arm is down → the raise is over.
+        #
+        # The sustained-pose timers are deliberately NOT cleared here. They
+        # used to be, which made sustain_gap_s unreachable: every gap this
+        # layer is supposed to forgive arrives as a DOWN frame, and clearing
+        # on DOWN wiped the timer before _tick_sustained could weigh the gap.
+        # Measured before the change — one DOWN frame in three, a 0.1 s gap
+        # against a 0.85 s tolerance — a three-second hold never fired at
+        # all. Every bit of flicker tolerance the system actually had came
+        # from the tracker's state_release_s, so the protection this layer
+        # documents did not exist and lowering that one setting would have
+        # silently broken held poses. Staleness is now decided in one place,
+        # by comparing against sustain_gap_s where the docstring says it is.
         if reading is None or reading.state == ArmState.DOWN:
             self._reset_raise()
-            self._sustain.entered_at.clear()
-            self._sustain.last_seen.clear()
             return None
 
         state = reading.state
@@ -261,6 +342,7 @@ class GestureStateMachine:
             self._pose_latch[state] = now
             self._sustain.entered_at.clear()
             self._sustain.last_seen.clear()
+            self._sustain.held_s.clear()
             return None
 
         # Cooldown gate for sustained-state gestures only — these need the
@@ -269,7 +351,7 @@ class GestureStateMachine:
         # (_snap_fired, _hold_fired) already prevent repeated firing, and
         # enforcing cooldown here blocks DOUBLE_SNAP from working after SNAP.
         if state != ArmState.SINGLE_UP:
-            if now - self._last_fired_any < self.c.cooldown_s:
+            if now - self._last_fired_any < self.c.cross_gesture_cooldown_s:
                 return None
 
         # Dispatch per state
@@ -396,10 +478,17 @@ class GestureStateMachine:
                                and now - last > self.c.sustain_gap_s + 1e-6):
             self._sustain.entered_at = {state: now}   # reset others
             self._sustain.last_seen = {state: now}
+            self._sustain.held_s = {state: 0.0}
             return None
-        self._sustain.last_seen[state] = now
 
-        if (now - entered) < self.c.sustain_s:
+        # Credit the interval since the previous match, capped so a forgiven
+        # gap cannot stand in for the hold it interrupted. See _SustainState.
+        held = self._sustain.held_s.get(state, 0.0) + min(
+            now - last, self._credit_cap())
+        self._sustain.last_seen[state] = now
+        self._sustain.held_s[state] = held
+
+        if held < self.c.sustain_s:
             return None
 
         # Held long enough — fire once and latch until the pose is released
@@ -407,6 +496,7 @@ class GestureStateMachine:
         gesture = POSE_GESTURE[state]
         self._sustain.entered_at.clear()
         self._sustain.last_seen.clear()
+        self._sustain.held_s.clear()
         self._pose_latch[state] = now
         return self._fire(gesture, now)
 

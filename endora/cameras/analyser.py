@@ -650,10 +650,17 @@ class CameraAnalyser(threading.Thread):
         ))
         state_machine = GestureStateMachine(StateMachineConfig(
             cooldown_s=float(getattr(s, 'cooldown_s', 2.0)),
+            cross_gesture_cooldown_s=float(
+                getattr(s, 'cross_gesture_cooldown_s', 0.5)),
             snap_elevation_min=float(getattr(s, 'snap_elevation_min', 0.70)),
             hold_duration_s=float(getattr(s, 'hold_duration_s', 1.5)),
             double_snap_window_s=float(getattr(s, 'double_snap_window_s', 3.0)),
             sustain_s=float(getattr(s, 'sustain_s', 0.5)),
+            # sustain_gap_s was in Settings, in the registry and in
+            # /effective, but was never passed here — so it silently had no
+            # effect at all while the debug page reported it as live.
+            sustain_gap_s=float(getattr(s, 'sustain_gap_s', 0.85)),
+            sustain_credit_ticks=float(getattr(s, 'sustain_credit_ticks', 2.5)),
             snap_sustain_s=float(getattr(s, 'snap_sustain_s', 0.0)),
             snap_roll_threshold=float(getattr(s, 'snap_roll_threshold', 0.0)),
             snap_require_flourish=bool(getattr(s, 'snap_require_flourish', True)),

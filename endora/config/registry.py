@@ -459,6 +459,13 @@ REGISTRY: list[SettingField] = [
                   "Seconds after SNAP that arm must stay up to fire HOLD", group="Hysteresis", user_facing=True),
     SettingField("double_snap_window_s", float, 3.0,
                   "Seconds within which two snaps count as DOUBLE_SNAP", group="Hysteresis", user_facing=True),
+    SettingField("sustain_credit_ticks", float, 2.5,
+                  "How much of one gap between matched frames may count towards "
+                  "sustain_s, in TICKS rather than seconds so it does not become a "
+                  "frame-rate-dependent threshold. Forgiving a gap and crediting it "
+                  "are different questions: crediting it let two lone frames 0.6 s "
+                  "apart satisfy a 0.5 s sustain",
+                  group="Gesture"),
     SettingField("sustain_gap_s", float, 0.85,
                   "How long a sustained pose may go unmatched and still count as held. "
                   "Folded hands mutually occlude, so the measured wrist gap swings "
@@ -493,6 +500,7 @@ GESTURE_CRITICAL: list[str] = [
     "folded_wrist_proximity", "folded_midline_max",
     "folded_chest_depth", "folded_extension_max",
     "folded_resolution_min", "sustain_gap_s",
+    "sustain_credit_ticks",
     "folded_lean_max_deg", "folded_knee_above_hip_max",
     "folded_recline_memory_s", "folded_posture_visibility_min",
     # HOLD was missing here while every other gesture flag was listed, and

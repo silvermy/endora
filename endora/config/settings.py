@@ -297,6 +297,7 @@ class Settings:
     # Seconds held for CROSS_ARMS / T_POSE / RAISE_BOTH before firing.
     sustain_s: float = 0.5
     sustain_gap_s: float = 0.85
+    sustain_credit_ticks: float = 2.5
     # A sustained-pose gesture fires ONCE per pose entry, then can't re-fire
     # until the pose has been released for this many seconds. Stops sitting
     # with crossed arms from re-firing CROSS_ARMS every cooldown (~100 fires
