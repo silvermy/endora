@@ -7,9 +7,17 @@ with the current ArmReading; the machine returns a Gesture to fire or None.
 
 Design:
 - Each gesture has explicit entry/exit conditions, not scattered flags.
-- Cooldowns are per-gesture and global.
-- SNAP is delayed by snap_sustain_frames so concurrent gestures
+- SNAP is delayed by snap_sustain_s so concurrent gestures
   (BOTH_UP, T_POSE, CROSS_ARMS) can supersede it.
+
+Cooldowns: this layer keeps ONE, the global gate on sustained poses, and its
+only job is to stop the residual motion of a gesture immediately reading as a
+different one — so it is sized like fusion's cross_gesture_cooldown_s, not
+like a per-gesture repeat guard. Repeat suppression belongs elsewhere: a held
+pose is latched by sustained_rearm_s, a raise by the per-raise flags, and the
+per-gesture cooldown that decides what actually reaches Home Assistant lives
+in core/fusion.py. Three cooldowns in two layers is how a spurious CROSS_ARMS
+came to swallow a real SNAP for two seconds.
 """
 from __future__ import annotations
 
@@ -135,7 +143,14 @@ class StateMachineConfig:
 @dataclass
 class _RaiseState:
     """State tracked for the duration of a single SINGLE_UP raise."""
+    # Whether a snap was DETECTED during this raise. Suppresses re-detection
+    # every frame, and is set even when the gesture is switched off.
     snap_fired:    bool  = False
+    # Whether that detection actually became an event. HOLD extends an
+    # emitted raise gesture, so it keys off this one: with enable_snap off
+    # the raise produced nothing, and a HOLD 1.5 s later is a gesture the
+    # user switched off arriving under a different name.
+    snap_emitted:  bool  = False
     hold_fired:    bool  = False
     snap_fired_at: float = 0.0
     up_frames:     int   = 0
@@ -171,7 +186,6 @@ class _SustainState:
     """
     entered_at: dict = field(default_factory=dict)  # ArmState → first seen
     last_seen: dict = field(default_factory=dict)   # ArmState → most recent
-    samples: dict = field(default_factory=dict)     # ArmState → frames matched
 
 
 # ── State Machine ────────────────────────────────────────────────────────────
@@ -204,9 +218,12 @@ class GestureStateMachine:
         # it goes unobserved for sustained_rearm_s (see StateMachineConfig).
         self._pose_latch: dict[ArmState, float] = {}
 
-        # Per-gesture last fired (for per-gesture cooldown) and global.
-        # -inf sentinel means "never fired" — avoids blocking very first tick.
-        self._last_fired: dict[Gesture, float] = {g: float('-inf') for g in Gesture}
+        # Last time ANY gesture fired, for the sustained-pose cooldown gate.
+        # -inf sentinel means "never fired" — avoids blocking the first tick.
+        # There is deliberately no per-gesture clock here: the real
+        # per-gesture cooldown lives in core/fusion.py, which is the layer
+        # that decides what reaches Home Assistant. A second copy here was
+        # written on every fire and read by nothing.
         self._last_fired_any: float = float('-inf')
 
         self.total_emitted = 0
@@ -232,7 +249,6 @@ class GestureStateMachine:
             self._reset_raise()
             self._sustain.entered_at.clear()
             self._sustain.last_seen.clear()
-            self._sustain.samples.clear()
             return None
 
         state = reading.state
@@ -245,7 +261,6 @@ class GestureStateMachine:
             self._pose_latch[state] = now
             self._sustain.entered_at.clear()
             self._sustain.last_seen.clear()
-            self._sustain.samples.clear()
             return None
 
         # Cooldown gate for sustained-state gestures only — these need the
@@ -261,7 +276,6 @@ class GestureStateMachine:
         if state == ArmState.SINGLE_UP:
             self._sustain.entered_at.clear()  # no sustained state active
             self._sustain.last_seen.clear()
-            self._sustain.samples.clear()
             return self._tick_single_up(reading, now)
 
         if state in (ArmState.BOTH_UP, ArmState.T_POSE, ArmState.CROSS_ARMS,
@@ -318,8 +332,9 @@ class GestureStateMachine:
             gate_ok = rise_ok and still_ok
             sustain_needed = self.c.snap_sustain_s
 
-        # HOLD: arm still vertical, SNAP already fired, enough time passed
-        if (r.snap_fired and not r.hold_fired and snap_condition
+        # HOLD: arm still vertical, a raise gesture already EMITTED, enough
+        # time passed. See _RaiseState.snap_emitted for why not snap_fired.
+        if (r.snap_emitted and not r.hold_fired and snap_condition
                 and (now - r.snap_fired_at) >= self.c.hold_duration_s):
             r.hold_fired = True
             return self._fire(Gesture.HOLD, now)
@@ -381,10 +396,8 @@ class GestureStateMachine:
                                and now - last > self.c.sustain_gap_s + 1e-6):
             self._sustain.entered_at = {state: now}   # reset others
             self._sustain.last_seen = {state: now}
-            self._sustain.samples = {state: 1}
             return None
         self._sustain.last_seen[state] = now
-        self._sustain.samples[state] = self._sustain.samples.get(state, 0) + 1
 
         if (now - entered) < self.c.sustain_s:
             return None
@@ -394,7 +407,6 @@ class GestureStateMachine:
         gesture = POSE_GESTURE[state]
         self._sustain.entered_at.clear()
         self._sustain.last_seen.clear()
-        self._sustain.samples.clear()
         self._pose_latch[state] = now
         return self._fire(gesture, now)
 
@@ -414,10 +426,15 @@ class GestureStateMachine:
         ]
         if self._snap_times and self.is_enabled(Gesture.DOUBLE_SNAP):
             self._snap_times.clear()
-            return self._fire(Gesture.DOUBLE_SNAP, now)
+            fired = self._fire(Gesture.DOUBLE_SNAP, now)
+        else:
+            self._snap_times.append(now)
+            fired = self._fire(Gesture.SNAP, now)
 
-        self._snap_times.append(now)
-        return self._fire(Gesture.SNAP, now)
+        # A DOUBLE_SNAP counts: the arm is up and an event went out, so a
+        # HOLD that follows is still extending a gesture the user performed.
+        r.snap_emitted = fired is not None
+        return fired
 
     # ── Fire helper ───────────────────────────────────────────────────────
 
@@ -444,7 +461,6 @@ class GestureStateMachine:
         if not self.is_enabled(gesture):
             log.debug("Gesture %s detected but disabled in settings", gesture)
             return None
-        self._last_fired[gesture] = now
         self._last_fired_any = now
         self.total_emitted += 1
         log.info("Gesture fired: %s", gesture)

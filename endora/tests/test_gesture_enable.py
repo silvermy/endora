@@ -64,6 +64,48 @@ def test_double_snap_still_works_when_enabled():
     assert m.tick(_up(), 1.0) is Gesture.DOUBLE_SNAP
 
 
+# ── HOLD extends an EMITTED raise, not a detected one ─────────────────────────
+
+def test_hold_does_not_fire_when_snap_is_disabled():
+    """Switching SNAP off used to leave HOLD firing on its own.
+
+    _fire_snap marks the raise as snapped whether or not the gesture is
+    enabled — it has to, or a disabled gesture would be re-detected every
+    frame. HOLD then saw "a snap happened" and fired 1.5 s later, so turning
+    SNAP off converted the raise into a HOLD event rather than silencing it.
+    """
+    m = _m(enable_snap=False, enable_hold=True, hold_duration_s=1.0)
+    fired = [m.tick(_up(), t / 10.0) for t in range(40)]
+    assert not any(fired), [g.name for g in fired if g]
+
+
+def test_hold_still_follows_a_snap_that_did_fire():
+    m = _m(hold_duration_s=1.0)
+    assert m.tick(_up(), 0.0) is Gesture.SNAP
+    fired = [m.tick(_up(), t / 10.0) for t in range(1, 30)]
+    assert Gesture.HOLD in fired
+
+
+def test_hold_follows_a_double_snap_too():
+    """A DOUBLE_SNAP is still an emitted raise gesture, and the arm is still
+    up — so holding it is still a HOLD."""
+    m = _m(cooldown_s=0.0, double_snap_window_s=3.0, hold_duration_s=1.0)
+    assert m.tick(_up(), 0.0) is Gesture.SNAP
+    m.tick(_pose(ArmState.DOWN), 0.5)
+    assert m.tick(_up(), 1.0) is Gesture.DOUBLE_SNAP
+    fired = [m.tick(_up(), 1.0 + t / 10.0) for t in range(1, 30)]
+    assert Gesture.HOLD in fired
+
+
+def test_a_disabled_snap_is_still_consumed_once():
+    """The other half of the contract: HOLD must not fire, but the snap must
+    also not be re-detected on every subsequent frame."""
+    m = _m(enable_snap=False, enable_hold=False)
+    for t in range(40):
+        m.tick(_up(), t / 10.0)
+    assert m.total_emitted == 0
+
+
 if __name__ == "__main__":
     import traceback
     failed = 0
