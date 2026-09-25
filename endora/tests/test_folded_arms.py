@@ -24,7 +24,9 @@ import math
 
 import pytest
 
-from cameras.arm_tracker import ArmTracker, ArmTrackerConfig, ArmState
+from cameras.arm_tracker import (
+    ArmTracker, ArmTrackerConfig, ArmState, ReclineWitness,
+)
 from tests.fake_landmarks import Landmarks, Point
 from tests.fake_landmarks import (
     NOSE, LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_ELBOW, RIGHT_ELBOW,
@@ -401,3 +403,101 @@ def test_a_flickering_hold_still_confirms():
             fired.append(i / 10.0)
     assert fired, "a hold measured two frames in three never confirmed"
     assert fired[0] < 1.5, f"took {fired[0]:.1f}s to recognise a steady hold"
+
+
+# ── the recline memory belongs to the scene, not to a track id ────────────────
+
+def _two_tracks(witness, frames=12):
+    """One occupant, two simultaneous detections — which is what the camera
+    actually produces for somebody lying on a couch.
+
+    Recorded live on 2026-09-25: the correct reclined skeleton (shoulders
+    22-48 px, hips 0.90-0.96, leaning 50-60 degrees) and a hallucinated
+    compact upright one (shoulders 62-78 px, hips 0.31-0.58, leaning 12)
+    appear in alternating frames of the same capture, and _match_persons
+    gives them separate pids with separate ArmTrackers.
+    """
+    lying = ArmTracker(ArmTrackerConfig(), recline_witness=witness)
+    upright = ArmTracker(ArmTrackerConfig(), recline_witness=witness)
+    state = None
+    for i in range(frames):
+        t = i / 10.0
+        lying.classify(_pose(lean_deg=50), W, H, None, now=t)
+        r = upright.classify(_pose(), W, H, None, now=t)
+        state = r.state if r is not None else None
+    return state
+
+
+def test_a_reclining_track_suppresses_the_gesture_on_another_track():
+    """The hallucinated skeleton is internally consistent and perfectly
+    steady, so every per-frame test passes and its OWN tracker never once
+    observes the recline. Per-person memory files the evidence under the
+    wrong person; this is why the witness is shared.
+    """
+    assert _two_tracks(ReclineWitness()) is not ArmState.FOLDED_ARMS
+
+
+def test_without_a_shared_witness_the_same_frames_do_fire():
+    """The control. Each tracker keeping its own memory is exactly the
+    configuration that fired twice in eight minutes on 2026-09-25, so the
+    test above has to be shown to depend on the sharing.
+    """
+    lying = ArmTracker(ArmTrackerConfig())
+    upright = ArmTracker(ArmTrackerConfig())
+    state = None
+    for i in range(12):
+        t = i / 10.0
+        lying.classify(_pose(lean_deg=50), W, H, None, now=t)
+        r = upright.classify(_pose(), W, H, None, now=t)
+        state = r.state if r is not None else None
+    assert state is ArmState.FOLDED_ARMS
+
+
+def test_a_shared_witness_does_not_block_an_empty_room():
+    """It only ever suppresses, and only on evidence. Two upright tracks
+    sharing a witness must behave exactly as one tracker alone."""
+    w = ReclineWitness()
+    a = ArmTracker(ArmTrackerConfig(), recline_witness=w)
+    b = ArmTracker(ArmTrackerConfig(), recline_witness=w)
+    state = None
+    for i in range(12):
+        t = i / 10.0
+        a.classify(_pose(cx=250.0), W, H, None, now=t)
+        r = b.classify(_pose(), W, H, None, now=t)
+        state = r.state if r is not None else None
+    assert state is ArmState.FOLDED_ARMS
+
+
+def test_the_witness_outlives_the_tracks_that_wrote_it():
+    """Person ids churn — ten new tracks in 159 seconds for one person on a
+    couch, recorded 2026-09-25 — and a new track starts with no history at
+    all. A pid created 2 seconds ago fired FOLDED_ARMS because its tracker
+    had never seen anything. The witness is owned by the camera, so a fresh
+    track inherits what the room already knows.
+    """
+    w = ReclineWitness()
+    doomed = ArmTracker(ArmTrackerConfig(), recline_witness=w)
+    for i in range(5):
+        doomed.classify(_pose(lean_deg=50), W, H, None, now=i / 10.0)
+    del doomed                                   # pruned, as _prune_persons does
+
+    newborn = ArmTracker(ArmTrackerConfig(), recline_witness=w)
+    state = None
+    for i in range(8):
+        r = newborn.classify(_pose(), W, H, None, now=0.5 + i / 10.0)
+        state = r.state if r is not None else None
+    assert state is not ArmState.FOLDED_ARMS
+
+
+def test_the_analyser_gives_every_person_the_same_witness():
+    """One witness per camera, created once and handed to each _PersonEntry —
+    a per-entry one would be the bug this fixes."""
+    import inspect, re
+    from cameras import analyser
+    src = inspect.getsource(analyser.CameraAnalyser)
+    assert re.search(r"self\._recline_witness\s*=\s*ReclineWitness\(\)", src), \
+        "the camera must own exactly one witness"
+    assert "recline_witness=self._recline_witness" in src, \
+        "every person's ArmTracker must be given it"
+    assert len(re.findall(r"ReclineWitness\(\)", src)) == 1, \
+        "a second witness means some tracker has private memory again"

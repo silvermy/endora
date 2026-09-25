@@ -28,7 +28,7 @@ import numpy as np
 
 from version import __version__
 from cameras.arm_tracker import (
-    ArmState, ArmTracker, ArmTrackerConfig, Side,
+    ArmState, ArmTracker, ArmTrackerConfig, ReclineWitness, Side,
     LEFT_ELBOW, RIGHT_ELBOW, LEFT_WRIST, RIGHT_WRIST,
 )
 from cameras.frame_capture import FrameCapture
@@ -602,6 +602,14 @@ class CameraAnalyser(threading.Thread):
         # by nearest-centroid matching across YOLO frames.
         self._persons: dict[int, _PersonEntry] = {}
         self._next_pid: int = 0
+        # "Is somebody lying down in this room" is a question about the SCENE,
+        # not about a track id — one reclining occupant produces two
+        # simultaneous detections that get separate pids, and the one that
+        # fires FOLDED_ARMS is the hallucinated upright skeleton, whose own
+        # tracker never observes the recline. Shared by every person's
+        # tracker on this camera, and it outlives them all. See
+        # ReclineWitness.
+        self._recline_witness = ReclineWitness()
         # Counts actual YOLO runs, so person pruning can be expressed in
         # missed detections rather than elapsed time (see _PERSON_PRUNE_MISSES).
         self._yolo_runs: int = 0
@@ -647,7 +655,7 @@ class CameraAnalyser(threading.Thread):
             rise_elevation_delta=float(getattr(s, 'rise_elevation_delta', 0.35)),
             rise_start_elevation_max=float(getattr(s, 'rise_start_elevation_max', 0.35)),
             wrist_still_max_travel=float(getattr(s, 'wrist_still_max_travel_arm', 0.15)),
-        ))
+        ), recline_witness=self._recline_witness)
         state_machine = GestureStateMachine(StateMachineConfig(
             cooldown_s=float(getattr(s, 'cooldown_s', 2.0)),
             cross_gesture_cooldown_s=float(

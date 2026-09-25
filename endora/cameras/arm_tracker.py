@@ -476,16 +476,49 @@ class ArmTrackerConfig:
     sweep_confirm_climb: float = 0.60
 
 
+class ReclineWitness:
+    """Scene-level memory of a body seen lying down, shared by every tracker
+    on one camera.
+
+    Per-person memory cannot do this job, because the thing it needs to
+    remember is filed under the wrong person. Recorded live: one occupant on
+    a couch produces TWO simultaneous detections — the correct reclined
+    skeleton (shoulders 22-48 px, hips at 0.90-0.96 confidence, torso leaning
+    50-60 degrees) and a hallucinated compact upright one (shoulders 62-78
+    px, hips at 0.31-0.58, leaning 12 degrees) — and _match_persons assigns
+    them separate pids with separate ArmTrackers. The hallucination is
+    internally consistent and perfectly steady, so every per-frame test
+    passes and its own tracker never once observes the recline. pid=0 and
+    pid=6 coexisted through two false fires on 2026-09-25.
+
+    So the question "is somebody lying down in this room" is answered for the
+    scene, not for a track id.
+
+    The cost, stated plainly: while one person is lying down, nobody else in
+    view can fire FOLDED_ARMS either. In a one-occupant living room that is
+    free, and it is the conservative direction — this only ever suppresses.
+    Set detect_folded_arms per camera, or share no witness, to opt out.
+    """
+
+    __slots__ = ("at",)
+
+    def __init__(self) -> None:
+        self.at: Optional[float] = None
+
+
 class ArmTracker:
-    def __init__(self, config: ArmTrackerConfig):
+    def __init__(self, config: ArmTrackerConfig,
+                 recline_witness: "Optional[ReclineWitness]" = None):
         self.c = config
+        # Shared across every tracker on a camera when the analyser supplies
+        # one; private otherwise, so unit tests and single-person callers
+        # behave exactly as before. See ReclineWitness.
+        self._recline = recline_witness if recline_witness is not None \
+            else ReclineWitness()
         self._stable_reading: Optional[ArmReading] = None
         self._pending_state: Optional[ArmState] = None
         self._pending_since: float = 0.0
         self._pending_last: float = 0.0
-        # Last moment this body was confidently seen reclining — see
-        # _note_posture.
-        self._reclined_at: Optional[float] = None
         # Rolling per-arm history for the trajectory checks.
         self._hist: Deque[_HistSample] = deque()
 
@@ -716,6 +749,9 @@ class ArmTracker:
 
     # ── Posture ───────────────────────────────────────────────────────────
 
+    def _note_reclined(self, now: float) -> None:
+        self._recline.at = now
+
     def _note_posture(self, now: Optional[float], sh_mid: _Pt,
                       hip_mid: Optional[_Pt], shoulder_w: float,
                       lk: _Pt, rk: _Pt, hip_vis: float,
@@ -763,12 +799,12 @@ class ArmTracker:
                         > self.c.folded_knee_above_hip_max)
 
         if leaning or knees_up:
-            self._reclined_at = now
+            self._note_reclined(now)
 
     def _reclined_recently(self, now: Optional[float]) -> bool:
-        if now is None or self._reclined_at is None:
+        if now is None or self._recline.at is None:
             return False
-        return (now - self._reclined_at) <= self.c.folded_recline_memory_s
+        return (now - self._recline.at) <= self.c.folded_recline_memory_s
 
     def _folded_posture_ok(self, sh_mid: _Pt, hip_mid: Optional[_Pt],
                            shoulder_w: float, lk: _Pt, rk: _Pt,
