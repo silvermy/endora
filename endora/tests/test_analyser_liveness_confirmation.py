@@ -173,3 +173,58 @@ def test_confirmed_pid_stays_exempt_regardless_of_grace_period():
 
     known = _known_centroids(a._persons, now=1010.0 + 10 * _LIVENESS_CONFIRM_WINDOW_S)
     assert known == [MOVED_CENTROID]
+
+
+# ── the window needs a floor as well as a ceiling ────────────────────────────
+
+def test_two_adjacent_frames_do_not_confirm():
+    """"Two genuine passes within 60 s" was only ever an upper bound, so two
+    frames 0.06 s apart satisfied it — which is not the sustained evidence
+    the name implies.
+
+    Recorded 2026-09-26: a painting of a figure was confirmed human 0.56 s
+    after its track was born and fired FOLDED_ARMS off the artwork eleven
+    seconds later, in an empty room.
+    """
+    from cameras.analyser import _LIVENESS_CONFIRM_MIN_GAP_S
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+    pid = _only_pid(a)
+    t = 1000.0
+    for i in range(1, 8):                       # ~0.5 s of jittering frames
+        t = 1000.0 + i * 0.06
+        a._match_persons([(None, MOVED_CENTROID if i % 2 else CENTROID, True)],
+                         640, 480, now=t)
+    assert t - 1000.0 < _LIVENESS_CONFIRM_MIN_GAP_S, "fixture must stay inside the gap"
+    assert a._persons[pid].confirmed_human is False
+
+
+def test_a_pass_after_the_minimum_gap_still_confirms():
+    """A real person is in view for many seconds, so the floor costs them
+    nothing."""
+    from cameras.analyser import _LIVENESS_CONFIRM_MIN_GAP_S
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+    pid = _only_pid(a)
+    a._match_persons([(None, MOVED_CENTROID, True)], 640, 480,
+                     now=1000.0 + _LIVENESS_CONFIRM_MIN_GAP_S + 0.1)
+    assert a._persons[pid].confirmed_human is True
+
+
+def test_the_floor_is_below_the_ceiling():
+    from cameras.analyser import (_LIVENESS_CONFIRM_MIN_GAP_S,
+                                  _LIVENESS_CONFIRM_WINDOW_S)
+    assert 0 < _LIVENESS_CONFIRM_MIN_GAP_S < _LIVENESS_CONFIRM_WINDOW_S
+
+
+def test_a_long_run_of_jitter_still_confirms_eventually():
+    """The floor delays confirmation; it must not prevent it. A pid feeding
+    genuine moved passes continuously is confirmed once two of them are far
+    enough apart."""
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+    pid = _only_pid(a)
+    for i in range(1, 60):
+        a._match_persons([(None, MOVED_CENTROID if i % 2 else CENTROID, True)],
+                         640, 480, now=1000.0 + i * 0.1)
+    assert a._persons[pid].confirmed_human is True

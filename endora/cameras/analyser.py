@@ -192,6 +192,13 @@ _LIVENESS_EXEMPT_DIST = 0.06
 # A static ghost gets the identical window, not a longer one — it's the
 # same clock either way.
 _LIVENESS_CONFIRM_WINDOW_S = 60.0
+# …and no less than this far apart. The window was only ever an UPPER bound,
+# so two adjacent frames 0.06 s apart satisfied "two genuine passes within
+# 60 s" — which is not the sustained evidence the name implies. A painting of
+# a figure was confirmed human 0.56 s after its track was born, and fired
+# FOLDED_ARMS eleven seconds later (2026-09-26). A real person is in view for
+# many seconds, so this costs them nothing.
+_LIVENESS_CONFIRM_MIN_GAP_S = 2.0
 
 # Minimum centroid displacement (fraction of frame diagonal) between this
 # detection and this pid's previous one to count as "actually moved" for
@@ -293,6 +300,37 @@ def _passes_liveness_gate(
     return _wrist_shows_motion(kps_row, fg_mask, frame_w, frame_h, min_foreground_frac)
 
 
+def _acquire_ok(conf: Optional[float], centroid: tuple,
+                tracked_centroids: Optional[list], match_dist: float,
+                acquire_conf: float) -> bool:
+    """May a detection this weak start a NEW person track?
+
+    The detector runs at the permissive "maintain" confidence so an already
+    tracked person survives the dropouts of an arm raise. That relaxation is
+    meant for keeping a track you already have — but it was applied to the
+    whole frame, so one tracked person lowered the bar for every detection
+    anywhere in it, including brand-new ones with nothing to do with them.
+
+    On this camera that is self-sustaining, which is what makes it serious
+    rather than untidy: a ghost accepted at the low threshold becomes a
+    tracked person, which keeps the roster non-empty, which holds the
+    threshold down, which admits the next ghost. Measured live — 1234 pids
+    in 40 hours, new tracks appearing on wall art, in the kitchen doorway
+    and in an empty corner, one of them confirmed human 0.56 s after birth
+    and firing FOLDED_ARMS off a painting of a figure at conf 0.39, against
+    a configured yolo_conf of 0.45.
+
+    So a detection that matches something already tracked may be weak; one
+    that does not must clear the strict acquire threshold on its own.
+    """
+    if conf is None or conf >= acquire_conf:
+        return True
+    if not tracked_centroids:
+        return False
+    return any((centroid[0] - tc[0]) ** 2 + (centroid[1] - tc[1]) ** 2
+               <= match_dist ** 2 for tc in tracked_centroids)
+
+
 def _all_valid_landmarks(
     kps: Optional[np.ndarray],
     frame_w: int,
@@ -301,6 +339,9 @@ def _all_valid_landmarks(
     min_foreground_frac: float = 0.12,
     known_centroids: Optional[list] = None,
     match_dist: float = 0.0,
+    boxes: Optional[np.ndarray] = None,
+    tracked_centroids: Optional[list] = None,
+    acquire_conf: float = 0.0,
 ) -> list[tuple]:
     """Return list of (_YOLOLandmarks, centroid_px, raw_live) for every real
     person detected. known_centroids should come from _known_centroids (see
@@ -309,6 +350,12 @@ def _all_valid_landmarks(
     any known-centroid exemption — the caller (_match_persons) uses it to
     decide whether a tracked pid has earned confirmed-human status, which
     feeds back into _known_centroids on the next frame.
+
+    tracked_centroids/acquire_conf gate which detections may start a new
+    track rather than merely continue one — see _acquire_ok. They are
+    deliberately separate from known_centroids, which is about liveness:
+    every tracked pid counts for keeping a weak detection, but only a
+    liveness-confirmed one exempts a still body from the wrist check.
     """
     if kps is None or kps.shape[0] == 0:
         return []
@@ -318,6 +365,10 @@ def _all_valid_landmarks(
             continue
         c = _person_centroid(kps[i])
         if c is None:
+            continue
+        conf = (float(boxes[i][4]) if boxes is not None
+                and i < len(boxes) else None)
+        if not _acquire_ok(conf, c, tracked_centroids, match_dist, acquire_conf):
             continue
         raw_live = _wrist_shows_motion(kps[i], fg_mask, frame_w, frame_h, min_foreground_frac)
         if not raw_live:
@@ -354,6 +405,11 @@ class _PersonEntry:
     # to known_centroids, which is what exempts a matching candidate from
     # the wrist-liveness check.
     last_genuine_live_at: Optional[float] = None
+    # Anchor of the current confirmation window: the FIRST genuine+moved pass
+    # of the run in progress. Separate from last_genuine_live_at, which keeps
+    # advancing because _known_centroids uses it as a freshness grace period
+    # — anchoring on it would make the gap below unreachable.
+    first_genuine_live_at: Optional[float] = None
     confirmed_human:       bool          = False
 
 
@@ -704,6 +760,10 @@ class CameraAnalyser(threading.Thread):
             last_seen_run=self._yolo_runs,
             last_lm=lm,
             last_genuine_live_at=now,
+            # Birth counts as the window's first pass, as it always has —
+            # the anchor just has its own field now so that
+            # last_genuine_live_at can keep advancing for _known_centroids.
+            first_genuine_live_at=now,
         )
 
     def _note_liveness(
@@ -711,9 +771,11 @@ class CameraAnalyser(threading.Thread):
     ) -> None:
         """Update a pid's confirmed-human status from this frame's checks.
 
-        Two genuine AND MOVED passes within _LIVENESS_CONFIRM_WINDOW_S of
-        each other permanently confirm the pid as human (sticky — never
-        revoked short of the pid itself being pruned). Requiring actual
+        Two genuine AND MOVED passes, at least _LIVENESS_CONFIRM_MIN_GAP_S
+        and at most _LIVENESS_CONFIRM_WINDOW_S apart, permanently confirm the
+        pid as human (sticky — never revoked short of the pid itself being
+        pruned). Both bounds matter: with only the upper one, two adjacent
+        frames qualified. Requiring actual
         keypoint displacement (not just the foreground-mask check passing)
         is what closes the gap the window alone left open: correlated
         lighting noise (a flicker, an exposure adjustment) can make the
@@ -723,11 +785,13 @@ class CameraAnalyser(threading.Thread):
         """
         if not raw_live or not moved or e.confirmed_human:
             return
-        if (e.last_genuine_live_at is not None
-                and now - e.last_genuine_live_at <= _LIVENESS_CONFIRM_WINDOW_S):
+        first = e.first_genuine_live_at
+        if first is None or now - first > _LIVENESS_CONFIRM_WINDOW_S:
+            e.first_genuine_live_at = now        # anchor a fresh window
+        elif now - first >= _LIVENESS_CONFIRM_MIN_GAP_S:
             e.confirmed_human = True
-            log.info("[%s] pid confirmed human (2 genuine, moved passes within %.0fs)",
-                      self.label, _LIVENESS_CONFIRM_WINDOW_S)
+            log.info("[%s] pid confirmed human (2 genuine, moved passes "
+                     "%.1fs apart)", self.label, now - first)
         e.last_genuine_live_at = now
 
     def _match_persons(
@@ -904,6 +968,9 @@ class CameraAnalyser(threading.Thread):
         _prev_small: Optional[np.ndarray] = None   # for motion gate
         _frames_since_yolo: int = 999              # force run on first frame
         _prev_primary_state: ArmState = ArmState.DOWN
+        # Set on every YOLO run; the debug-overlay loop below reads it on
+        # frames where YOLO did not run, so it needs a value from the start.
+        _acquire_conf: float = float(getattr(self.s, 'yolo_conf', 0.45)) * 1.3
         _last_person_count: int = -1
         _logged_frame_geometry: bool = False
 
@@ -1002,7 +1069,14 @@ class CameraAnalyser(threading.Thread):
                 #   acquire  (no one tracked): base_conf * 1.3 — strict, rejects ghosts
                 #   maintain (someone tracked): base_conf * 0.65 — bridges arm-raise dropouts
                 base_conf = float(getattr(self.s, 'yolo_conf', 0.45))
-                model.conf = base_conf * 0.65 if self._persons else base_conf * 1.3
+                _acquire_conf = base_conf * 1.3      # strict: start a track
+                _maintain_conf = base_conf * 0.65    # permissive: keep one
+                # Inference runs permissive whenever anyone is tracked, so a
+                # raise's dropouts do not lose the person. Which detections
+                # that relaxation is allowed to APPLY to is decided per
+                # detection in _acquire_ok — see there for why letting it
+                # apply frame-wide is self-sustaining.
+                model.conf = _maintain_conf if self._persons else _acquire_conf
 
                 # Boxes are carried alongside the keypoints purely for the
                 # debug overlay; nothing in the gesture path reads them.
@@ -1027,6 +1101,9 @@ class CameraAnalyser(threading.Thread):
                 detected = _all_valid_landmarks(
                     _cached_kps, pw, ph, fg_mask=fg_mask, min_foreground_frac=min_fg_frac,
                     known_centroids=known_centroids, match_dist=match_dist,
+                    boxes=_cached_boxes,
+                    tracked_centroids=[e.centroid for e in self._persons.values()],
+                    acquire_conf=_acquire_conf,
                 )
                 self._match_persons(detected, pw, ph, now)
                 self._prune_persons(now)
@@ -1219,6 +1296,12 @@ class CameraAnalyser(threading.Thread):
                     c = _person_centroid(_cached_kps[i])
                     if reason is None and c is None:
                         reason = "no centroid"
+                    if reason is None and not _acquire_ok(
+                        float(box[4]) if box is not None else None, c,
+                        [e.centroid for e in self._persons.values()],
+                        match_dist, _acquire_conf,
+                    ):
+                        reason = "too weak to acquire"
                     if reason is None and not _passes_liveness_gate(
                         _cached_kps[i], c, fg_mask, pw, ph, min_fg_frac,
                         known_centroids, match_dist,
