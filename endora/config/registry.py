@@ -388,6 +388,32 @@ REGISTRY: list[SettingField] = [
                   "because a guessed hip that blocks a real gesture is worse than one "
                   "that fails to block a false one",
                   group="Gesture"),
+    SettingField("flourish_require_progressive", bool, False,
+                  "Require the sweep to have been progressive — the arm actually "
+                  "observed passing through the elevations between, not jumping "
+                  "between two extremes. Off by default: across fourteen recorded "
+                  "snaps it would suppress five, and only two are confirmed false. "
+                  "Needs labelled captures before it can honestly be enabled",
+                  group="Gesture"),
+    SettingField("body_scale_min_ratio", float, 0.55,
+                  "Reject a frame whose body measures less than this fraction of the "
+                  "track's recent median size — the detector substituting a collapsed "
+                  "skeleton, which every scale-relative guard is blind to by "
+                  "construction. People do not shrink by half in a seventh of a "
+                  "second. Measured: genuine captures stay above 0.70, the known "
+                  "false positives reach 0.47 and 0.23",
+                  group="Gesture"),
+    SettingField("body_scale_min_samples", int, 5,
+                  "Body-size samples a track needs before body_scale_min_ratio "
+                  "applies; below it the check abstains, since a newly acquired "
+                  "track has no history to be inconsistent with",
+                  group="Gesture"),
+    SettingField("body_scale_reject_run_max", int, 3,
+                  "Consecutive scale rejections after which a track accepts the new "
+                  "size. Without it the check is a trap: a rejected frame does not "
+                  "update the median, so somebody walking away from the camera would "
+                  "be rejected once and then permanently",
+                  group="Gesture"),
     SettingField("cross_gesture_cooldown_s", float, 0.5,
                   "Minimum seconds before a DIFFERENT gesture type may fire. Deliberately "
                   "short — its only job is to stop one gesture's residual motion triggering "
@@ -509,7 +535,7 @@ GESTURE_CRITICAL: list[str] = [
     "folded_resolution_min", "sustain_gap_s",
     "sustain_credit_ticks",
     "folded_lean_max_deg", "folded_knee_above_hip_max",
-    "folded_arm_span_max",
+    "folded_arm_span_max", "body_scale_min_ratio",
     "folded_recline_memory_s", "folded_posture_visibility_min",
     # HOLD was missing here while every other gesture flag was listed, and
     # it is the one that most visibly surprises: it fires hold_duration_s

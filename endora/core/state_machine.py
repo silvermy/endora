@@ -143,6 +143,36 @@ class StateMachineConfig:
     # genuine snap recorded here sits between 0.89 and 1.85. An arm does not
     # sweep faster than this; a detector glitch does.
     flourish_max_rate: float = 4.00
+    # …and the climb must have been PROGRESSIVE: the arm actually observed
+    # passing through the elevations in between, not jumping between two
+    # extremes. ArmReading.sweep_progressive has always carried this, and
+    # its docstring has always said it is "what stops noise from being
+    # mistaken for a fast gesture" — but nothing ever read it when deciding
+    # to fire. It was used only to skip the confirm delay.
+    #
+    # It is the difference between a gesture and a glitch. Recorded live on
+    # 2026-09-28: a person on the sofa with their arm out roughly
+    # horizontal, while the detector intermittently collapsed their skeleton
+    # to a fifth of its size — shoulders 107 px to 20 px in one frame — and
+    # in the collapsed version the short "arm" pointed straight up. The
+    # sweep was measured ACROSS that substitution: real elevation -0.65,
+    # garbage elevation +1.00, apparent climb 1.65 at a plausible rate. Two
+    # false snaps, and the arm never rose at all.
+    #
+    # Every bogus sweep in those captures reports progressive False. But
+    # OFF by default, because the measurement does not support switching it
+    # on: across fourteen recorded snap captures it would suppress five, and
+    # only two of those are confirmed false positives — the other three are
+    # unlabelled and may well be real. Blocking a fifth of genuine snaps to
+    # catch two known bad ones is not a trade worth making blind.
+    #
+    # The same captures are separated cleanly by body_scale_min_ratio
+    # instead, which attacks the cause (the substituted skeleton) rather
+    # than this symptom, and drops individual frames rather than whole
+    # gestures. Kept here, measured and documented, as the next thing to
+    # reach for if that proves insufficient — and it needs labelled snaps
+    # before it can honestly be turned on.
+    flourish_require_progressive: bool = False
 
     # Legacy hold-style gating, used only when snap_require_flourish is off:
     # require the arm to have risen, and to be held still, before firing.
@@ -398,7 +428,9 @@ class GestureStateMachine:
         if self.c.snap_require_flourish:
             if (reading.sweep_climb >= self.c.flourish_min_climb
                     and self.c.flourish_min_rate <= reading.sweep_rate
-                        <= self.c.flourish_max_rate):
+                        <= self.c.flourish_max_rate
+                    and (reading.sweep_progressive
+                         or not self.c.flourish_require_progressive)):
                 r.flourish_seen = True
             gate_ok = r.flourish_seen
             rise_ok = still_ok = True
@@ -445,7 +477,8 @@ class GestureStateMachine:
                             f"(need {self.c.flourish_min_climb:.2f}), "
                             f"rate={reading.sweep_rate:.2f}/s "
                             f"(need {self.c.flourish_min_rate:.2f}"
-                            f"-{self.c.flourish_max_rate:.2f})",
+                            f"-{self.c.flourish_max_rate:.2f}), "
+                            f"progressive={reading.sweep_progressive}",
                             reading)
                 elif not rise_ok:
                     if "no_rise" not in r.gates_logged:

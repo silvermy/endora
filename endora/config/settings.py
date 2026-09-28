@@ -261,6 +261,10 @@ class Settings:
     # sweep without admitting slow drift.
     flourish_min_rate: float = 0.80
     flourish_max_rate: float = 4.00
+    flourish_require_progressive: bool = False
+    body_scale_min_ratio: float = 0.55
+    body_scale_min_samples: int = 5
+    body_scale_reject_run_max: int = 3
     # Legacy hold-style gates — used only when snap_require_flourish is off.
     snap_require_rise: bool = True
     snap_require_still: bool = False

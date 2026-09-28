@@ -833,6 +833,10 @@ class CameraAnalyser(threading.Thread):
             folded_visibility_min=float(getattr(s, 'folded_visibility_min', 0.50)),
             folded_extension_max=float(getattr(s, 'folded_extension_max', 0.80)),
             folded_arm_span_max=float(getattr(s, 'folded_arm_span_max', 1.60)),
+            body_scale_min_ratio=float(getattr(s, 'body_scale_min_ratio', 0.55)),
+            body_scale_min_samples=int(getattr(s, 'body_scale_min_samples', 5)),
+            body_scale_reject_run_max=int(
+                getattr(s, 'body_scale_reject_run_max', 3)),
             folded_lean_max_deg=float(getattr(s, 'folded_lean_max_deg', 22.0)),
             folded_knee_above_hip_max=float(
                 getattr(s, 'folded_knee_above_hip_max', 0.15)),
@@ -866,6 +870,8 @@ class CameraAnalyser(threading.Thread):
             flourish_min_climb=float(getattr(s, 'flourish_min_climb', 0.60)),
             flourish_min_rate=float(getattr(s, 'flourish_min_rate', 0.80)),
             flourish_max_rate=float(getattr(s, 'flourish_max_rate', 4.00)),
+            flourish_require_progressive=bool(
+                getattr(s, 'flourish_require_progressive', True)),
             snap_require_rise=bool(getattr(s, 'snap_require_rise', True)),
             snap_require_still=bool(getattr(s, 'snap_require_still', False)),
             sustained_rearm_s=float(getattr(s, 'sustained_rearm_s', 2.0)),

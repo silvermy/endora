@@ -374,6 +374,44 @@ class ArmTrackerConfig:
     #
     # Fitted against two false captures, so the margin is real but not wide.
     folded_arm_span_max: float = 1.60
+
+    # ── Detector sanity: the body cannot change size ──────────────────────
+    # A frame whose body measures this much smaller than the track's recent
+    # median is not this person; it is the detector having substituted a
+    # collapsed skeleton. People do not shrink by half in a seventh of a
+    # second.
+    #
+    # Recorded live 2026-09-28: a person sitting with their arm out roughly
+    # horizontal, while the detector intermittently produced a skeleton a
+    # fifth of the size — shoulders 107 px, then 20 px in the next frame —
+    # whose short "arm" pointed straight up. Two false snaps, and the arm
+    # never rose. The sweep was measured ACROSS the substitution: real
+    # elevation -0.65 against garbage elevation +1.00, an apparent climb of
+    # 1.65 at an entirely plausible rate.
+    #
+    # Every scale-relative guard is blind to this by construction. The arm
+    # looked the right length FOR that tiny body (min_arm_len_frac passed at
+    # 0.85-1.35), the torso looked the right shape, the pose looked upright.
+    # Only comparing the body against its own recent history sees it.
+    #
+    # Measured over fourteen snap captures, on shoulder width: the two known
+    # false positives bottom out at 0.16 and 0.11 with four or five offending
+    # frames each. Three other captures dip below 0.55 for one or two frames
+    # apiece — those are garbage frames too, and dropping them costs nothing,
+    # because frames are rejected individually and a real gesture still fires
+    # on the twenty-odd good ones around them.
+    body_scale_min_ratio: float = 0.55
+    # Samples needed before the median means anything. Below this the check
+    # abstains — a track that has just been acquired has no history to be
+    # inconsistent with.
+    body_scale_min_samples: int = 5
+    # Consecutive rejections after which the track accepts the new scale and
+    # starts over. Without this the check is a trap: a rejected frame does
+    # not update the median, so a person who genuinely changes size — walking
+    # away from the camera, standing up from the couch — would be rejected
+    # once and then forever, because the median can never follow them. A
+    # glitch lasts a frame or two; a real change persists, and says so.
+    body_scale_reject_run_max: int = 3
     # Shoulder width as a fraction of torso length, below which the person is
     # not square to the camera. Facing matters here in a way it does not for
     # a raised arm: in profile the two wrists overlap in the image whatever
@@ -542,6 +580,10 @@ class ArmTracker:
         self._pending_last: float = 0.0
         # Rolling per-arm history for the trajectory checks.
         self._hist: Deque[_HistSample] = deque()
+        # Recent body sizes for this track, for the scale-stability check —
+        # see body_scale_min_ratio.
+        self._body_hist: Deque[float] = deque(maxlen=15)
+        self._body_reject_run: int = 0
 
     # ── Trajectory history ────────────────────────────────────────────────
 
@@ -926,6 +968,32 @@ class ArmTracker:
         # geometry. Both candidates are now in pixels, so comparing them is
         # meaningful (in normalised coords it was not — see module docstring).
         body_size = max(shoulder_w, torso_len)
+
+        # Scale sanity, before anything records this frame. A collapsed
+        # skeleton must not reach the sweep history: the damage it does is
+        # not a bad classification on this frame, it is that every later
+        # frame's climb and rate get measured against it.
+        #
+        # Measured on SHOULDER WIDTH, not body_size. body_size is
+        # max(shoulder_w, torso_len), and a collapsed skeleton frequently
+        # keeps a spurious long torso — shoulders 28 px against a torso of
+        # 118 in one recorded frame — so the max stays large and hides
+        # exactly the collapse this is looking for. Shoulders are the scale
+        # that survives, which is why the folded-arms geometry measures
+        # against them too. See body_scale_min_ratio.
+        if shoulder_w > 1e-6:
+            if len(self._body_hist) >= self.c.body_scale_min_samples:
+                median = float(np.median(self._body_hist))
+                if (median > 1e-6
+                        and shoulder_w < self.c.body_scale_min_ratio * median):
+                    self._body_reject_run += 1
+                    if self._body_reject_run <= self.c.body_scale_reject_run_max:
+                        return None
+                    # Persistently this size: it is not a glitch, it is the
+                    # person. Forget the old scale and follow them.
+                    self._body_hist.clear()
+            self._body_reject_run = 0
+            self._body_hist.append(shoulder_w)
 
         # Leg-raise guard: both knees above shoulder level means legs in the
         # air, not arms. Deliberately still frame-relative — a coarse
