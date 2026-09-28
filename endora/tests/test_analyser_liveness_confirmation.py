@@ -17,11 +17,30 @@ Regression coverage for two real, sequential bugs in the same feature:
    exposure adjustment) does not produce independent single-frame flukes —
    it produces a BURST of several correlated frames that all read as
    "changed" together, easily landing two "genuine" passes within any 60s
-   window for a completely static object. Fixed by additionally requiring
-   the centroid to have actually moved by a meaningful amount between the
-   two passes (see _CENTROID_MOVED_MIN_FRAC) — something no amount of
-   foreground-mask noise can fake, since it comes from the pose model's
-   own keypoint coordinates, not the background model.
+   window for a completely static object. Fixed at the time by additionally
+   requiring the centroid to have MOVED between the two passes.
+
+3. That displacement requirement turned out to be backwards, and was
+   removed on 2026-09-28. It assumed a static object cannot shift its own
+   keypoints. Measured on recorded captures the opposite holds: a ghost's
+   centroid leaps between garbage positions (557 px across one capture)
+   because the keypoints are garbage, while a person sitting still moves
+   3-81 px. So it was satisfied by exactly the ghosts it was meant to stop,
+   and denied to the primary use case, somebody sitting on a couch. A
+   painting was confirmed human and fired FOLDED_ARMS 17 times in 20
+   minutes at detector confidence 0.71.
+
+   What defends against bug 2 now: the confirming passes must be at least
+   _LIVENESS_CONFIRM_MIN_GAP_S apart, so a short correlated burst cannot
+   supply both; the liveness evidence itself is stronger, since raw_live
+   requires the WHOLE BODY region to differ from the learned background and
+   not merely a wrist patch; and, crucially, confirmation now EXPIRES
+   (_LIVENESS_CONFIRM_EXPIRY_S) instead of lasting the life of the pid.
+   That last one is what makes the trade acceptable: the old design needed
+   a hard displacement gate because a single mistaken confirmation was
+   permanent. State the residual honestly — a lighting change lasting
+   longer than the minimum gap can still confirm a static object, and it
+   now has 300 seconds to be wrong in rather than forever.
 
 Uses CameraAnalyser._match_persons directly with a real Settings()
 instance (not a bare MagicMock — _make_person_entry constructs a real
@@ -76,21 +95,35 @@ def test_ghost_never_self_exempts_without_a_second_genuine_pass():
     assert known_centroids == []
 
 
-def test_two_genuine_passes_at_the_same_spot_does_not_confirm():
-    """The exact live regression: a static ghost's foreground-mask check
-    can pass twice within the confirm window (correlated lighting noise,
-    not independent flukes) while its reported position never moves at
-    all. Without also requiring displacement, this used to confirm it.
+def test_staying_put_no_longer_blocks_confirmation():
+    """The displacement requirement was removed — see item 3 in the module
+    docstring. Somebody sitting still on a couch must be able to earn
+    confirmation; under the old rule they never could, while the ghosts it
+    was aimed at cleared it on keypoint jitter.
     """
     a = _analyser()
     a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
     pid = _only_pid(a)
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1005.0)
+    assert a._persons[pid].confirmed_human is True
 
-    a._match_persons(
-        [(None, CENTROID, True)], 640, 480,
-        now=1000.0 + _LIVENESS_CONFIRM_WINDOW_S - 1,
-    )
-    assert a._persons[pid].confirmed_human is False
+
+def test_a_static_object_never_supplies_a_genuine_pass():
+    """Which is what actually keeps a picture on the wall out, now that
+    displacement does not. _match_persons is handed raw_live already
+    computed, so the defence lives one level up, in the liveness evidence
+    itself — a region that never differs from the learned background.
+    """
+    import numpy as np
+    from cameras.analyser import _body_shows_life, _wrist_shows_motion
+
+    painting = np.zeros((17, 3), dtype=np.float32)
+    for i in (0, 5, 6, 7, 8, 9, 10, 11, 12):
+        painting[i] = (150 + (i % 3) * 30, 200 + (i % 4) * 25, 0.9)
+    static_mask = np.zeros((120, 160), dtype=np.uint8)   # nothing ever changes
+
+    assert _body_shows_life(painting, static_mask, 1280, 640) is False
+    assert _wrist_shows_motion(painting, static_mask, 1280, 640, 0.12) is False
 
 
 def test_two_genuine_moved_passes_within_window_confirms():
@@ -164,15 +197,35 @@ def test_unconfirmed_pid_loses_exemption_after_grace_period_elapses():
     assert known == []
 
 
-def test_confirmed_pid_stays_exempt_regardless_of_grace_period():
+def test_confirmed_pid_stays_exempt_well_past_the_grace_period():
+    """Confirmation still outlasts the short grace window by a long way — a
+    confirmed person who goes quiet must not be dropped."""
+    from cameras.analyser import _LIVENESS_CONFIRM_EXPIRY_S
     a = _analyser()
     a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
     pid = _only_pid(a)
     a._match_persons([(None, MOVED_CENTROID, True)], 640, 480, now=1010.0)
     assert a._persons[pid].confirmed_human is True
 
-    known = _known_centroids(a._persons, now=1010.0 + 10 * _LIVENESS_CONFIRM_WINDOW_S)
-    assert known == [MOVED_CENTROID]
+    still_fresh = 1010.0 + _LIVENESS_CONFIRM_EXPIRY_S - 1
+    assert _known_centroids(a._persons, now=still_fresh) == [MOVED_CENTROID]
+    assert _LIVENESS_CONFIRM_EXPIRY_S > _LIVENESS_CONFIRM_WINDOW_S
+
+
+def test_confirmation_expires_rather_than_lasting_forever():
+    """It used to be sticky for the life of the pid, so one mistaken
+    confirmation was permanent — and a picture on the wall only has to fool
+    the gate once in twenty-nine hours to be exempt for twenty-nine hours.
+    """
+    from cameras.analyser import _LIVENESS_CONFIRM_EXPIRY_S
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+    pid = _only_pid(a)
+    a._match_persons([(None, MOVED_CENTROID, True)], 640, 480, now=1010.0)
+    assert a._persons[pid].confirmed_human is True
+
+    stale = 1010.0 + _LIVENESS_CONFIRM_EXPIRY_S + 1
+    assert _known_centroids(a._persons, now=stale) == []
 
 
 # ── the window needs a floor as well as a ceiling ────────────────────────────

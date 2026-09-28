@@ -199,6 +199,13 @@ _LIVENESS_CONFIRM_WINDOW_S = 60.0
 # FOLDED_ARMS eleven seconds later (2026-09-26). A real person is in view for
 # many seconds, so this costs them nothing.
 _LIVENESS_CONFIRM_MIN_GAP_S = 2.0
+# Confirmation is evidence, and evidence goes stale. It used to be sticky for
+# the life of the pid, so one bad confirmation was permanent — and a picture
+# on the wall only has to fool the gate once in twenty-nine hours to be
+# exempt from it for twenty-nine hours. A pid that has not produced a genuine
+# liveness pass in this long must earn its exemption again. Comfortably longer
+# than the grace period, so an ordinary still person is never disturbed.
+_LIVENESS_CONFIRM_EXPIRY_S = 300.0
 
 # Minimum centroid displacement (fraction of frame diagonal) between this
 # detection and this pid's previous one to count as "actually moved" for
@@ -215,6 +222,37 @@ _CENTROID_MOVED_MIN_FRAC = 0.02
 # used by the background-subtraction liveness check.
 _COCO_LEFT_WRIST  = 9
 _COCO_RIGHT_WRIST = 10
+# Whole-body foreground floor. A picture on the wall never differs from the
+# learned background ANYWHERE in its box: not at the wrists, not at the head,
+# not once in twenty-nine hours. A person always does — breathing, shifting,
+# the light changing across them — even sitting apparently still. So the share
+# of a candidate's own body region that reads as foreground separates the two
+# far more decisively than two small wrist patches, and it is a presence test
+# rather than a tuned geometric threshold.
+#
+# Deliberately near zero, and it should stay there until live data says
+# otherwise. This is not "is this person moving", it is "is this region made
+# of pixels the background model has never settled on" — a painting measures
+# exactly zero, and anything above zero is evidence.
+#
+# It cannot be validated offline: the recorded captures hold keypoints, not
+# foreground masks, so the negative side (a painting scores 0) is provable
+# from them and the positive side is not. Set conservatively for that reason.
+# The measured fraction is logged on every rejection so the real distribution
+# can be seen on live data before anyone tightens this.
+#
+# The absolute floor matters as much as the fraction: the background model
+# runs downscaled to keep it off the critical path, so a couch-distance body
+# covers roughly 14x37 mask pixels and a percentage of that is a handful of
+# pixels. Two pixels guards against single-pixel sensor noise without
+# demanding motion.
+_BODY_FOREGROUND_MIN = 0.005
+_BODY_FOREGROUND_MIN_PX = 2
+# How much of the body's bounding span to sample, as a fraction either side
+# of the keypoint extent's centre — keeps the region on the body rather than
+# on the wall around it.
+_BODY_REGION_SHRINK = 0.7
+
 _WRIST_PATCH_FRAC = 0.04  # half-width of the wrist foreground-check patch,
                            # as a fraction of the frame diagonal
 
@@ -262,6 +300,82 @@ def _wrist_shows_motion(
     return not seen_wrist  # no visible wrist → can't judge, don't reject
 
 
+def _body_foreground_frac(
+    kps_row: np.ndarray,
+    fg_mask: Optional[np.ndarray],
+    frame_w: int,
+    frame_h: int,
+) -> Optional[float]:
+    """Share of this candidate's body region reading as foreground, or None
+    when there is nothing to measure. Exposed separately so the value can be
+    logged — see _BODY_FOREGROUND_MIN on why it needs watching."""
+    if fg_mask is None:
+        return None
+    vis = kps_row[kps_row[:, 2] > 0.3]
+    if vis.shape[0] < 2:
+        return None
+    mh, mw = fg_mask.shape[:2]
+    sx, sy = mw / max(1, frame_w), mh / max(1, frame_h)
+    xs, ys = vis[:, 0] * sx, vis[:, 1] * sy
+    cx, cy = (xs.min() + xs.max()) / 2.0, (ys.min() + ys.max()) / 2.0
+    hw = max(1.0, (xs.max() - xs.min()) / 2.0 * _BODY_REGION_SHRINK)
+    hh = max(1.0, (ys.max() - ys.min()) / 2.0 * _BODY_REGION_SHRINK)
+    x0, x1 = max(0, int(cx - hw)), min(mw, int(cx + hw) + 1)
+    y0, y1 = max(0, int(cy - hh)), min(mh, int(cy + hh) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    region = fg_mask[y0:y1, x0:x1]
+    if region.size == 0:
+        return None
+    return float((region > 0).mean())
+
+
+def _body_shows_life(
+    kps_row: np.ndarray,
+    fg_mask: Optional[np.ndarray],
+    frame_w: int,
+    frame_h: int,
+    min_frac: float = _BODY_FOREGROUND_MIN,
+) -> bool:
+    """Does ANY part of this candidate's body region differ from the learned
+    background?
+
+    The wrist-patch test asks a much narrower question, and a framed painting
+    of a person answers it the same way a sleeping person does — no motion at
+    the wrists. But the painting differs from the background nowhere at all,
+    ever, while a living body differs from it somewhere continuously. Sampling
+    the whole body region is the difference between "is this person waving"
+    and "is this thing made of pixels that ever change", and only the second
+    question distinguishes a person from a picture of one.
+
+    Returns True when there is nothing to judge against — no background model
+    yet, or no usable keypoint extent — matching _wrist_shows_motion: this
+    gate only ever rejects on positive evidence of staticness.
+    """
+    if fg_mask is None:
+        return True
+    vis = kps_row[kps_row[:, 2] > 0.3]
+    if vis.shape[0] < 2:
+        return True
+
+    mh, mw = fg_mask.shape[:2]
+    sx, sy = mw / max(1, frame_w), mh / max(1, frame_h)
+    xs, ys = vis[:, 0] * sx, vis[:, 1] * sy
+    cx, cy = (xs.min() + xs.max()) / 2.0, (ys.min() + ys.max()) / 2.0
+    hw = max(1.0, (xs.max() - xs.min()) / 2.0 * _BODY_REGION_SHRINK)
+    hh = max(1.0, (ys.max() - ys.min()) / 2.0 * _BODY_REGION_SHRINK)
+
+    x0, x1 = max(0, int(cx - hw)), min(mw, int(cx + hw) + 1)
+    y0, y1 = max(0, int(cy - hh)), min(mh, int(cy + hh) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return True
+    region = fg_mask[y0:y1, x0:x1]
+    if region.size == 0:
+        return True
+    hits = int((region > 0).sum())
+    return hits >= max(_BODY_FOREGROUND_MIN_PX, int(region.size * min_frac))
+
+
 def _passes_liveness_gate(
     kps_row: np.ndarray,
     centroid: tuple,
@@ -297,7 +411,13 @@ def _passes_liveness_gate(
     )
     if near_known:
         return True
-    return _wrist_shows_motion(kps_row, fg_mask, frame_w, frame_h, min_foreground_frac)
+    # Either, not both — mirrors the `admit` test in _all_valid_landmarks.
+    # A hand-waver shows life at the wrists and barely anywhere else; someone
+    # sitting still shows it across the body and not at the wrists. A picture
+    # on the wall shows it in neither place, which is the whole point.
+    return (_body_shows_life(kps_row, fg_mask, frame_w, frame_h)
+            or _wrist_shows_motion(kps_row, fg_mask, frame_w, frame_h,
+                                   min_foreground_frac))
 
 
 def _acquire_ok(conf: Optional[float], centroid: tuple,
@@ -370,8 +490,20 @@ def _all_valid_landmarks(
                 and i < len(boxes) else None)
         if not _acquire_ok(conf, c, tracked_centroids, match_dist, acquire_conf):
             continue
-        raw_live = _wrist_shows_motion(kps[i], fg_mask, frame_w, frame_h, min_foreground_frac)
-        if not raw_live:
+        # Two questions, two answers. A painting answers no to both.
+        #
+        #   admit  — is there ANY evidence of life? Either the wrists moved
+        #            or the body region differs from the background. A person
+        #            waving only a hand shows the first and barely the second;
+        #            one sitting still shows the second and not the first.
+        #   strong — both at once. Only this earns confirmed_human, because
+        #            confirmation exempts a pid from being checked again and
+        #            is far too powerful to hand out on the narrower signal.
+        _body = _body_shows_life(kps[i], fg_mask, frame_w, frame_h)
+        _wrist = _wrist_shows_motion(kps[i], fg_mask, frame_w, frame_h,
+                                     min_foreground_frac)
+        admit, raw_live = (_body or _wrist), (_body and _wrist)
+        if not admit:
             near_known = known_centroids is not None and any(
                 (c[0] - kc[0]) ** 2 + (c[1] - kc[1]) ** 2 <= match_dist ** 2
                 for kc in known_centroids
@@ -418,9 +550,9 @@ def _known_centroids(
 ) -> list[tuple]:
     """Centroids exempt from the wrist-liveness check this frame.
 
-    Includes confirmed_human pids (sticky, see _LIVENESS_CONFIRM_WINDOW_S)
-    plus pids still inside their own confirmation grace period — within
-    _LIVENESS_CONFIRM_WINDOW_S of their last genuine pass. Without the
+    Includes confirmed_human pids — for _LIVENESS_CONFIRM_EXPIRY_S since
+    their last genuine pass, no longer indefinitely — plus unconfirmed pids
+    still inside the shorter grace period of _LIVENESS_CONFIRM_WINDOW_S. Without the
     grace period, a real person who hasn't yet earned their second genuine
     pass (e.g. someone who just sat down and hasn't moved their wrist
     since) fails the liveness check on the very next frame, gets pruned by
@@ -433,9 +565,9 @@ def _known_centroids(
     """
     return [
         e.centroid for e in persons.values()
-        if e.confirmed_human or (
-            e.last_genuine_live_at is not None
-            and now - e.last_genuine_live_at <= _LIVENESS_CONFIRM_WINDOW_S
+        if e.last_genuine_live_at is not None and now - e.last_genuine_live_at <= (
+            _LIVENESS_CONFIRM_EXPIRY_S if e.confirmed_human
+            else _LIVENESS_CONFIRM_WINDOW_S
         )
     ]
 
@@ -767,15 +899,16 @@ class CameraAnalyser(threading.Thread):
         )
 
     def _note_liveness(
-        self, e: "_PersonEntry", raw_live: bool, moved: bool, now: float
+        self, e: "_PersonEntry", raw_live: bool, now: float,
+        pid: object = None,
     ) -> None:
         """Update a pid's confirmed-human status from this frame's checks.
 
-        Two genuine AND MOVED passes, at least _LIVENESS_CONFIRM_MIN_GAP_S
+        Two genuine passes, at least _LIVENESS_CONFIRM_MIN_GAP_S
         and at most _LIVENESS_CONFIRM_WINDOW_S apart, permanently confirm the
-        pid as human (sticky — never revoked short of the pid itself being
-        pruned). Both bounds matter: with only the upper one, two adjacent
-        frames qualified. Requiring actual
+        pid as human. Both bounds matter: with only the upper one, two
+        adjacent frames qualified. Confirmation is no longer permanent —
+        see _LIVENESS_CONFIRM_EXPIRY_S. Requiring actual
         keypoint displacement (not just the foreground-mask check passing)
         is what closes the gap the window alone left open: correlated
         lighting noise (a flicker, an exposure adjustment) can make the
@@ -783,15 +916,24 @@ class CameraAnalyser(threading.Thread):
         row for a completely static object, but it can never make that
         object's own reported keypoint positions actually shift.
         """
-        if not raw_live or not moved or e.confirmed_human:
+        # `moved` is deliberately NOT required. It was added on the theory
+        # that a static object cannot shift its own keypoints, but measured
+        # on recorded captures the opposite holds: a ghost's centroid leaps
+        # between garbage positions (557 px over one capture) while a person
+        # sitting still moves 3-81 px. Requiring displacement as proof of
+        # humanity selected FOR ghosts and against the primary use case,
+        # somebody sitting on a couch. raw_live now carries the whole-body
+        # foreground test, which is the evidence that actually separates a
+        # person from a picture of one.
+        if not raw_live or e.confirmed_human:
             return
         first = e.first_genuine_live_at
         if first is None or now - first > _LIVENESS_CONFIRM_WINDOW_S:
             e.first_genuine_live_at = now        # anchor a fresh window
         elif now - first >= _LIVENESS_CONFIRM_MIN_GAP_S:
             e.confirmed_human = True
-            log.info("[%s] pid confirmed human (2 genuine, moved passes "
-                     "%.1fs apart)", self.label, now - first)
+            log.info("[%s] pid=%s confirmed human (2 genuine passes %.1fs "
+                     "apart)", self.label, pid, now - first)
         e.last_genuine_live_at = now
 
     def _match_persons(
@@ -826,7 +968,7 @@ class CameraAnalyser(threading.Thread):
                 e.last_seen = now
                 e.last_seen_run = self._yolo_runs
                 available.remove(best_pid)
-                self._note_liveness(e, raw_live, moved, now)
+                self._note_liveness(e, raw_live, now, pid=best_pid)
             else:
                 pid = self._next_pid
                 self._next_pid += 1
@@ -1302,11 +1444,17 @@ class CameraAnalyser(threading.Thread):
                         match_dist, _acquire_conf,
                     ):
                         reason = "too weak to acquire"
+                    # Report the measured body-foreground share on the
+                    # overlay whenever liveness rejects, so the real
+                    # distribution is visible before anyone retunes
+                    # _BODY_FOREGROUND_MIN — it cannot be measured offline.
+                    _bf = _body_foreground_frac(_cached_kps[i], fg_mask, pw, ph)
                     if reason is None and not _passes_liveness_gate(
                         _cached_kps[i], c, fg_mask, pw, ph, min_fg_frac,
                         known_centroids, match_dist,
                     ):
-                        reason = "not live"
+                        reason = ("not live" if _bf is None
+                                  else f"not live bf={_bf:.3f}")
                     if reason is None:
                         _all_dbg_kps.append(_cached_kps[i])
                     if box is not None:
