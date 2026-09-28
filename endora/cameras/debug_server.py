@@ -1191,6 +1191,56 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
 
+        elif parsed.path == "/label":
+            from cameras import labeler
+            body = labeler.page()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path == "/label/list":
+            from cameras import labeler
+            body = json.dumps(labeler.list_captures()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path == "/label/trace":
+            from cameras import labeler
+            trace = labeler.load_trace(qs.get("name", [""])[0])
+            body = json.dumps(trace or {"error": "not found"}).encode()
+            self.send_response(200 if trace else 404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path == "/label/summary":
+            from cameras import labeler
+            body = json.dumps(labeler.summary()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path == "/label/export":
+            # Everything at once, for pulling the labelled set off the box.
+            from cameras import labeler
+            body = json.dumps({"labels": labeler.get_labels(),
+                               "summary": labeler.summary()}, indent=1).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Disposition",
+                             'attachment; filename="capture_labels.json"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         elif parsed.path == "/settings":
             body = json.dumps(_current_values()).encode()
             self.send_response(200)
@@ -1382,6 +1432,24 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/label/set":
+            from cameras import labeler
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                payload = json.loads(self.rfile.read(length)) if length else {}
+            except Exception:
+                payload = {}
+            ok = labeler.set_label(str(payload.get("name", "")),
+                                   payload.get("label"),
+                                   str(payload.get("note", "")))
+            body = json.dumps({"ok": ok}).encode()
+            self.send_response(200 if ok else 400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if path == "/capture":
             if _recorder is None:
                 body = json.dumps({
