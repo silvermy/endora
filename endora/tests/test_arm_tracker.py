@@ -11,13 +11,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from cameras.arm_tracker import ArmTracker, ArmTrackerConfig, ArmState, Side
 from tests.fake_landmarks import (
+    SYNTHETIC_BODY,
     arm_down, right_arm_up_vertical, right_arm_up_horizontal,
     both_arms_up, t_pose, cross_arms, lying_down, low_visibility,
 )
 
 
 def _tracker() -> ArmTracker:
-    return ArmTracker(ArmTrackerConfig())
+    return ArmTracker(ArmTrackerConfig(**SYNTHETIC_BODY))
 
 
 def test_arm_down_returns_down_state():

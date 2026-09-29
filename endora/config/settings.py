@@ -147,6 +147,7 @@ class Settings:
     # than this multiple of shoulder width, refuse to judge it rather than
     # guess.
     min_arm_len_frac: float = 0.55
+    head_rest_rise_max: float = 0.95
     # Deprecated — superseded by the settings above. Kept so existing
     # settings files keep loading; no code reads them.
     arm_above_head_tolerance: float = 0.15

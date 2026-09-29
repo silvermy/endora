@@ -280,6 +280,15 @@ class ArmTrackerConfig:
     # shoulder width (or torso length when shoulders are unusable) before
     # trusting it. Refusing to judge is the correct failure here.
     min_arm_len_frac: float = 0.55
+    # Hand resting on or behind the head. The pose model does not draw that
+    # as a hand on a head: it draws a SHORT arm pointing up, with the wrist
+    # about one head above the shoulder, and it passes elevation and
+    # extension like a real raise. A raise whose wrist rises less than this
+    # many shoulder-widths above its own shoulder is rejected. Over 109
+    # recorded fires this caught 13 photo-verified hand-on-head fires (easy
+    # chair and reclining on the couch); the lowest clear genuine raise rose
+    # 0.97, so the margin is thin. 0 disables.
+    head_rest_rise_max: float = 0.95
     # Elevation at/above which an arm counts as "on its way up" for the
     # early chime.
     arm_rising_elevation: float = 0.45
@@ -707,6 +716,16 @@ class ArmTracker:
                 return False
         return True
 
+    def _hand_on_head(self, shoulder: _Pt, wrist: _Pt, shoulder_w: float) -> bool:
+        """Is this 'raised' arm really a hand resting on the head?
+
+        See head_rest_rise_max. Needs both shoulders for the scale; without
+        them it answers False, so an unmeasurable pose is never rejected.
+        """
+        if shoulder_w <= 1e-6 or self.c.head_rest_rise_max <= 0:
+            return False
+        return (shoulder[1] - wrist[1]) < self.c.head_rest_rise_max * shoulder_w
+
     # ── Public API ────────────────────────────────────────────────────────
 
     def classify(
@@ -1038,8 +1057,10 @@ class ArmTracker:
                     and elev >= self.c.raise_elevation_min
                     and ext >= self.c.arm_extension_min)
 
-        l_raised = _raised(l_elev, l_ext, l_len, l_ok)
-        r_raised = _raised(r_elev, r_ext, r_len, r_ok)
+        l_raised = (_raised(l_elev, l_ext, l_len, l_ok)
+                    and not self._hand_on_head(ls, lw, shoulder_w))
+        r_raised = (_raised(r_elev, r_ext, r_len, r_ok)
+                    and not self._hand_on_head(rs, rw, shoulder_w))
 
         both_sh_ok = ls_ok and rs_ok
 

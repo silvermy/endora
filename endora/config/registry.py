@@ -166,6 +166,10 @@ REGISTRY: list[SettingField] = [
                   "Refuse to judge an arm whose projection is shorter than this multiple "
                   "of shoulder width (too foreshortened to read reliably)",
                   group="Pose"),
+    SettingField("head_rest_rise_max", float, 0.95,
+                  "Reject a raise whose wrist is less than this many shoulder-widths above "
+                  "its shoulder — a hand resting on or behind the head (0 = off)",
+                  group="Pose"),
     # Superseded by the two above — kept so existing settings files load,
     # but no longer read by any code path.
     SettingField("arm_above_head_tolerance", float, 0.15,
@@ -524,6 +528,7 @@ REGISTRY_BY_KEY: dict[str, SettingField] = {f.key: f for f in REGISTRY}
 GESTURE_CRITICAL: list[str] = [
     "yolo_pose_model", "yolo_imgsz", "yolo_conf",
     "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
+    "head_rest_rise_max",
     "snap_elevation_min", "snap_sustain_s",
     "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
     "flourish_max_rate", "folded_visibility_min",

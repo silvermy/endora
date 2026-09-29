@@ -158,8 +158,8 @@ def test_a_pose_shadows_the_frame_until_it_is_switched_off():
 def test_switching_a_pose_off_leaves_the_raise_intact():
     """Turning off unused poses must not disturb the gesture you do use."""
     from cameras.arm_tracker import ArmTracker, ArmTrackerConfig
-    from tests.fake_landmarks import right_arm_up_vertical
+    from tests.fake_landmarks import SYNTHETIC_BODY, right_arm_up_vertical
     cfg = ArmTrackerConfig(detect_cross_arms=False, detect_t_pose=False,
-                           detect_both_up=False)
+                           detect_both_up=False, **SYNTHETIC_BODY)
     r = ArmTracker(cfg)._classify_raw(right_arm_up_vertical(), 1280, 720)
     assert r.state is ArmState.SINGLE_UP and r.raised_side is Side.RIGHT

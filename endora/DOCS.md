@@ -196,8 +196,10 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `yolo_imgsz` change has no effect | Only `320`/`480`/`640` are bundled — any other value silently falls back to `640` on a Pi (no runtime ONNX export on aarch64) |
 | SNAP fires with nobody in frame (framed pictures, mirrors, TV) | Raise `bg_subtract_min_foreground` toward `0.20`; check `/captures` on the debug page to confirm the ghost source |
 | Real gesture rejected as a "ghost" | Lower `bg_subtract_min_foreground` toward `0.05`, or disable `bg_subtract_enable` |
-| SNAP fires from resting a hand near your own face (glasses, phone, scratching) | Raise `wrist_head_exclude_dist` toward `0.12` |
-| Genuine raise near your head gets rejected | Lower `wrist_head_exclude_dist` toward `0.05` |
+| SNAP fires from resting a hand near your own face (glasses, phone, scratching) | Raise `arm_extension_min` toward `0.85` — a hand at the face bends the elbow, so it fails on straightness |
+| Genuine raise near your head gets rejected | Lower `arm_extension_min` toward `0.75` |
+| SNAP fires from resting a hand on or behind your head (reclining, easy chair) | Raise `head_rest_rise_max` toward `1.05` — the wrist of a hand on the head rises about one shoulder-width above the shoulder, a real raise more |
+| Genuine raise with a bent arm gets rejected | Lower `head_rest_rise_max` toward `0.85`, or `0` to disable |
 
 ---
 
@@ -216,7 +218,7 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `arm_extension_min` | `0.80` | How straight the arm must be (1.0 = fully extended, 0.71 = elbow at 90°) |
 | `body_upright_min` | `-0.15` | Hip-shoulder gap to confirm upright (negative OK for fisheye) |
 | `pose_visibility_min` | `0.45` | Min landmark visibility to accept a pose (filters furniture) |
-| `wrist_head_exclude_dist` | `0.09` | Reject a raised wrist within this distance of the nose keypoint (filters resting a hand against your own face) |
+| `head_rest_rise_max` | `0.95` | Reject a raise whose wrist rises less than this many shoulder-widths above its shoulder — a hand resting on or behind your head (`0` = off) |
 | `snap_elevation_min` | `0.70` | Minimum arm elevation for the gesture to fire |
 | `snap_require_flourish` | `true` | Fire on the arm sweep (Endora's flourish), not on a held raise |
 | `flourish_min_climb` | `0.60` | How much elevation the sweep must gain |

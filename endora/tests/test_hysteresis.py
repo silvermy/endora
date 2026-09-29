@@ -9,14 +9,14 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from cameras.arm_tracker import ArmTracker, ArmTrackerConfig, ArmState
-from tests.fake_landmarks import arm_down, right_arm_up_vertical
+from tests.fake_landmarks import SYNTHETIC_BODY, arm_down, right_arm_up_vertical
 
 CONFIRM_S = 0.20
 RELEASE_S = 0.30
 
 
 def _tracker(**overrides) -> ArmTracker:
-    return ArmTracker(ArmTrackerConfig(**overrides))
+    return ArmTracker(ArmTrackerConfig(**{**SYNTHETIC_BODY, **overrides}))
 
 
 def test_first_frame_not_yet_confirmed():

@@ -18,11 +18,11 @@ from cameras.arm_tracker import (
     ArmReading, ArmState, ArmTracker, ArmTrackerConfig, Side,
 )
 from core.state_machine import Gesture, GestureStateMachine, StateMachineConfig
-from tests.fake_landmarks import _build, Point, arm_down, right_arm_up_vertical
+from tests.fake_landmarks import SYNTHETIC_BODY, _build, Point, arm_down, right_arm_up_vertical
 
 
 def _tracker() -> ArmTracker:
-    return ArmTracker(ArmTrackerConfig())
+    return ArmTracker(ArmTrackerConfig(**SYNTHETIC_BODY))
 
 
 def _feed(tracker, schedule):

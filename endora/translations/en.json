@@ -68,6 +68,10 @@
       "name": "Foreshortening guard",
       "description": "Refuse to judge an arm pointing nearly at the camera, where its projection is too short to read (default 0.55)"
     },
+    "head_rest_rise_max": {
+      "name": "Hand-on-head guard",
+      "description": "Reject a raise whose wrist is less than this many shoulder-widths above the shoulder — a hand resting on or behind your head (default 0.95, 0 = off)"
+    },
     "rise_elevation_delta": {
       "name": "Minimum lift",
       "description": "How much the arm must climb to count as a deliberate lift when it starts already raised, e.g. from an armrest (default 0.35)"

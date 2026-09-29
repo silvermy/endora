@@ -11,6 +11,13 @@ The frame origin (0,0) is top-left; y increases downward.
 from dataclasses import dataclass
 from typing import Dict
 
+# Tracker settings for tests built on these fixtures. The fake body's arms are
+# shorter than its shoulders are wide (a raised wrist sits 0.84 shoulder-widths
+# above the shoulder at 1280x720, where real people measure about 1.5), so the
+# hand-on-head guard rejects every raise here. It is tested on recorded traces
+# in test_hand_on_head.py instead.
+SYNTHETIC_BODY = {"head_rest_rise_max": 0.0}
+
 
 @dataclass
 class Point:
