@@ -281,3 +281,35 @@ def test_a_long_run_of_jitter_still_confirms_eventually():
         a._match_persons([(None, MOVED_CENTROID if i % 2 else CENTROID, True)],
                          640, 480, now=1000.0 + i * 0.1)
     assert a._persons[pid].confirmed_human is True
+
+
+# ── only a confirmed track may fire ───────────────────────────────────────────
+# Admission is per frame and needs only a few changed pixels, which a painting
+# can supply on a quiet day: its first FOLDED_ARMS on 2026-09-28 fired eleven
+# seconds before its track was ever confirmed.
+
+def test_an_unconfirmed_track_cannot_fire():
+    from core.state_machine import Gesture
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+    pid = _only_pid(a)
+    assert a._confirmed_gesture(a._persons[pid], pid, Gesture.FOLDED_ARMS) is None
+
+
+def test_a_confirmed_track_fires():
+    from core.state_machine import Gesture
+    from cameras.analyser import _LIVENESS_CONFIRM_MIN_GAP_S
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+    pid = _only_pid(a)
+    a._match_persons([(None, CENTROID, True)], 640, 480,
+                     now=1000.0 + _LIVENESS_CONFIRM_MIN_GAP_S)
+    assert a._persons[pid].confirmed_human is True
+    assert a._confirmed_gesture(a._persons[pid], pid, Gesture.SNAP) is Gesture.SNAP
+
+
+def test_no_gesture_stays_no_gesture():
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+    pid = _only_pid(a)
+    assert a._confirmed_gesture(a._persons[pid], pid, None) is None

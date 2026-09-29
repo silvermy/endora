@@ -256,6 +256,28 @@ _BODY_REGION_SHRINK = 0.7
 _WRIST_PATCH_FRAC = 0.04  # half-width of the wrist foreground-check patch,
                            # as a fraction of the frame diagonal
 
+# Foreground only counts as evidence of life when it is the candidate's own.
+# Both tests above ask whether pixels differ from the learned background, and a
+# change in the light answers yes everywhere at once: on 2026-09-28 afternoon
+# sun through the kitchen window lit up the painting's box, the painting was
+# confirmed human fourteen times and fired FOLDED_ARMS eight times with nobody
+# in the room. Its keypoints jitter by more than _CENTROID_MOVED_MIN_FRAC too,
+# so nothing downstream caught it.
+#
+# A light change marks the wall around a painting as much as the painting. A
+# person differs from what surrounds them. So the candidate's box is compared
+# with a ring of the scene just outside it, _SURROUND_MARGIN of the box's own
+# size wide on each side. While the ring is quiet (under _SURROUND_QUIET) this
+# changes nothing; when the ring is busy, the box must read at least
+# _SURROUND_MIN_RATIO times as changed as the ring.
+#
+# Like _BODY_FOREGROUND_MIN this cannot be validated offline — the captures
+# hold keypoints, not masks — and the values are a first guess to be checked
+# against the logged measurements (see _surround_contrast).
+_SURROUND_MARGIN = 0.5
+_SURROUND_QUIET = 0.02
+_SURROUND_MIN_RATIO = 1.5
+
 
 def _wrist_shows_motion(
     kps_row: np.ndarray,
@@ -376,6 +398,58 @@ def _body_shows_life(
     return hits >= max(_BODY_FOREGROUND_MIN_PX, int(region.size * min_frac))
 
 
+def _surround_contrast(
+    kps_row: np.ndarray,
+    fg_mask: Optional[np.ndarray],
+    frame_w: int,
+    frame_h: int,
+) -> Optional[tuple]:
+    """(inside, ring): the foreground share of this candidate's keypoint box
+    and of the band of scene around it, or None when there is nothing to
+    measure. See _SURROUND_MARGIN."""
+    if fg_mask is None:
+        return None
+    vis = kps_row[kps_row[:, 2] > 0.3]
+    if vis.shape[0] < 2:
+        return None
+    mh, mw = fg_mask.shape[:2]
+    sx, sy = mw / max(1, frame_w), mh / max(1, frame_h)
+    xs, ys = vis[:, 0] * sx, vis[:, 1] * sy
+    x0, x1 = max(0, int(xs.min())), min(mw, int(xs.max()) + 1)
+    y0, y1 = max(0, int(ys.min())), min(mh, int(ys.max()) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    mx = max(1, int((x1 - x0) * _SURROUND_MARGIN))
+    my = max(1, int((y1 - y0) * _SURROUND_MARGIN))
+    X0, X1 = max(0, x0 - mx), min(mw, x1 + mx)
+    Y0, Y1 = max(0, y0 - my), min(mh, y1 + my)
+    outer = fg_mask[Y0:Y1, X0:X1] > 0
+    inner = fg_mask[y0:y1, x0:x1] > 0
+    ring_px = outer.size - inner.size
+    if inner.size == 0 or ring_px <= 0:
+        return None
+    ring = (int(outer.sum()) - int(inner.sum())) / ring_px
+    return float(inner.mean()), float(ring)
+
+
+def _stands_out(
+    kps_row: np.ndarray,
+    fg_mask: Optional[np.ndarray],
+    frame_w: int,
+    frame_h: int,
+) -> bool:
+    """Is this candidate's foreground its own, rather than the whole scene's?
+
+    True when the surroundings are quiet or cannot be measured — like the
+    tests it guards, this only ever rejects on positive evidence.
+    """
+    c = _surround_contrast(kps_row, fg_mask, frame_w, frame_h)
+    if c is None:
+        return True
+    inside, ring = c
+    return ring < _SURROUND_QUIET or inside >= _SURROUND_MIN_RATIO * ring
+
+
 def _passes_liveness_gate(
     kps_row: np.ndarray,
     centroid: tuple,
@@ -415,6 +489,8 @@ def _passes_liveness_gate(
     # A hand-waver shows life at the wrists and barely anywhere else; someone
     # sitting still shows it across the body and not at the wrists. A picture
     # on the wall shows it in neither place, which is the whole point.
+    if not _stands_out(kps_row, fg_mask, frame_w, frame_h):
+        return False
     return (_body_shows_life(kps_row, fg_mask, frame_w, frame_h)
             or _wrist_shows_motion(kps_row, fg_mask, frame_w, frame_h,
                                    min_foreground_frac))
@@ -499,9 +575,13 @@ def _all_valid_landmarks(
         #   strong — both at once. Only this earns confirmed_human, because
         #            confirmation exempts a pid from being checked again and
         #            is far too powerful to hand out on the narrower signal.
-        _body = _body_shows_life(kps[i], fg_mask, frame_w, frame_h)
-        _wrist = _wrist_shows_motion(kps[i], fg_mask, frame_w, frame_h,
-                                     min_foreground_frac)
+        #
+        # Either answer counts only if the change is the candidate's own and
+        # not the whole scene's — see _SURROUND_MARGIN.
+        _own = _stands_out(kps[i], fg_mask, frame_w, frame_h)
+        _body = _own and _body_shows_life(kps[i], fg_mask, frame_w, frame_h)
+        _wrist = _own and _wrist_shows_motion(kps[i], fg_mask, frame_w, frame_h,
+                                              min_foreground_frac)
         admit, raw_live = (_body or _wrist), (_body and _wrist)
         if not admit:
             near_known = known_centroids is not None and any(
@@ -943,6 +1023,21 @@ class CameraAnalyser(threading.Thread):
                      "apart)", self.label, pid, now - first)
         e.last_genuine_live_at = now
 
+    def _confirmed_gesture(self, entry: "_PersonEntry", pid, gesture):
+        """The gesture, if this track may fire it; otherwise None.
+
+        Only a track confirmed human may fire. Admission is decided frame by
+        frame and needs just a few changed pixels, which a painting can supply
+        on a quiet day: the painting's first FOLDED_ARMS on 2026-09-28 fired
+        eleven seconds before its track was ever confirmed. Costs a real person
+        at least _LIVENESS_CONFIRM_MIN_GAP_S after they appear.
+        """
+        if gesture is None or entry.confirmed_human:
+            return gesture
+        log.info("[%s] pid=%s %s withheld: not yet confirmed human",
+                 self.label, pid, gesture.name)
+        return None
+
     def _match_persons(
         self, detected: list, frame_w: int, frame_h: int, now: float
     ) -> None:
@@ -1378,7 +1473,8 @@ class CameraAnalyser(threading.Thread):
                         float(getattr(self.s, 'flourish_min_rate', 0.80)),
                         float(getattr(self.s, 'flourish_max_rate', 4.00)))
                     if self._chime is not None:
-                        if _sweeping and not entry.chimed_this_sweep:
+                        if (_sweeping and not entry.chimed_this_sweep
+                                and entry.confirmed_human):
                             entry.chimed_this_sweep = True
                             self._chime.notify()
                         elif not _sweeping and reading.state == ArmState.DOWN:
@@ -1387,7 +1483,8 @@ class CameraAnalyser(threading.Thread):
                     if self._feedback:
                         self._feedback.push_reading(reading)
 
-                gesture = entry.state_machine.tick(reading, now)
+                gesture = self._confirmed_gesture(
+                    entry, pid, entry.state_machine.tick(reading, now))
                 if gesture is not None:
                     log.debug("[%s] pid=%d gesture: %s", self.label, pid, gesture)
                     # Guarantee the sound accompanies a real gesture. The
@@ -1460,8 +1557,14 @@ class CameraAnalyser(threading.Thread):
                         _cached_kps[i], c, fg_mask, pw, ph, min_fg_frac,
                         known_centroids, match_dist,
                     ):
-                        reason = ("not live" if _bf is None
-                                  else f"not live bf={_bf:.3f}")
+                        # Likewise the surroundings measurement, when that
+                        # is what refused it — see _SURROUND_MARGIN.
+                        _sc = _surround_contrast(_cached_kps[i], fg_mask, pw, ph)
+                        if not _stands_out(_cached_kps[i], fg_mask, pw, ph):
+                            reason = f"scene change in={_sc[0]:.2f} ring={_sc[1]:.2f}"
+                        else:
+                            reason = ("not live" if _bf is None
+                                      else f"not live bf={_bf:.3f}")
                     if reason is None:
                         _all_dbg_kps.append(_cached_kps[i])
                     if box is not None:
