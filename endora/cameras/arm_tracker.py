@@ -129,6 +129,13 @@ class ArmReading:
     # between a good and a garbage position is bimodal and is not, which is
     # what stops noise from being mistaken for a fast gesture.
     sweep_progressive: bool = False
+    # For FOLDED_ARMS only. Jeannie is folded arms AND a nod: nodded says a
+    # nod — the head dipping towards the shoulders and coming back up — was
+    # completed while the arms were folded, within folded_nod_recent_s.
+    # nod_dip is the largest dip measured during this fold, in shoulder
+    # widths, reported whether or not it was enough, for tuning.
+    nodded: bool = False
+    nod_dip: float = 0.0
 
 
 # ── Landmark protocol for type hints ──────────────────────────────────────────
@@ -464,6 +471,21 @@ class ArmTrackerConfig:
     # gesture. See _note_posture for why a per-frame test is not enough and
     # for the measurements this sits between.
     folded_recline_memory_s: float = 1.5
+    # Jeannie is folded arms with a nod. The pose alone is a resting
+    # position: every one of the 13 FOLDED_ARMS that reached Home Assistant
+    # between 2026-09-30 and 10-03 was someone lying or sitting with their
+    # hands together, or a visitor standing with arms crossed, and none of
+    # them moved their head by more than 0.05 shoulder widths while folded.
+    # A nod is the nose dipping relative to the shoulder line by at least
+    # folded_nod_min_dip shoulder widths and coming back up, the whole thing
+    # inside folded_nod_window_s, measured only on frames where the arms are
+    # folded — so settling into a seat or walking up does not count. 0.10 is
+    # a first guess: the recordings end when the gesture fired, before
+    # anyone nodded, so no real nod has been measured yet.
+    folded_nod_min_dip: float = 0.10
+    folded_nod_window_s: float = 1.5
+    # How long a completed nod keeps the pose eligible to fire.
+    folded_nod_recent_s: float = 2.0
     # Confidence floor for posture evidence. Higher than the gesture's own
     # folded_visibility_min because this suppresses rather than triggers: a
     # guessed hip that vetoes a real gesture is worse than one that fails to
@@ -598,6 +620,11 @@ class ArmTracker:
         # see body_scale_min_ratio.
         self._body_hist: Deque[float] = deque(maxlen=15)
         self._body_reject_run: int = 0
+        # Head height above the shoulder line, in shoulder widths, on frames
+        # where the arms are folded — see folded_nod_min_dip.
+        self._fold_heads: Deque[Tuple[float, float]] = deque()
+        self._fold_best_dip: float = 0.0
+        self._last_nod_at: Optional[float] = None
 
     # ── Trajectory history ────────────────────────────────────────────────
 
@@ -730,6 +757,36 @@ class ArmTracker:
         if shoulder_w <= 1e-6 or self.c.head_rest_rise_max <= 0:
             return False
         return (shoulder[1] - wrist[1]) < self.c.head_rest_rise_max * shoulder_w
+
+    def _note_fold_head(self, now: Optional[float], sh_mid: _Pt, nose: _Pt,
+                        shoulder_w: float) -> Tuple[bool, float]:
+        """Record the head on a folded frame; return (nodded, best_dip).
+
+        A nod is the head dipping and coming back: the lowest sample in the
+        last folded_nod_window_s, with a higher one before it and after it,
+        each at least folded_nod_min_dip shoulder widths above it. A nod is
+        consumed when it completes, so one nod counts once.
+        """
+        if now is None or shoulder_w <= 1e-6:
+            return False, 0.0
+        win = self.c.folded_nod_window_s
+        if self._fold_heads and now - self._fold_heads[-1][0] > win:
+            self._fold_heads.clear()          # the fold was released
+            self._fold_best_dip = 0.0
+        self._fold_heads.append((now, (sh_mid[1] - nose[1]) / shoulder_w))
+        while self._fold_heads and now - self._fold_heads[0][0] > win:
+            self._fold_heads.popleft()
+        heads = [h for _t, h in self._fold_heads]
+        low = min(range(len(heads)), key=heads.__getitem__)
+        if 0 < low < len(heads) - 1:
+            dip = min(max(heads[:low]), max(heads[low + 1:])) - heads[low]
+            self._fold_best_dip = max(self._fold_best_dip, dip)
+            if dip >= self.c.folded_nod_min_dip:
+                self._last_nod_at = now
+                self._fold_heads.clear()
+        nodded = (self._last_nod_at is not None
+                  and now - self._last_nod_at <= self.c.folded_nod_recent_s)
+        return nodded, self._fold_best_dip
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -1161,8 +1218,11 @@ class ArmTracker:
                         and not self._reclined_recently(now)
                         and self._folded_posture_ok(sh_mid, hip_mid,
                                                     shoulder_w, lk, rk, vis)):
+                    nodded, dip = self._note_fold_head(now, sh_mid, px(NOSE),
+                                                       shoulder_w)
                     return ArmReading(state=ArmState.FOLDED_ARMS,
-                                      upright=bool(upright))
+                                      upright=bool(upright),
+                                      nodded=nodded, nod_dip=dip)
 
             # CROSS_ARMS: each wrist past the body midline onto the OTHER
             # side, at chest height, wrists close together. Distances are

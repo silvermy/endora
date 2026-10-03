@@ -42,7 +42,10 @@ def _horizontal_up() -> ArmReading:
 
 
 def _state(s: ArmState) -> ArmReading:
-    return ArmReading(state=s)
+    # A FOLDED_ARMS reading here carries a completed nod: these tests are
+    # about how a pose is held and released, and the nod Jeannie also needs
+    # has tests of its own (test_jeannie_nod.py).
+    return ArmReading(state=s, nodded=(s == ArmState.FOLDED_ARMS))
 
 
 # ── SNAP ──────────────────────────────────────────────────────────────────────

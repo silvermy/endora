@@ -88,6 +88,11 @@ class StateMachineConfig:
     # This disambiguates transitional poses (e.g. briefly looking like T_POSE
     # while raising both arms).
     sustain_s: float = 0.5
+    # Jeannie is folded arms AND a nod: FOLDED_ARMS fires only once the pose
+    # has been held for sustain_s and the tracker has seen a nod (see
+    # ArmTrackerConfig.folded_nod_min_dip). Without it the pose alone fired
+    # on anyone resting with their hands together.
+    folded_require_nod: bool = True
     # How long a sustained pose may go unmatched without the hold being
     # considered released. See _SustainState: the pose is steady, the
     # keypoints are not.
@@ -252,6 +257,8 @@ class _SustainState:
     entered_at: dict = field(default_factory=dict)  # ArmState → first seen
     last_seen: dict = field(default_factory=dict)   # ArmState → most recent
     held_s: dict = field(default_factory=dict)      # ArmState → credited time
+    # A held fold still waiting for its nod is reported once, not per frame.
+    nod_wait_logged: bool = False
 
 
 # ── State Machine ────────────────────────────────────────────────────────────
@@ -393,7 +400,7 @@ class GestureStateMachine:
         if state in (ArmState.BOTH_UP, ArmState.T_POSE, ArmState.CROSS_ARMS,
                      ArmState.FOLDED_ARMS):
             self._reset_raise()
-            return self._tick_sustained(state, now)
+            return self._tick_sustained(state, now, reading)
 
         return None
 
@@ -499,7 +506,8 @@ class GestureStateMachine:
 
         return None
 
-    def _tick_sustained(self, state: ArmState, now: float) -> Optional[Gesture]:
+    def _tick_sustained(self, state: ArmState, now: float,
+                        reading: Optional[ArmReading] = None) -> Optional[Gesture]:
         entered = self._sustain.entered_at.get(state)
         last = self._sustain.last_seen.get(state)
         # A gap longer than sustain_gap_s means the pose was actually
@@ -512,6 +520,7 @@ class GestureStateMachine:
             self._sustain.entered_at = {state: now}   # reset others
             self._sustain.last_seen = {state: now}
             self._sustain.held_s = {state: 0.0}
+            self._sustain.nod_wait_logged = False
             return None
 
         # Credit the interval since the previous match, capped so a forgiven
@@ -522,6 +531,19 @@ class GestureStateMachine:
         self._sustain.held_s[state] = held
 
         if held < self.c.sustain_s:
+            return None
+
+        # Jeannie also needs the nod. The hold keeps accumulating while it
+        # waits, so a nod at any point during the fold fires at once.
+        if (state == ArmState.FOLDED_ARMS and self.c.folded_require_nod
+                and not (reading is not None and reading.nodded)):
+            if not self._sustain.nod_wait_logged and reading is not None:
+                self._sustain.nod_wait_logged = True
+                self._near_miss(
+                    "FOLDED_ARMS",
+                    f"no_nod: arms folded but no nod yet — largest dip "
+                    f"{reading.nod_dip:.2f} shoulder widths",
+                    reading)
             return None
 
         # Held long enough — fire once and latch until the pose is released

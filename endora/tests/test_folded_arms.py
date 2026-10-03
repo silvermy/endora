@@ -392,7 +392,9 @@ def test_a_flickering_hold_still_confirms():
     """
     tr = ArmTracker(ArmTrackerConfig())
     from core.state_machine import GestureStateMachine, StateMachineConfig, Gesture
-    sm = GestureStateMachine(StateMachineConfig())
+    # About the hold, not the nod: this synthetic body never moves its head.
+    # The nod has tests of its own (test_jeannie_nod.py).
+    sm = GestureStateMachine(StateMachineConfig(folded_require_nod=False))
     held, apart = _pose(), _pose(wrist_gap=SHOULDER_W * 1.3)
     fired = []
     for i in range(30):                        # 3 s at 10 fps

@@ -1022,6 +1022,7 @@ class CameraAnalyser(threading.Thread):
                 getattr(s, 'folded_recline_memory_s', 1.5)),
             folded_posture_visibility_min=float(
                 getattr(s, 'folded_posture_visibility_min', 0.50)),
+            folded_nod_min_dip=float(getattr(s, 'folded_nod_min_dip', 0.10)),
             facing_shoulder_min=float(getattr(s, 'facing_shoulder_min', 0.45)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),
@@ -1037,6 +1038,7 @@ class CameraAnalyser(threading.Thread):
             hold_duration_s=float(getattr(s, 'hold_duration_s', 1.5)),
             double_snap_window_s=float(getattr(s, 'double_snap_window_s', 3.0)),
             sustain_s=float(getattr(s, 'sustain_s', 0.5)),
+            folded_require_nod=bool(getattr(s, 'folded_require_nod', True)),
             # sustain_gap_s was in Settings, in the registry and in
             # /effective, but was never passed here — so it silently had no
             # effect at all while the debug page reported it as live.

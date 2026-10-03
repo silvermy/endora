@@ -386,6 +386,15 @@ REGISTRY: list[SettingField] = [
                   "correct reclined skeleton and a hallucinated upright one on the same "
                   "body, so a per-frame posture test alone is outvoted by the bad frames",
                   group="Gesture"),
+    SettingField("folded_require_nod", bool, True,
+                  "FOLDED_ARMS (Jeannie) also needs a nod while the arms are folded. "
+                  "Without it the pose fires on anyone resting with their hands together",
+                  group="Gesture"),
+    SettingField("folded_nod_min_dip", float, 0.10,
+                  "FOLDED_ARMS: how far the head must dip towards the shoulders and come "
+                  "back, in shoulder widths, to count as a nod. Each held fold without "
+                  "one logs the largest dip measured",
+                  group="Gesture"),
     SettingField("folded_posture_visibility_min", float, 0.50,
                   "FOLDED_ARMS: confidence floor for the hips and knees before they may "
                   "veto the gesture on posture. Higher than folded_visibility_min "
@@ -542,6 +551,7 @@ GESTURE_CRITICAL: list[str] = [
     "folded_lean_max_deg", "folded_knee_above_hip_max",
     "folded_arm_span_max", "body_scale_min_ratio",
     "folded_recline_memory_s", "folded_posture_visibility_min",
+    "folded_require_nod", "folded_nod_min_dip",
     # HOLD was missing here while every other gesture flag was listed, and
     # it is the one that most visibly surprises: it fires hold_duration_s
     # after a successful SNAP, from the same raised arm, with its own HA

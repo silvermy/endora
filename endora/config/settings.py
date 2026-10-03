@@ -330,6 +330,8 @@ class Settings:
     folded_lean_max_deg: float = 22.0
     folded_knee_above_hip_max: float = 0.15
     folded_recline_memory_s: float = 1.5
+    folded_require_nod: bool = True
+    folded_nod_min_dip: float = 0.10
     folded_posture_visibility_min: float = 0.50
     facing_shoulder_min: float = 0.45
 
