@@ -45,6 +45,7 @@ covers every posture.
 from __future__ import annotations
 
 import dataclasses
+import logging
 import math
 import time
 from collections import deque
@@ -165,6 +166,8 @@ LEFT_KNEE      = 25
 RIGHT_KNEE     = 26
 
 _Pt = Tuple[float, float]
+
+log = logging.getLogger(__name__)
 
 # Smallest share of an arm's total length that either segment (shoulder-elbow
 # or elbow-wrist) may occupy before the elbow is treated as collapsed rather
@@ -486,6 +489,21 @@ class ArmTrackerConfig:
     folded_nod_window_s: float = 1.5
     # How long a completed nod keeps the pose eligible to fire.
     folded_nod_recent_s: float = 2.0
+    # Near-miss reporting. When the hands are close together around chest
+    # height — what an attempt looks like — but the pose is still not
+    # accepted, every check that failed is logged with its measured value, so
+    # a Jeannie that does nothing says why. Looser than the gesture itself on
+    # purpose (folded_near_miss_slack times the proximity limit).
+    #
+    # Once per episode, not on a timer: someone lying with their hands on
+    # their chest is a near-miss for hours, and a line every few seconds
+    # would push everything else out of the log. An episode is reported once
+    # it has lasted folded_near_miss_settle_s — so the line describes the
+    # settled pose, not arms still on their way into it — and ends after
+    # folded_near_miss_gap_s without one.
+    folded_near_miss_slack: float = 2.0
+    folded_near_miss_settle_s: float = 0.5
+    folded_near_miss_gap_s: float = 1.0
     # Confidence floor for posture evidence. Higher than the gesture's own
     # folded_visibility_min because this suppresses rather than triggers: a
     # guessed hip that vetoes a real gesture is worse than one that fails to
@@ -625,6 +643,9 @@ class ArmTracker:
         self._fold_heads: Deque[Tuple[float, float]] = deque()
         self._fold_best_dip: float = 0.0
         self._last_nod_at: Optional[float] = None
+        self._fold_miss_since: Optional[float] = None
+        self._fold_miss_last: Optional[float] = None
+        self._fold_miss_logged: bool = False
 
     # ── Trajectory history ────────────────────────────────────────────────
 
@@ -757,6 +778,21 @@ class ArmTracker:
         if shoulder_w <= 1e-6 or self.c.head_rest_rise_max <= 0:
             return False
         return (shoulder[1] - wrist[1]) < self.c.head_rest_rise_max * shoulder_w
+
+    def _log_fold_miss(self, now: Optional[float], why: list) -> None:
+        """Say why an apparent Jeannie was not accepted, once per episode.
+        See folded_near_miss_settle_s."""
+        if not why or now is None:
+            return
+        if (self._fold_miss_last is None
+                or now - self._fold_miss_last > self.c.folded_near_miss_gap_s):
+            self._fold_miss_since = now          # a new episode
+            self._fold_miss_logged = False
+        self._fold_miss_last = now
+        if (not self._fold_miss_logged
+                and now - self._fold_miss_since >= self.c.folded_near_miss_settle_s):
+            self._fold_miss_logged = True
+            log.info("FOLDED_ARMS near-miss: %s", "; ".join(why))
 
     def _note_fold_head(self, now: Optional[float], sh_mid: _Pt, nose: _Pt,
                         shoulder_w: float) -> Tuple[bool, float]:
@@ -960,7 +996,14 @@ class ArmTracker:
     def _folded_posture_ok(self, sh_mid: _Pt, hip_mid: Optional[_Pt],
                            shoulder_w: float, lk: _Pt, rk: _Pt,
                            vis) -> bool:
-        """Is this body sitting or standing, rather than lying down?
+        return self._folded_posture_problem(sh_mid, hip_mid, shoulder_w,
+                                            lk, rk, vis) is None
+
+    def _folded_posture_problem(self, sh_mid: _Pt, hip_mid: Optional[_Pt],
+                                shoulder_w: float, lk: _Pt, rk: _Pt,
+                                vis) -> Optional[str]:
+        """Is this body sitting or standing, rather than lying down? None if
+        so, otherwise what disqualified it, with the measured value.
 
         FOLDED_ARMS asks a stricter posture question than any other gesture,
         because the pose it looks for is what a reclining body does by
@@ -980,22 +1023,24 @@ class ArmTracker:
         # Torso lean. Required, not merely "not contradicted" — see
         # folded_lean_max_deg.
         if hip_mid is None or shoulder_w <= 1e-6:
-            return False
+            return "hips not visible"
         tdy = hip_mid[1] - sh_mid[1]
         tdx = hip_mid[0] - sh_mid[0]
         if tdy <= 0:                       # hips at or above the shoulders
-            return False
-        if math.degrees(math.atan2(abs(tdx), tdy)) > self.c.folded_lean_max_deg:
-            return False
+            return "hips at or above the shoulders"
+        lean = math.degrees(math.atan2(abs(tdx), tdy))
+        if lean > self.c.folded_lean_max_deg:
+            return f"torso lean {lean:.0f} deg (max {self.c.folded_lean_max_deg:.0f})"
 
         # Knees, when they can be seen at all.
         if (vis(LEFT_KNEE) + vis(RIGHT_KNEE)) / 2.0 >= 0.20:
             knee_y = (lk[1] + rk[1]) / 2.0
             rise = (hip_mid[1] - knee_y) / shoulder_w   # +ve = knees above hips
             if rise > self.c.folded_knee_above_hip_max:
-                return False
+                return (f"knees {rise:.2f} shoulder widths above hips "
+                        f"(max {self.c.folded_knee_above_hip_max:.2f})")
 
-        return True
+        return None
 
     # ── Classification ────────────────────────────────────────────────────
 
@@ -1212,12 +1257,50 @@ class ArmTracker:
                 # when seated or standing and beside it when reclined.
                 facing = resolved
                 head_up = (sh_mid[1] - px(NOSE)[1]) > 0
+                posture = self._folded_posture_problem(sh_mid, hip_mid,
+                                                       shoulder_w, lk, rk, vis)
+                reclined = self._reclined_recently(now)
+                if not (hands_together and at_chest and bent and proportioned
+                        and facing and head_up and not reclined
+                        and posture is None):
+                    gap = _dist(lw, rw) / shoulder_w
+                    if (gap <= self.c.folded_near_miss_slack
+                            * self.c.folded_wrist_proximity
+                            and fold_top - shoulder_w < min(lw[1], rw[1])
+                            and max(lw[1], rw[1]) < fold_bottom + shoulder_w):
+                        why = []
+                        if not hands_together:
+                            why.append(
+                                f"hands {gap:.2f} shoulder widths apart or off "
+                                f"centre (max {self.c.folded_wrist_proximity:.2f}, "
+                                f"centre {self.c.folded_midline_max:.2f})")
+                        if not at_chest:
+                            why.append("hands not at chest height")
+                        if not bent:
+                            why.append(f"arms too straight (extension "
+                                       f"{l_ext:.2f}/{r_ext:.2f}, max "
+                                       f"{self.c.folded_extension_max:.2f})")
+                        if not proportioned:
+                            why.append(f"arm span {span:.2f} (max "
+                                       f"{self.c.folded_arm_span_max:.2f})")
+                        if not facing:
+                            ratio = shoulder_w / head_len if head_len > 1e-6 else 0.0
+                            why.append(f"not resolved or not facing: shoulders/head "
+                                       f"{ratio:.2f} (min "
+                                       f"{self.c.folded_resolution_min:.2f})")
+                        if not head_up:
+                            why.append("head not above shoulders")
+                        if reclined:
+                            why.append("seen reclining in the last "
+                                       f"{self.c.folded_recline_memory_s:.1f}s")
+                        if posture is not None:
+                            why.append(posture)
+                        self._log_fold_miss(now, why)
                 if (hands_together and at_chest and bent and proportioned
                         and facing
                         and head_up
-                        and not self._reclined_recently(now)
-                        and self._folded_posture_ok(sh_mid, hip_mid,
-                                                    shoulder_w, lk, rk, vis)):
+                        and not reclined
+                        and posture is None):
                     nodded, dip = self._note_fold_head(now, sh_mid, px(NOSE),
                                                        shoulder_w)
                     return ArmReading(state=ArmState.FOLDED_ARMS,

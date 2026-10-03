@@ -161,6 +161,13 @@ _PERSON_PRUNE_MIN_S = 1.5
 # plausibly be the same person after they moved."
 _LIVENESS_EXEMPT_DIST = 0.06
 
+# Dropout diagnostics (see _note_dropouts): how near a below-threshold
+# detection must be to a missing person to count as "them", as a fraction of
+# the frame diagonal, and the shortest dropout worth a log line — single-run
+# misses are routine and would drown the rest.
+_DROPOUT_NEAR_FRAC = 0.10
+_DROPOUT_REPORT_MIN_S = 0.3
+
 # A tracked pid only becomes exempt from the wrist-liveness check (i.e. only
 # becomes a "known centroid" other candidates can match against) after TWO
 # genuine, non-exempted passes land within this many seconds of each other.
@@ -719,6 +726,11 @@ class _PersonEntry:
     # — anchoring on it would make the gap below unreachable.
     first_genuine_live_at: Optional[float] = None
     confirmed_human:       bool          = False
+    # Dropout diagnostics — see _note_dropouts. When this track started
+    # being missed, and the strongest below-threshold detection seen near it
+    # since (-1 if none).
+    missing_since:         Optional[float] = None
+    missing_best_weak:     float         = -1.0
 
 
 def _known_centroids(
@@ -979,6 +991,8 @@ class CameraAnalyser(threading.Thread):
         # Counts actual YOLO runs, so person pruning can be expressed in
         # missed detections rather than elapsed time (see _PERSON_PRUNE_MISSES).
         self._yolo_runs: int = 0
+        # The detector threshold at the last run, for _report_dropout.
+        self._dropout_threshold: float = 0.0
         # Last known person boxes, in motion-thumbnail coordinates.
         self._motion_regions: list[tuple] = []
 
@@ -1199,8 +1213,49 @@ class CameraAnalyser(threading.Thread):
                  if self._yolo_runs - e.last_seen_run >= _PERSON_PRUNE_MISSES
                  and now - e.last_seen >= _PERSON_PRUNE_MIN_S]
         for pid in stale:
+            self._report_dropout(pid, self._persons[pid], now, "then lost")
             log.info("[%s] Lost person pid=%d", self.label, pid)
             del self._persons[pid]
+
+    def _note_dropouts(self, weak, threshold: float, frame_w: int,
+                       frame_h: int, now: float) -> None:
+        """Track people the detector stopped seeing, and how close it came.
+
+        Diagnostics for 2026-10-03: sitting on the couch, folding the arms made
+        the person vanish from the detector altogether. Whether they fell just
+        under the confidence threshold or out of the model's view entirely
+        needs opposite fixes, so for each dropout this records the strongest
+        below-threshold detection near where the person was, and
+        _report_dropout logs it once when the dropout ends.
+        """
+        self._dropout_threshold = threshold
+        near = _DROPOUT_NEAR_FRAC * ((frame_w ** 2 + frame_h ** 2) ** 0.5)
+        for pid, e in self._persons.items():
+            if e.last_seen_run == self._yolo_runs:
+                if e.missing_since is not None:
+                    self._report_dropout(pid, e, now, "then found again")
+                continue
+            if e.missing_since is None:
+                e.missing_since, e.missing_best_weak = now, -1.0
+            if weak is not None and len(weak):
+                d2 = ((weak[:, 0] - e.centroid[0]) ** 2
+                      + (weak[:, 1] - e.centroid[1]) ** 2)
+                close = weak[d2 <= near ** 2]
+                if len(close):
+                    e.missing_best_weak = max(e.missing_best_weak,
+                                              float(close[:, 2].max()))
+
+    def _report_dropout(self, pid, e: "_PersonEntry", now: float,
+                        outcome: str) -> None:
+        since = e.missing_since
+        e.missing_since, best = None, e.missing_best_weak
+        if since is None or now - since < _DROPOUT_REPORT_MIN_S:
+            return
+        threshold = self._dropout_threshold
+        there = (f"best candidate there {best:.2f}" if best >= 0
+                 else "no candidate there at all")
+        log.info("[%s] pid=%s not detected for %.1fs (threshold %.2f) — %s; %s",
+                 self.label, pid, now - since, threshold, there, outcome)
 
     # ── Frame preprocessing ───────────────────────────────────────────────
 
@@ -1467,6 +1522,8 @@ class CameraAnalyser(threading.Thread):
                     motion_mask=motion_mask,
                 )
                 self._match_persons(detected, pw, ph, now)
+                self._note_dropouts(getattr(model, 'last_weak', None),
+                                    float(model.conf), pw, ph, now)
                 self._prune_persons(now)
 
                 # Feed the recorder one buffer per tracked person.

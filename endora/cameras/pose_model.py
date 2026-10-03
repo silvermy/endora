@@ -90,6 +90,11 @@ PROVIDER_PREFERENCES: dict[str, tuple[str, ...]] = {
 # add-on and the compose deployments.
 TRT_CACHE_DIR = "/data/trt_cache"
 
+# Below-threshold detections kept for diagnostics: anything weaker than this
+# is noise, and the best few are all a missing person needs.
+_WEAK_FLOOR = 0.05
+_WEAK_KEEP = 20
+
 
 def _trt_options(cache_dir: str) -> dict:
     """TensorRT EP options.
@@ -517,6 +522,8 @@ class PoseModel:
         self.imgsz = actual_imgsz
         # Set by infer_refined; see its docstring.
         self.last_refined = 0
+        # Set by infer; see _weak_candidates.
+        self.last_weak = np.empty((0, 3), np.float32)
         self.conf = conf
         log.info(
             "PoseModel: %s  imgsz=%d  threads=%d  conf=%.2f  provider=%s",
@@ -585,6 +592,7 @@ class PoseModel:
 
         # 4. Transpose → [num_anchors, 56], confidence filter
         preds = raw[0].T                           # [num_anchors, 56]
+        self.last_weak = self._weak_candidates(preds, ratio, pad_w, pad_h)
         mask = preds[:, 4] >= self.conf
         preds = preds[mask]
         if preds.shape[0] == 0:
@@ -618,6 +626,24 @@ class PoseModel:
 
         return kps, out_boxes
 
+    def _weak_candidates(self, preds: np.ndarray, ratio: float,
+                         pad_w: float, pad_h: float) -> np.ndarray:
+        """[M, 3] of (cx, cy, conf) in frame pixels for the strongest
+        detections that fell BELOW self.conf — diagnostics only, so that a
+        tracked person who vanishes can be told apart from one the threshold
+        dropped. The analyser logs the best one near a missing person."""
+        conf = preds[:, 4]
+        weak = (conf >= _WEAK_FLOOR) & (conf < self.conf)
+        if not weak.any():
+            return np.empty((0, 3), np.float32)
+        w = preds[weak]
+        w = w[np.argsort(-w[:, 4])[:_WEAK_KEEP]]
+        out = np.empty((w.shape[0], 3), np.float32)
+        out[:, 0] = (w[:, 0] - pad_w) / ratio
+        out[:, 1] = (w[:, 1] - pad_h) / ratio
+        out[:, 2] = w[:, 4]
+        return out
+
     def infer_refined(
         self,
         frame: np.ndarray,
@@ -642,6 +668,7 @@ class PoseModel:
         and if it sits at zero the threshold is doing nothing.
         """
         kps, boxes = self.infer(frame)
+        weak = self.last_weak            # the crops below would overwrite it
         if kps is None or boxes is None:
             self.last_refined = 0
             return kps, boxes
@@ -650,4 +677,5 @@ class PoseModel:
             frame, kps, boxes, self.infer,
             margin=margin, max_persons=max_persons, min_box_frac=min_box_frac,
         )
+        self.last_weak = weak
         return kps, boxes

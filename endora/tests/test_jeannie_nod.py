@@ -132,3 +132,50 @@ def test_the_recording_fires_without_the_nod(name):
 def test_resting_with_folded_arms_does_not_fire(name):
     """Replayed, and then held still for two more seconds, none fires now."""
     assert _replay_resting(name) == []
+
+
+# ── saying why an attempt was not accepted ───────────────────────────────────
+# Sitting on the couch, attempts produced nothing at all — not even a fold to
+# wait for a nod on — and nothing in the log said why.
+
+def _misses(caplog, lm, frames=1):
+    import logging
+    tr = ArmTracker(ArmTrackerConfig())
+    with caplog.at_level(logging.INFO, logger="cameras.arm_tracker"):
+        for i in range(frames):
+            tr._classify_raw(lm, W, H, now=i / FPS)
+    return [r.getMessage() for r in caplog.records if "near-miss" in r.getMessage()]
+
+
+def test_a_leaning_fold_says_how_far_it_leaned(caplog):
+    [msg] = _misses(caplog, _pose(lean_deg=30), frames=10)
+    assert "torso lean 30 deg (max 22)" in msg
+
+
+def test_hands_nowhere_near_each_other_are_not_an_attempt(caplog):
+    assert _misses(caplog, _pose(wrist_gap=SHOULDER_W * 3), frames=10) == []
+
+
+def test_an_accepted_fold_reports_nothing(caplog):
+    assert _misses(caplog, _pose(), frames=10) == []
+
+
+def test_a_passing_moment_is_not_reported(caplog):
+    """Arms on their way somewhere pass through the shape; only a pose held
+    for folded_near_miss_settle_s is an attempt worth describing."""
+    assert _misses(caplog, _pose(lean_deg=30), frames=3) == []
+
+
+def test_resting_for_a_long_time_is_reported_once(caplog):
+    """Lying with hands on the chest is a near-miss for hours. One line."""
+    assert len(_misses(caplog, _pose(lean_deg=30), frames=600)) == 1
+
+
+def test_each_separate_attempt_is_reported(caplog):
+    import logging
+    tr = ArmTracker(ArmTrackerConfig())
+    with caplog.at_level(logging.INFO, logger="cameras.arm_tracker"):
+        for start in (0.0, 5.0):                 # two attempts, 4 s apart
+            for i in range(10):
+                tr._classify_raw(_pose(lean_deg=30), W, H, now=start + i / FPS)
+    assert len([r for r in caplog.records if "near-miss" in r.getMessage()]) == 2
