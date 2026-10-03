@@ -278,6 +278,95 @@ _SURROUND_MARGIN = 0.5
 _SURROUND_QUIET = 0.02
 _SURROUND_MIN_RATIO = 1.5
 
+# Confirmation asks for MOVEMENT, not difference from the background. On
+# 2026-09-30 at 7 am early sun lit the painting alone, not the wall around it,
+# so the surroundings check had nothing to object to: the background model
+# reported the painting's box as changed on body and wrist, twice, two seconds
+# apart, which is exactly what a person looks like to it. It confirmed the
+# painting human and it fired FOLDED_ARMS five times into an empty room.
+#
+# Light drifts over seconds to minutes; a body, even one sitting still, shifts
+# from moment to moment. So a confirming pass now needs the body's own pixels
+# to have changed against the frame from _MOTION_GAP_S ago — long enough for a
+# person's small movements to add up, short enough that sunlight barely
+# moves. The difference is taken on blurred greyscale at the background
+# model's scale, where compression noise mostly averages away, and must clear
+# _MOTION_PIXEL_DELTA grey levels. _stands_out applies to it too, so an
+# exposure jump across the whole frame is not movement either.
+#
+# Admission is unchanged: it still uses the background model, so someone who
+# holds still stays tracked. Only confirmation — which is what lets a track
+# fire — asks for movement.
+#
+# Like the other foreground thresholds these cannot be measured offline; the
+# time each track takes to be confirmed is logged, and is the number to watch.
+_MOTION_GAP_S = 0.5
+_MOTION_PIXEL_DELTA = 15
+_MOTION_BLUR = 5
+_MOTION_BODY_MIN_FRAC = 0.02
+_MOTION_BODY_MIN_PX = 4
+
+
+class _ShortTermMotion:
+    """Where the picture changed over the last _MOTION_GAP_S.
+
+    Fed the same downscaled frame as the background model, every loop. Keeps
+    just enough history to reach back _MOTION_GAP_S, and compares against the
+    newest frame at least that old.
+    """
+
+    def __init__(self, gap_s: float = _MOTION_GAP_S) -> None:
+        self.gap_s = gap_s
+        self._hist: collections.deque = collections.deque()
+
+    def update(self, frame_bgr: np.ndarray, now: float) -> Optional[np.ndarray]:
+        grey = cv2.GaussianBlur(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY),
+                                (_MOTION_BLUR, _MOTION_BLUR), 0)
+        self._hist.append((now, grey))
+        ref = None
+        while len(self._hist) > 1 and now - self._hist[1][0] >= self.gap_s:
+            self._hist.popleft()
+        if now - self._hist[0][0] >= self.gap_s:
+            ref = self._hist[0][1]
+        if ref is None or ref.shape != grey.shape:
+            return None
+        diff = cv2.absdiff(grey, ref)
+        return (diff >= _MOTION_PIXEL_DELTA).astype(np.uint8) * 255
+
+
+def _body_moved(
+    kps_row: np.ndarray,
+    motion_mask: Optional[np.ndarray],
+    frame_w: int,
+    frame_h: int,
+) -> bool:
+    """Did this candidate's own body move over the last _MOTION_GAP_S?
+
+    Unlike the admission tests this does NOT abstain: with no motion history
+    or too few keypoints there is no evidence of movement, and this answers a
+    question — may this track be trusted to fire — where the safe answer to
+    "cannot tell" is no. Measured over the whole keypoint box, because what
+    moves on a person sitting still is as often a hand or the head as the
+    torso.
+    """
+    if motion_mask is None:
+        return False
+    vis = kps_row[kps_row[:, 2] > 0.3]
+    if vis.shape[0] < 2:
+        return False
+    mh, mw = motion_mask.shape[:2]
+    sx, sy = mw / max(1, frame_w), mh / max(1, frame_h)
+    xs, ys = vis[:, 0] * sx, vis[:, 1] * sy
+    x0, x1 = max(0, int(xs.min())), min(mw, int(xs.max()) + 1)
+    y0, y1 = max(0, int(ys.min())), min(mh, int(ys.max()) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return False
+    region = motion_mask[y0:y1, x0:x1]
+    hits = int((region > 0).sum())
+    if hits < max(_MOTION_BODY_MIN_PX, int(region.size * _MOTION_BODY_MIN_FRAC)):
+        return False
+    return _stands_out(kps_row, motion_mask, frame_w, frame_h)
+
 
 def _wrist_shows_motion(
     kps_row: np.ndarray,
@@ -538,8 +627,9 @@ def _all_valid_landmarks(
     boxes: Optional[np.ndarray] = None,
     tracked_centroids: Optional[list] = None,
     acquire_conf: float = 0.0,
+    motion_mask: Optional[np.ndarray] = None,
 ) -> list[tuple]:
-    """Return list of (_YOLOLandmarks, centroid_px, raw_live) for every real
+    """Return list of (_YOLOLandmarks, centroid_px, raw_live, moved) for every real
     person detected. known_centroids should come from _known_centroids (see
     _passes_liveness_gate), not an unconditional list of every tracked pid.
     raw_live is this candidate's own wrist-liveness result, independent of
@@ -552,6 +642,10 @@ def _all_valid_landmarks(
     deliberately separate from known_centroids, which is about liveness:
     every tracked pid counts for keeping a weak detection, but only a
     liveness-confirmed one exempts a still body from the wrist check.
+    Each result also carries `moved`: whether the body itself moved, from
+    motion_mask (see _MOTION_GAP_S). raw_live keeps a still person tracked;
+    only `moved` confirms one, which is what lets a track fire. Without a
+    motion_mask, `moved` is raw_live, as confirmation always used to be.
     """
     if kps is None or kps.shape[0] == 0:
         return []
@@ -583,6 +677,8 @@ def _all_valid_landmarks(
         _wrist = _own and _wrist_shows_motion(kps[i], fg_mask, frame_w, frame_h,
                                               min_foreground_frac)
         admit, raw_live = (_body or _wrist), (_body and _wrist)
+        moved = (admit and _body_moved(kps[i], motion_mask, frame_w, frame_h)
+                 if motion_mask is not None else raw_live)
         if not admit:
             near_known = known_centroids is not None and any(
                 (c[0] - kc[0]) ** 2 + (c[1] - kc[1]) ** 2 <= match_dist ** 2
@@ -590,7 +686,7 @@ def _all_valid_landmarks(
             )
             if not near_known:
                 continue
-        result.append((_YOLOLandmarks(kps[i], frame_w, frame_h), c, raw_live))
+        result.append((_YOLOLandmarks(kps[i], frame_w, frame_h), c, raw_live, moved))
     return result
 
 
@@ -891,7 +987,8 @@ class CameraAnalyser(threading.Thread):
 
     # ── Person pool management ─────────────────────────────────────────────
 
-    def _make_person_entry(self, lm, centroid: tuple, now: float) -> _PersonEntry:
+    def _make_person_entry(self, lm, centroid: tuple, now: float,
+                           moved: bool = True) -> _PersonEntry:
         s = self.s
         arm_tracker = ArmTracker(ArmTrackerConfig(
             raise_elevation_min=float(getattr(s, 'raise_elevation_min', 0.70)),
@@ -979,15 +1076,16 @@ class CameraAnalyser(threading.Thread):
             last_seen_run=self._yolo_runs,
             last_lm=lm,
             last_genuine_live_at=now,
-            # Birth counts as the window's first pass, as it always has —
-            # the anchor just has its own field now so that
-            # last_genuine_live_at can keep advancing for _known_centroids.
-            first_genuine_live_at=now,
+            # Birth counts as the window's first confirming pass only if the
+            # body moved (see _MOTION_GAP_S); a painting is born still. The
+            # anchor has its own field so that last_genuine_live_at can keep
+            # advancing for _known_centroids either way.
+            first_genuine_live_at=now if moved else None,
         )
 
     def _note_liveness(
         self, e: "_PersonEntry", raw_live: bool, now: float,
-        pid: object = None,
+        pid: object = None, moved: Optional[bool] = None,
     ) -> None:
         """Update a pid's confirmed-human status from this frame's checks.
 
@@ -1012,16 +1110,26 @@ class CameraAnalyser(threading.Thread):
         # somebody sitting on a couch. raw_live now carries the whole-body
         # foreground test, which is the evidence that actually separates a
         # person from a picture of one.
-        if not raw_live or e.confirmed_human:
+        #
+        # Two kinds of pass since 2026-09-30. raw_live (background model)
+        # keeps a still person tracked through the grace period; only a pass
+        # where the body moved counts towards confirmation — see
+        # _MOTION_GAP_S. Asking movement to do both dropped anyone sitting
+        # still and rebuilt their track every few seconds.
+        if moved is None:
+            moved = raw_live
+        if e.confirmed_human:
             return
-        first = e.first_genuine_live_at
-        if first is None or now - first > _LIVENESS_CONFIRM_WINDOW_S:
-            e.first_genuine_live_at = now        # anchor a fresh window
-        elif now - first >= _LIVENESS_CONFIRM_MIN_GAP_S:
-            e.confirmed_human = True
-            log.info("[%s] pid=%s confirmed human (2 genuine passes %.1fs "
-                     "apart)", self.label, pid, now - first)
-        e.last_genuine_live_at = now
+        if moved:
+            first = e.first_genuine_live_at
+            if first is None or now - first > _LIVENESS_CONFIRM_WINDOW_S:
+                e.first_genuine_live_at = now        # anchor a fresh window
+            elif now - first >= _LIVENESS_CONFIRM_MIN_GAP_S:
+                e.confirmed_human = True
+                log.info("[%s] pid=%s confirmed human (2 moving passes %.1fs "
+                         "apart)", self.label, pid, now - first)
+        if raw_live:
+            e.last_genuine_live_at = now
 
     def _confirmed_gesture(self, entry: "_PersonEntry", pid, gesture):
         """The gesture, if this track may fire it; otherwise None.
@@ -1051,7 +1159,8 @@ class CameraAnalyser(threading.Thread):
         moved_min_dist = _CENTROID_MOVED_MIN_FRAC * diag
         available = list(self._persons.keys())
 
-        for lm, centroid, raw_live in detected:
+        for lm, centroid, raw_live, *rest in detected:
+            body_moved = rest[0] if rest else raw_live
             best_pid, best_dist = None, float('inf')
             for pid in available:
                 e = self._persons[pid]
@@ -1070,11 +1179,13 @@ class CameraAnalyser(threading.Thread):
                 e.last_seen = now
                 e.last_seen_run = self._yolo_runs
                 available.remove(best_pid)
-                self._note_liveness(e, raw_live, now, pid=best_pid)
+                self._note_liveness(e, raw_live, now, pid=best_pid,
+                                    moved=body_moved)
             else:
                 pid = self._next_pid
                 self._next_pid += 1
-                self._persons[pid] = self._make_person_entry(lm, centroid, now)
+                self._persons[pid] = self._make_person_entry(lm, centroid, now,
+                                                             moved=body_moved)
                 log.info("[%s] New person pid=%d at (%.0f, %.0f)",
                          self.label, pid, *centroid)
 
@@ -1196,6 +1307,7 @@ class CameraAnalyser(threading.Thread):
         # so toggling it on the debug page takes effect immediately, with no
         # add-on restart required.
         bg_subtractor = cv2.createBackgroundSubtractorMOG2(detectShadows=False)
+        short_motion = _ShortTermMotion()
 
         # grlib/MediaPipe Hands is initialized lazily on the first SINGLE_UP
         # frame to avoid loading two ML runtimes simultaneously at startup.
@@ -1262,8 +1374,10 @@ class CameraAnalyser(threading.Thread):
                 else:
                     bg_in = proc_frame
                 fg_mask = bg_subtractor.apply(bg_in)
+                motion_mask = short_motion.update(bg_in, now)
             else:
                 fg_mask = None
+                motion_mask = None
             _t_stage = _stage_timer.mark("bgsub", _t_stage)
             min_fg_frac = float(getattr(self.s, 'bg_subtract_min_foreground', 0.12))
             # Confirmed-human persons' positions, plus pids still inside
@@ -1348,6 +1462,7 @@ class CameraAnalyser(threading.Thread):
                     boxes=_cached_boxes,
                     tracked_centroids=[e.centroid for e in self._persons.values()],
                     acquire_conf=_acquire_conf,
+                    motion_mask=motion_mask,
                 )
                 self._match_persons(detected, pw, ph, now)
                 self._prune_persons(now)
