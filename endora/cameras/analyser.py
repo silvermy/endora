@@ -1018,18 +1018,18 @@ class CameraAnalyser(threading.Thread):
             detect_t_pose=bool(getattr(s, 'gesture_t_pose_enable', True)),
             detect_both_up=bool(getattr(s, 'gesture_raise_both_enable', True)),
             detect_folded_arms=bool(getattr(s, 'gesture_folded_arms_enable', True)),
-            folded_wrist_proximity=float(getattr(s, 'folded_wrist_proximity', 0.50)),
+            folded_wrist_proximity=float(getattr(s, 'folded_wrist_proximity', 0.80)),
             folded_midline_max=float(getattr(s, 'folded_midline_max', 0.35)),
-            folded_chest_depth=float(getattr(s, 'folded_chest_depth', 0.45)),
+            folded_chest_depth=float(getattr(s, 'folded_chest_depth', 0.80)),
             folded_resolution_min=float(getattr(s, 'folded_resolution_min', 1.60)),
             folded_visibility_min=float(getattr(s, 'folded_visibility_min', 0.50)),
             folded_extension_max=float(getattr(s, 'folded_extension_max', 0.80)),
-            folded_arm_span_max=float(getattr(s, 'folded_arm_span_max', 1.60)),
+            folded_arm_span_max=float(getattr(s, 'folded_arm_span_max', 2.00)),
             body_scale_min_ratio=float(getattr(s, 'body_scale_min_ratio', 0.55)),
             body_scale_min_samples=int(getattr(s, 'body_scale_min_samples', 5)),
             body_scale_reject_run_max=int(
                 getattr(s, 'body_scale_reject_run_max', 3)),
-            folded_lean_max_deg=float(getattr(s, 'folded_lean_max_deg', 22.0)),
+            folded_lean_max_deg=float(getattr(s, 'folded_lean_max_deg', 45.0)),
             folded_knee_above_hip_max=float(
                 getattr(s, 'folded_knee_above_hip_max', 0.15)),
             folded_recline_memory_s=float(

@@ -146,18 +146,25 @@ def test_reclining_is_excluded():
     assert _state(_pose(reclined=True)) is not ArmState.FOLDED_ARMS
 
 
-# ── posture: sitting or standing, not reclining ───────────────────────────────
+# ── posture: sitting or standing, not lying down ──────────────────────────────
 #
-# Fourteen false fires in one evening, all of them the user on the couch. The
-# original guard was the shared `upright` flag, which asks only whether the
-# torso is more vertical than horizontal — so it passes anything short of a 45
-# degree lean, and a couch is a 25-45 degree lean. Nobody lies flat on a sofa.
+# Fourteen false fires in one evening, all of them the user on the couch, led
+# to a 22 degree limit. That also excluded performing the gesture sitting on
+# the couch: on 2026-10-03 every such attempt measured 31-38 degrees. FOLDED_ARMS
+# now needs a nod as well (test_jeannie_nod.py), which is what tells a gesture
+# from resting, so the lean limit only has to exclude lying down.
 
-@pytest.mark.parametrize("deg", [25, 30, 40, 44])
-def test_a_partial_recline_is_excluded(deg):
-    """The shape a couch actually produces. `upright` says True for all of
-    these, which is exactly why it was not enough on its own."""
+@pytest.mark.parametrize("deg", [55, 60, 70])
+def test_lying_down_is_excluded(deg):
+    """The recorded lying-down fires measured 54-74 degrees."""
     assert _state(_pose(lean_deg=deg)) is not ArmState.FOLDED_ARMS
+
+
+@pytest.mark.parametrize("deg", [25, 31, 35, 38])
+def test_sitting_back_on_the_couch_is_accepted(deg):
+    """What sitting on the living-room couch measures. Every attempt there
+    on 2026-10-03 was rejected at 22 degrees."""
+    assert _state(_pose(lean_deg=deg)) is ArmState.FOLDED_ARMS
 
 
 @pytest.mark.parametrize("deg", [0, 8, 15])
@@ -167,11 +174,11 @@ def test_sitting_at_a_normal_slouch_still_works(deg):
     assert _state(_pose(lean_deg=deg)) is ArmState.FOLDED_ARMS
 
 
-def test_the_lean_limit_sits_between_the_two_populations():
+def test_the_lean_limit_sits_between_sitting_and_lying():
     c = ArmTrackerConfig()
-    assert 17.0 < c.folded_lean_max_deg < 25.0, (
-        "genuine captures reached 16.6 degrees and reclining started at 25 — "
-        "a threshold outside that gap drops real gestures or keeps false ones")
+    assert 38.0 < c.folded_lean_max_deg < 54.0, (
+        "sitting on the couch measured up to 38 degrees and lying on it from "
+        "54 — a threshold outside that gap drops real gestures or admits lying")
 
 
 def test_knees_above_the_hips_is_excluded():
@@ -529,12 +536,32 @@ def test_a_normally_proportioned_fold_still_fires():
     assert _state(_pose()) is ArmState.FOLDED_ARMS
 
 
-def test_the_span_ceiling_sits_in_the_measured_window():
-    """Swept end-to-end over the recorded captures: below 1.52 genuine
-    gestures start dropping out, at 1.72 both surviving false positives come
-    back. A value outside 1.52-1.70 is not supported by the data."""
+def test_the_span_ceiling_admits_a_seated_fold():
+    """It was fitted at 1.60 between genuine standing captures and two false
+    positives of people at rest. Sitting on the couch on 2026-10-03 the real
+    gesture measured 1.72-1.80, and the people at rest are now the nod's job
+    (test_jeannie_nod.py)."""
     c = ArmTrackerConfig()
-    assert 1.52 <= c.folded_arm_span_max <= 1.70
+    assert c.folded_arm_span_max >= 1.80
+
+
+# ── the shape of a seated Jeannie ─────────────────────────────────────────────
+# Forearms stacked, each hand near the opposite elbow: the wrists sit wide
+# apart, on either side of the centre. Seated attempts measured a 0.64-0.68
+# wrist gap, which the 0.50 limit rejected every time.
+
+def test_a_wide_stacked_fold_is_accepted():
+    assert _state(_pose(wrist_gap=SHOULDER_W * 0.65)) is ArmState.FOLDED_ARMS
+
+
+def test_the_pair_of_hands_must_still_be_centred():
+    """Both hands off to one side is not a fold at the chest."""
+    assert _state(_pose(wrist_gap=SHOULDER_W * 0.30,
+                        midline_shift=SHOULDER_W * 0.50)) is not ArmState.FOLDED_ARMS
+
+
+def test_hands_far_apart_are_still_not_folded():
+    assert _state(_pose(wrist_gap=SHOULDER_W * 1.10)) is not ArmState.FOLDED_ARMS
 
 
 def test_span_scales_with_the_body_not_the_frame():

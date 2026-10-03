@@ -148,8 +148,8 @@ def _misses(caplog, lm, frames=1):
 
 
 def test_a_leaning_fold_says_how_far_it_leaned(caplog):
-    [msg] = _misses(caplog, _pose(lean_deg=30), frames=10)
-    assert "torso lean 30 deg (max 22)" in msg
+    [msg] = _misses(caplog, _pose(lean_deg=60), frames=10)
+    assert "torso lean 60 deg (max 45)" in msg
 
 
 def test_hands_nowhere_near_each_other_are_not_an_attempt(caplog):
@@ -163,12 +163,12 @@ def test_an_accepted_fold_reports_nothing(caplog):
 def test_a_passing_moment_is_not_reported(caplog):
     """Arms on their way somewhere pass through the shape; only a pose held
     for folded_near_miss_settle_s is an attempt worth describing."""
-    assert _misses(caplog, _pose(lean_deg=30), frames=3) == []
+    assert _misses(caplog, _pose(lean_deg=60), frames=3) == []
 
 
 def test_resting_for_a_long_time_is_reported_once(caplog):
     """Lying with hands on the chest is a near-miss for hours. One line."""
-    assert len(_misses(caplog, _pose(lean_deg=30), frames=600)) == 1
+    assert len(_misses(caplog, _pose(lean_deg=60), frames=600)) == 1
 
 
 def test_each_separate_attempt_is_reported(caplog):
@@ -177,5 +177,5 @@ def test_each_separate_attempt_is_reported(caplog):
     with caplog.at_level(logging.INFO, logger="cameras.arm_tracker"):
         for start in (0.0, 5.0):                 # two attempts, 4 s apart
             for i in range(10):
-                tr._classify_raw(_pose(lean_deg=30), W, H, now=start + i / FPS)
+                tr._classify_raw(_pose(lean_deg=60), W, H, now=start + i / FPS)
     assert len([r for r in caplog.records if "near-miss" in r.getMessage()]) == 2

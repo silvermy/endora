@@ -338,8 +338,17 @@ class ArmTrackerConfig:
     # CROSS_ARMS. Both wrists stay near the body midline instead of passing
     # it, so the two tests are mutually exclusive by construction as long as
     # folded_midline_max stays below cross_arms_min_crossing.
-    folded_wrist_proximity: float = 0.50   # wrist gap, in shoulder widths
-    folded_midline_max: float = 0.35       # each wrist's distance from midline
+    #
+    # Loosened 2026-10-03 once the nod became required: these were tuned to
+    # keep resting poses out, which is now the nod's job, and they were
+    # rejecting the real gesture sitting on the couch — a Jeannie stacks the
+    # forearms with each hand near the opposite elbow, and seated attempts
+    # measured a 0.64-0.68 wrist gap against a 0.50 limit. Standing, the one
+    # attempt that fired measured 0.21-0.42. The midline test now asks
+    # whether the PAIR of hands is centred, not each hand, because stacked
+    # forearms put the two wrists on either side of the centre by design.
+    folded_wrist_proximity: float = 0.80   # wrist gap, in shoulder widths
+    folded_midline_max: float = 0.35       # the hands' midpoint from midline
     folded_chest_pad: float = 0.15         # slack above the shoulder line
     # How far below the shoulder line the hands may sit, as a fraction of
     # torso length. "At the chest" has to mean the chest: the first version
@@ -356,7 +365,10 @@ class ArmTrackerConfig:
     # torso is long — which is not a body, it is a guessed hip. Shoulders
     # stay visible throughout, so they are the scale this gesture measures
     # against.
-    folded_chest_depth: float = 0.55
+    # Deepened from 0.55 when the nod became required: sitting back, the
+    # hands of seated attempts mostly fell below the band. 0.80 still
+    # excludes hands on a laptop, which sit 0.87-0.93 down.
+    folded_chest_depth: float = 0.80
     # Every folded-arms threshold is a fraction of TORSO length, which is
     # measured shoulder-to-hip — so a person whose hips the model cannot see
     # gets thresholds scaled by a guess. A false positive recorded at 14:46
@@ -397,7 +409,11 @@ class ArmTrackerConfig:
     # ones return. 1.60 sits near the middle of that window.
     #
     # Fitted against two false captures, so the margin is real but not wide.
-    folded_arm_span_max: float = 1.60
+    #
+    # Raised to 2.0 once the nod became required: seated attempts on the
+    # couch measured 1.63-2.39, and the false positives this was fitted
+    # against were people at rest, which the nod now excludes.
+    folded_arm_span_max: float = 2.00
 
     # ── Detector sanity: the body cannot change size ──────────────────────
     # A frame whose body measures this much smaller than the track's recent
@@ -454,11 +470,20 @@ class ArmTrackerConfig:
     #   genuine gesture      1.8 - 13.7 deg median, never above 16.6
     #   reclined on a couch  7.4 - 56.3 deg median, most above 29
     #
-    # 22 deg sits in the gap. Unlike `upright` this is REQUIRED, not merely
-    # "not contradicted": a frame whose hips cannot be seen cannot be shown
-    # to be sitting, and the tracker's confirm accumulator already tolerates
-    # a few such frames without discarding the hold.
-    folded_lean_max_deg: float = 22.0
+    # 22 deg sat in that gap — but the gap was between gestures performed
+    # standing or sitting upright and someone resting on the couch, and it
+    # excluded every attempt to perform the gesture SITTING on the couch: on
+    # 2026-10-03 those measured 31-38 deg, inside the "reclined" range. Since
+    # FOLDED_ARMS now also needs a nod (folded_nod_min_dip), the nod is what
+    # separates a gesture from resting, and this only has to exclude lying
+    # down — which measured 54-74 deg on the recorded lying-down fires.
+    # 45 sits between sitting on the couch and lying on it. Unlike `upright`
+    # this is REQUIRED, not merely "not contradicted": a frame whose hips
+    # cannot be seen cannot be shown to be sitting, and the tracker's confirm
+    # accumulator already tolerates a few such frames without discarding the
+    # hold. It also decides what counts as a reclining sighting for
+    # folded_recline_memory_s.
+    folded_lean_max_deg: float = 45.0
     # Knees above the hips means feet up — on a couch, a recliner, a bed.
     # This is the single cleanest discriminator in the recorded data: every
     # genuine capture has the knees at or below the hips (+0.02 to +1.51
@@ -1221,10 +1246,10 @@ class ArmTracker:
                 fold_top = sh_mid[1] - self.c.folded_chest_pad * shoulder_w
                 fold_bottom = sh_mid[1] + self.c.folded_chest_depth * shoulder_w
                 near_mid = self.c.folded_midline_max * shoulder_w
+                hands_mid = ((lw[0] + rw[0]) / 2.0, (lw[1] + rw[1]) / 2.0)
                 hands_together = (
                     _dist(lw, rw) <= self.c.folded_wrist_proximity * shoulder_w
-                    and abs(_toward_left(lw)) <= near_mid
-                    and abs(_toward_left(rw)) <= near_mid)
+                    and abs(_toward_left(hands_mid)) <= near_mid)
                 at_chest = (fold_top < lw[1] < fold_bottom
                             and fold_top < rw[1] < fold_bottom)
                 bent = (l_ext <= self.c.folded_extension_max
@@ -1275,7 +1300,11 @@ class ArmTracker:
                                 f"centre (max {self.c.folded_wrist_proximity:.2f}, "
                                 f"centre {self.c.folded_midline_max:.2f})")
                         if not at_chest:
-                            why.append("hands not at chest height")
+                            low = (max(lw[1], rw[1]) - sh_mid[1]) / shoulder_w
+                            why.append(f"hands {low:.2f} shoulder widths below "
+                                       f"the shoulders (band "
+                                       f"{-self.c.folded_chest_pad:.2f} to "
+                                       f"{self.c.folded_chest_depth:.2f})")
                         if not bent:
                             why.append(f"arms too straight (extension "
                                        f"{l_ext:.2f}/{r_ext:.2f}, max "

@@ -338,15 +338,16 @@ REGISTRY: list[SettingField] = [
                   "facing the camera, sitting or standing. Reclining is excluded on "
                   "purpose: lying down, forearms on the chest look identical",
                   group="Gesture", user_facing=True),
-    SettingField("folded_wrist_proximity", float, 0.50,
-                  "FOLDED_ARMS: how close the wrists must be, in shoulder widths",
+    SettingField("folded_wrist_proximity", float, 0.80,
+                  "FOLDED_ARMS: how close the wrists must be, in shoulder widths. A "
+                  "Jeannie stacks the forearms, so the wrists sit apart; seated on the "
+                  "couch they measured 0.64-0.68",
                   group="Gesture"),
     SettingField("folded_midline_max", float, 0.35,
-                  "FOLDED_ARMS: how far each wrist may sit from the body midline, in "
-                  "shoulder widths. Must stay below cross_arms_min_crossing or the two "
-                  "poses overlap",
+                  "FOLDED_ARMS: how far the midpoint of the two hands may sit from the "
+                  "body midline, in shoulder widths",
                   group="Gesture"),
-    SettingField("folded_chest_depth", float, 0.55,
+    SettingField("folded_chest_depth", float, 0.80,
                   "FOLDED_ARMS: how far below the shoulder line the hands may sit, "
                   "as a fraction of torso length. The whole torso was accepted at "
                   "first, which includes hands resting on a laptop at roughly 0.6-0.9 "
@@ -361,18 +362,19 @@ REGISTRY: list[SettingField] = [
                   "below which the body is not square to the camera. In profile the "
                   "wrists overlap in the image whatever the hands are doing",
                   group="Gesture"),
-    SettingField("folded_arm_span_max", float, 1.60,
+    SettingField("folded_arm_span_max", float, 2.00,
                   "FOLDED_ARMS: ceiling on arm span (upper arm + forearm) in shoulder "
                   "widths. An occluded body reads LONG — hands hidden behind furniture "
                   "make the model invent wrists in the visible chest and splay the "
-                  "elbows against narrow visible shoulders. Usable window measured "
-                  "end-to-end on recorded captures: 1.52-1.70",
+                  "elbows against narrow visible shoulders. Fitted at 1.60 against "
+                  "people at rest; raised to 2.0 once the nod was required, because "
+                  "seated Jeannies on the couch measured 1.72-1.80",
                   group="Gesture"),
-    SettingField("folded_lean_max_deg", float, 22.0,
-                  "FOLDED_ARMS: maximum torso lean off vertical, in degrees. Reclining "
-                  "on a couch puts your forearms on your chest by itself, and the "
-                  "generic upright test tolerates a 45 degree lean. Recorded traces: "
-                  "the real gesture never exceeded 17 degrees, reclining ran 25-56",
+    SettingField("folded_lean_max_deg", float, 45.0,
+                  "FOLDED_ARMS: maximum torso lean off vertical, in degrees — excludes "
+                  "lying down. Sitting on the living-room couch measures 31-38 degrees, "
+                  "lying on it 54-74. The nod, not this, is what separates a gesture "
+                  "from resting, so this only has to exclude lying down",
                   group="Gesture"),
     SettingField("folded_knee_above_hip_max", float, 0.15,
                   "FOLDED_ARMS: how far the knees may rise above the hips, in shoulder "
