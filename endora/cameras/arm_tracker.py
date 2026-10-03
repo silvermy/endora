@@ -166,6 +166,11 @@ _Pt = Tuple[float, float]
 # the shoulder or the wrist.
 _ELBOW_MIN_SEGMENT_FRAC = 0.20
 
+# The wait a raise on the end of a big sweep pays instead of state_confirm_s:
+# long enough that the frame which first shows the raise cannot confirm it on
+# its own, short enough that any second frame can. See _confirm_needed.
+_FAST_CONFIRM_S = 0.001
+
 
 def _hand_snap_roll(hand_lm: np.ndarray) -> float:
     """Palm-orientation signal from a flat grlib hand-landmark array
@@ -826,7 +831,14 @@ class ArmTracker:
         if (raw is not None and raw.state == ArmState.SINGLE_UP
                 and raw.sweep_climb >= self.c.sweep_confirm_climb
                 and raw.sweep_progressive):
-            return 0.0
+            # Not zero: the raise must still be seen on a second frame.
+            # Zero let one frame through on its own, and the sweep behind it
+            # is not always the arm moving — on 2026-10-03 a chin resting in
+            # a hand read as a high, "progressive" arm (the wrist sits above
+            # the shoulder however folded the arm is), then a single
+            # hallucinated straight-arm frame fired SNAP. Costs a real
+            # flourish one pose sample.
+            return _FAST_CONFIRM_S
         return self.c.state_confirm_s
 
     # ── Posture ───────────────────────────────────────────────────────────
