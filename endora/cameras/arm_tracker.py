@@ -514,6 +514,19 @@ class ArmTrackerConfig:
     folded_nod_window_s: float = 1.5
     # How long a completed nod keeps the pose eligible to fire.
     folded_nod_recent_s: float = 2.0
+    # A Jeannie nod is the HEAD moving while the folded arms stay still. On
+    # 2026-10-04 three FOLDED_ARMS fired while the user sat on the couch with
+    # a mug at their chin: hands together near the chest, head dipping to
+    # the cup and back — the pose and a nod, by every earlier test. Neither
+    # the depth of the dip (0.10-0.18 against 0.10-0.37 for real nods), its
+    # speed, nor the hands' height separated them. What did is which part
+    # moved: in the window of the accepted nod, the hands' travel (relative
+    # to the shoulders) divided by the head's was 0.26-0.49 for the three
+    # recorded real Jeannies and 0.74-1.68 for the three drinks. A nod whose
+    # hands moved more than this fraction of the head is rejected. 0.6 sits
+    # in that gap — fitted on three of each, so watch the logged ratio.
+    # 0 disables.
+    folded_nod_arms_ratio_max: float = 0.6
     # Near-miss reporting. When the hands are close together around chest
     # height — what an attempt looks like — but the pose is still not
     # accepted, every check that failed is logged with its measured value, so
@@ -820,13 +833,19 @@ class ArmTracker:
             log.info("FOLDED_ARMS near-miss: %s", "; ".join(why))
 
     def _note_fold_head(self, now: Optional[float], sh_mid: _Pt, nose: _Pt,
-                        shoulder_w: float) -> Tuple[bool, float]:
+                        shoulder_w: float,
+                        hands: Optional[_Pt] = None) -> Tuple[bool, float]:
         """Record the head on a folded frame; return (nodded, best_dip).
 
         A nod is the head dipping and coming back: the lowest sample in the
         last folded_nod_window_s, with a higher one before it and after it,
-        each at least folded_nod_min_dip shoulder widths above it. A nod is
-        consumed when it completes, so one nod counts once.
+        each at least folded_nod_min_dip shoulder widths above it — while the
+        folded arms stay still (see folded_nod_arms_ratio_max). A candidate
+        is consumed when it completes, accepted or not, so one dip counts
+        once and is reported once.
+
+        hands is the midpoint of the two wrists; without it the arms-still
+        test is skipped.
         """
         if now is None or shoulder_w <= 1e-6:
             return False, 0.0
@@ -834,20 +853,48 @@ class ArmTracker:
         if self._fold_heads and now - self._fold_heads[-1][0] > win:
             self._fold_heads.clear()          # the fold was released
             self._fold_best_dip = 0.0
-        self._fold_heads.append((now, (sh_mid[1] - nose[1]) / shoulder_w))
+        rel = lambda p: ((p[0] - sh_mid[0]) / shoulder_w,
+                         (p[1] - sh_mid[1]) / shoulder_w)
+        self._fold_heads.append((now, (sh_mid[1] - nose[1]) / shoulder_w,
+                                 rel(nose), rel(hands) if hands else None))
         while self._fold_heads and now - self._fold_heads[0][0] > win:
             self._fold_heads.popleft()
-        heads = [h for _t, h in self._fold_heads]
+        heads = [h for _t, h, _n, _w in self._fold_heads]
         low = min(range(len(heads)), key=heads.__getitem__)
         if 0 < low < len(heads) - 1:
             dip = min(max(heads[:low]), max(heads[low + 1:])) - heads[low]
             self._fold_best_dip = max(self._fold_best_dip, dip)
             if dip >= self.c.folded_nod_min_dip:
-                self._last_nod_at = now
+                ratio = self._nod_arms_ratio()
+                if (ratio is None or self.c.folded_nod_arms_ratio_max <= 0
+                        or ratio <= self.c.folded_nod_arms_ratio_max):
+                    self._last_nod_at = now
+                else:
+                    log.info("FOLDED_ARMS nod rejected: the arms moved with the "
+                             "head — hands/head travel %.2f (max %.2f), dip %.2f "
+                             "shoulder widths", ratio,
+                             self.c.folded_nod_arms_ratio_max, dip)
                 self._fold_heads.clear()
         nodded = (self._last_nod_at is not None
                   and now - self._last_nod_at <= self.c.folded_nod_recent_s)
         return nodded, self._fold_best_dip
+
+    def _nod_arms_ratio(self) -> Optional[float]:
+        """How far the hands moved relative to the head over the samples in
+        the nod window: each one's largest distance from its own median
+        position, both measured relative to the shoulders. None if the hands
+        were not recorded or the head did not move at all."""
+        rows = [(n, w) for _t, _h, n, w in self._fold_heads if w is not None]
+        if len(rows) < 2:
+            return None
+        def travel(pts):
+            mx = sorted(p[0] for p in pts)[len(pts) // 2]
+            my = sorted(p[1] for p in pts)[len(pts) // 2]
+            return max(math.hypot(p[0] - mx, p[1] - my) for p in pts)
+        head = travel([n for n, _w in rows])
+        if head <= 1e-6:
+            return None
+        return travel([w for _n, w in rows]) / head
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -1330,8 +1377,9 @@ class ArmTracker:
                         and head_up
                         and not reclined
                         and posture is None):
-                    nodded, dip = self._note_fold_head(now, sh_mid, px(NOSE),
-                                                       shoulder_w)
+                    nodded, dip = self._note_fold_head(
+                        now, sh_mid, px(NOSE), shoulder_w,
+                        hands=((lw[0] + rw[0]) / 2.0, (lw[1] + rw[1]) / 2.0))
                     return ArmReading(state=ArmState.FOLDED_ARMS,
                                       upright=bool(upright),
                                       nodded=nodded, nod_dip=dip)

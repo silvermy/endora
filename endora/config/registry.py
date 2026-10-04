@@ -397,6 +397,13 @@ REGISTRY: list[SettingField] = [
                   "back, in shoulder widths, to count as a nod. Each held fold without "
                   "one logs the largest dip measured",
                   group="Gesture"),
+    SettingField("folded_nod_arms_ratio_max", float, 0.6,
+                  "FOLDED_ARMS: a nod must move the head, not the arms. A dip where "
+                  "the hands travelled more than this fraction of the head's travel "
+                  "(e.g. sipping from a mug held at the chest) is rejected and logged "
+                  "with the ratio. Real Jeannies measured 0.26-0.49, drinks 1.08-1.68. "
+                  "0 disables",
+                  group="Gesture"),
     SettingField("folded_posture_visibility_min", float, 0.50,
                   "FOLDED_ARMS: confidence floor for the hips and knees before they may "
                   "veto the gesture on posture. Higher than folded_visibility_min "
@@ -553,7 +560,7 @@ GESTURE_CRITICAL: list[str] = [
     "folded_lean_max_deg", "folded_knee_above_hip_max",
     "folded_arm_span_max", "body_scale_min_ratio",
     "folded_recline_memory_s", "folded_posture_visibility_min",
-    "folded_require_nod", "folded_nod_min_dip",
+    "folded_require_nod", "folded_nod_min_dip", "folded_nod_arms_ratio_max",
     # HOLD was missing here while every other gesture flag was listed, and
     # it is the one that most visibly surprises: it fires hold_duration_s
     # after a successful SNAP, from the same raised arm, with its own HA

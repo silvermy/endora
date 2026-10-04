@@ -22,7 +22,7 @@ import pytest
 
 from cameras.arm_tracker import ArmTracker, ArmTrackerConfig
 from core.state_machine import Gesture, GestureStateMachine, StateMachineConfig
-from tests.fake_landmarks import NOSE, Point
+from tests.fake_landmarks import LEFT_WRIST, NOSE, RIGHT_WRIST, Point
 from tests.test_captured import _YOLOLandmarks
 from tests.test_folded_arms import SHOULDER_W, H, W, _pose
 
@@ -109,13 +109,13 @@ def test_a_nod_before_folding_does_not_count():
 RESTING = ["lying_hands_on_chest", "sitting_hands_together", "visitor_arms_crossed"]
 
 
-def _replay_resting(name, **sm_cfg):
-    data = np.load(REST / f"{name}.npz")
+def _replay_resting(name, folder=REST, tracker_cfg=None, **sm_cfg):
+    data = np.load(folder / f"{name}.npz")
     w, h = int(data["frame_w"]), int(data["frame_h"])
     kps, ts = list(data["keypoints"]), [float(t) for t in data["t_offsets"]]
     kps += [kps[-1]] * 20
     ts += [ts[-1] + 0.1 * (i + 1) for i in range(20)]
-    tr = ArmTracker(ArmTrackerConfig())
+    tr = ArmTracker(ArmTrackerConfig(**(tracker_cfg or {})))
     sm = GestureStateMachine(StateMachineConfig(**sm_cfg))
     return [t for k, t in zip(kps, ts)
             if sm.tick(tr.classify(_YOLOLandmarks(k, w, h), w, h, now=t), now=t)
@@ -132,6 +132,55 @@ def test_the_recording_fires_without_the_nod(name):
 def test_resting_with_folded_arms_does_not_fire(name):
     """Replayed, and then held still for two more seconds, none fires now."""
     assert _replay_resting(name) == []
+
+
+# ── the head moves, the arms stay still ──────────────────────────────────────
+# 2026-10-04: three FOLDED_ARMS fired while the user sat on the couch with a
+# mug at their chin — hands together near the chest, head dipping to the cup
+# and back. Depth, speed and hand height all failed to separate them from real
+# nods; which part moved did. Hands/head travel: 0.26-0.49 for the three real
+# Jeannies in tests/jeannie_real/, 1.08-1.68 for the three drinks.
+
+REAL = Path(__file__).parent / "jeannie_real"
+MUGS = ["mug_1", "mug_2", "mug_3"]
+REAL_NODS = ["standing", "seated_1", "seated_2"]
+
+
+@pytest.mark.parametrize("name", MUGS)
+def test_a_drink_fired_before_the_arms_had_to_be_still(name):
+    # Documents the bug.
+    assert _replay_resting(name, tracker_cfg={"folded_nod_arms_ratio_max": 0.0})
+
+
+@pytest.mark.parametrize("name", MUGS)
+def test_a_drink_is_not_a_jeannie(name):
+    assert _replay_resting(name) == []
+
+
+@pytest.mark.parametrize("name", REAL_NODS)
+def test_a_real_jeannie_still_fires(name):
+    assert len(_replay_resting(name, folder=REAL)) == 1
+
+
+def _hands_drop(lm, drop_sw: float):
+    """Move both wrists down with the head, as hands holding a cup do."""
+    for idx in (LEFT_WRIST, RIGHT_WRIST):
+        p = lm._points[idx]
+        lm._points[idx] = Point(p.x, p.y + drop_sw * SHOULDER_W / H, p.visibility)
+    return lm
+
+
+def test_a_nod_with_the_hands_moving_too_does_not_fire():
+    tr = ArmTracker(ArmTrackerConfig())
+    sm = GestureStateMachine(StateMachineConfig())
+    drops = [0.0] * 10 + _nod() + [0.0] * 20
+    fired = []
+    for i, drop in enumerate(drops):
+        t = i / FPS
+        lm = _hands_drop(_nose_drop(_pose(), drop), drop)
+        if sm.tick(tr.classify(lm, W, H, None, now=t), t) is Gesture.FOLDED_ARMS:
+            fired.append(t)
+    assert fired == []
 
 
 # ── saying why an attempt was not accepted ───────────────────────────────────
