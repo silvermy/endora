@@ -1389,10 +1389,11 @@ class CameraAnalyser(threading.Thread):
         _last_person_count: int = -1
         _logged_frame_geometry: bool = False
 
+        last_seq = 0
         while not self._stop_evt.is_set():
-            frame = self.camera.get_frame()
+            # Each camera frame exactly once — see RtspCapture.wait_new_frame.
+            frame, last_seq = self.camera.wait_new_frame(last_seq, timeout=0.5)
             if frame is None:
-                time.sleep(0.01)
                 continue
 
             now = time.monotonic()

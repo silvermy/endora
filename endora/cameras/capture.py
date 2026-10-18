@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -55,6 +55,10 @@ class RtspCapture(threading.Thread):
 
         self._frame: Optional[np.ndarray] = None
         self._lock = threading.Lock()
+        # Counts frames as they arrive, so a reader can tell a new frame from
+        # one it has already seen — see wait_new_frame.
+        self._seq: int = 0
+        self._new_frame = threading.Condition(self._lock)
         self._stop_evt = threading.Event()
         self._ready = threading.Event()
 
@@ -71,12 +75,40 @@ class RtspCapture(threading.Thread):
         with self._lock:
             return None if self._frame is None else self._frame.copy()
 
+    def wait_new_frame(self, after_seq: int,
+                       timeout: float = 0.5) -> Tuple[Optional[np.ndarray], int]:
+        """Block until a frame newer than *after_seq* arrives; return a copy
+        of it and its sequence number, or (None, after_seq) on timeout.
+
+        get_frame hands back whatever is newest, however often it is called,
+        and the analyser loop used to call it as fast as it could: on the
+        Jetson that ran the pose model 16.6 times a second on a camera
+        delivering 10, so four inferences in ten were repeats. A repeat is
+        worse than waste — TensorRT is deterministic, so it is a second,
+        identical observation of the same moment, which is exactly what a
+        "seen on two frames" check cannot afford to be fooled by.
+        """
+        with self._new_frame:
+            self._new_frame.wait_for(
+                lambda: self._seq > after_seq or self._stop_evt.is_set(), timeout)
+            if self._frame is None or self._seq <= after_seq:
+                return None, after_seq
+            return self._frame.copy(), self._seq
+
+    def _publish(self, frame: np.ndarray) -> None:
+        with self._new_frame:
+            self._frame = frame
+            self._seq += 1
+            self._new_frame.notify_all()
+
     def wait_ready(self, timeout: float = 30.0) -> bool:
         """Block until the first frame arrives or timeout elapses."""
         return self._ready.wait(timeout)
 
     def stop(self):
         self._stop_evt.set()
+        with self._new_frame:
+            self._new_frame.notify_all()     # release a reader waiting for a frame
 
     # ── Thread body ───────────────────────────────────────────────────────
 
@@ -158,8 +190,7 @@ class RtspCapture(threading.Thread):
                 frame_times = [t for t in frame_times if now - t < 1.0]
                 self._fps_actual = len(frame_times)
 
-                with self._lock:
-                    self._frame = frame
+                self._publish(frame)
                 self.frames_captured += 1
                 if not self._ready.is_set():
                     self._ready.set()
