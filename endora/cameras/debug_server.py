@@ -287,9 +287,42 @@ def _effective_settings() -> list:
     return out
 
 
+# The values as last saved (or as loaded, before anything was changed here).
+# Sliders apply live, so without this nothing told you a change was only in
+# memory and would vanish on the next restart. See _unsaved_keys.
+_saved_snapshot: Optional[dict] = None
+
+
+def _ensure_snapshot() -> None:
+    global _saved_snapshot
+    if _saved_snapshot is None:
+        _saved_snapshot = dict(_current_values())
+
+
+def _mark_saved() -> None:
+    global _saved_snapshot
+    _saved_snapshot = dict(_current_values())
+
+
+def _unsaved_keys() -> list:
+    """Settings changed on this page since the last save, i.e. live now but
+    gone after a restart."""
+    _ensure_snapshot()
+    out = []
+    for key, value in _current_values().items():
+        before = _saved_snapshot.get(key)
+        if isinstance(value, float) and isinstance(before, (int, float)):
+            if abs(value - before) > 1e-9:
+                out.append(key)
+        elif value != before:
+            out.append(key)
+    return sorted(out)
+
+
 def _apply_setting(key: str, raw: str) -> bool:
     if _settings is None:
         return False
+    _ensure_snapshot()        # the baseline is what was there before this change
     current = getattr(_settings, key, None)
     # log_level is a string field not in _PARAMS — handle separately
     if key == 'log_level' and hasattr(_settings, 'log_level'):
@@ -573,6 +606,14 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 }
 #savebtn:hover{background:#163016}
 #savebtn:disabled{opacity:.45;cursor:default}
+/* changed here but not yet saved — gone on the next restart */
+#savebtn.pending{background:#3a2a00;border-color:#e8a020;color:#ffc040;
+  box-shadow:0 0 0 2px #e8a02055}
+.row.unsaved,.togrow.unsaved{background:#2a2000;border-left:3px solid #e8a020;
+  padding-left:5px;border-radius:3px}
+.row.unsaved .lbl span:first-child::after,
+.togrow.unsaved .rowlabel::after{content:' \2022 unsaved';color:#e8a020;
+  font-size:10px;font-weight:700;letter-spacing:.03em}
 #savemsg{font-size:12px;min-height:16px;text-align:center;padding-top:3px}
 #resetbtn{
   width:100%;padding:6px;background:#2e1414;border:1px solid #6e2e2e;
@@ -825,26 +866,54 @@ function onIn(key, v, step) {
   document.getElementById('v_' + key).textContent = fmt(v, step);
 }
 
+// Every change goes through here, so the unsaved highlight is always current.
+function pushSetting(key, value) {
+  return fetch('set?key='+encodeURIComponent(key)+'&value='+encodeURIComponent(value))
+    .catch(e => console.warn('set', e))
+    .finally(refreshUnsaved);
+}
+
+let _unsaved = [];
+const SAVE_LABEL = '\u{1F4BE}\u00a0 Save to settings.yaml';
+function refreshUnsaved() {
+  return fetch('unsaved').then(r => r.json()).then(d => {
+    _unsaved = d.keys || [];
+    document.querySelectorAll('.unsaved').forEach(el => el.classList.remove('unsaved'));
+    _unsaved.forEach(key => {
+      const el = document.getElementById('s_' + key) || document.getElementById('tog_' + key)
+              || document.getElementById('jv_' + key);
+      const row = el && el.closest('.row, .togrow, .joy-wrap');
+      if (row) row.classList.add('unsaved');
+    });
+    const btn = document.getElementById('savebtn');
+    const n = _unsaved.length;
+    btn.classList.toggle('pending', n > 0);
+    btn.textContent = n ? '\u{1F4BE}\u00a0 Save ' + n + ' unsaved change' + (n > 1 ? 's' : '')
+                        : SAVE_LABEL;
+    btn.title = n ? 'Live now, but lost on restart until saved: ' + _unsaved.join(', ') : '';
+  }).catch(e => console.warn('unsaved', e));
+}
+window.addEventListener('beforeunload', e => {
+  if (_unsaved.length) { e.preventDefault(); e.returnValue = ''; }
+});
+
 const _t = {};
 function onCom(key, value) {
   clearTimeout(_t[key]);
-  _t[key] = setTimeout(() =>
-    fetch('set?key='+encodeURIComponent(key)+'&value='+encodeURIComponent(value))
-      .catch(e => console.warn('set', e)), 60);
+  _t[key] = setTimeout(() => pushSetting(key, value), 60);
 }
 
 function setBool(key, on) {
   const lbl = document.getElementById('lbl_' + key);
   if (lbl) { lbl.textContent = on ? 'ON' : 'OFF'; lbl.style.color = on ? '#e8c040' : '#555'; }
-  fetch('set?key='+encodeURIComponent(key)+'&value='+(on?'true':'false'))
-    .catch(e => console.warn(e));
+  pushSetting(key, on ? 'true' : 'false');
 }
 
 function setLog(isDebug) {
   const level = isDebug ? 'debug' : 'info';
   document.getElementById('loglabel').textContent = isDebug ? 'DEBUG' : 'INFO';
   document.getElementById('loglabel').style.color = isDebug ? '#e8c040' : '#555';
-  fetch('set?key=log_level&value=' + level).catch(e => console.warn(e));
+  pushSetting('log_level', level);
 }
 
 function doSave() {
@@ -857,6 +926,7 @@ function doSave() {
     .then(d => {
       msg.style.color = d.ok ? '#5c5' : '#c55';
       msg.textContent = d.ok ? '\u2713 saved' : '\u2717 ' + (d.error || 'error');
+      refreshUnsaved();
     })
     .catch(() => { msg.style.color='#c55'; msg.textContent='\u2717 request failed'; })
     .finally(() => { btn.disabled = false; });
@@ -908,7 +978,7 @@ document.getElementById('effbox').addEventListener('toggle', function(){
   if (this.open) loadEffective();
 });
 
-fetch('settings').then(r=>r.json()).then(build).catch(()=>build({}));
+fetch('settings').then(r=>r.json()).then(build).catch(()=>build({})).then(refreshUnsaved);
 
 // Show capture button only when recorder is active
 fetch('recorder_status').then(r=>r.json()).then(function(d){
@@ -1249,6 +1319,14 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
 
+        elif parsed.path == "/unsaved":
+            body = json.dumps({"keys": _unsaved_keys()}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         elif parsed.path == "/version":
             from version import __version__
             body = json.dumps({"version": __version__}).encode()
@@ -1526,6 +1604,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/save":
             ok, err = _save_to_yaml()
             if ok:
+                _mark_saved()
                 body = b'{"ok":true}'
                 self.send_response(200)
             else:
@@ -1540,6 +1619,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/reset_overrides":
             ok, err = _reset_overrides()
             if ok:
+                _mark_saved()
                 body = b'{"ok":true}'
                 self.send_response(200)
             else:
