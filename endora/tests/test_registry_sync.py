@@ -79,11 +79,22 @@ def test_debug_page_lists_derived_from_registry_match_known_layout():
     assert [p[0] for p in _PARAMS] == [
         "raise_elevation_min", "snap_elevation_min", "snap_sustain_s",
         "cooldown_s", "bg_subtract_min_foreground", "arm_extension_min",
-        "yolo_conf", "dewarp_vfov", "frame_crop_bottom", "pose_visibility_min",
+        "head_rest_rise_max", "hold_duration_s",
+        "yolo_conf", "yolo_keep_conf",
+        "dewarp_vfov", "frame_crop_bottom", "pose_visibility_min",
+        "folded_nod_min_dip", "folded_lean_max_deg", "folded_wrist_proximity",
+        "folded_chest_depth", "folded_arm_span_max", "folded_nod_arms_ratio_max",
     ]
-    assert [p[5] for p in _PARAMS] == [
-        "Gesture", "Gesture", "Gesture", "Gesture", "Gesture", "Gesture",
-        "Body", "View", "View", "View",
-    ]
+    assert [p[5] for p in _PARAMS] == (
+        ["Gesture"] * 8 + ["Body"] * 2 + ["View"] * 3 + ["Jeannie"] * 6)
     assert [p[0] for p in _JOY_PARAMS] == ["dewarp_pan", "dewarp_tilt"]
-    assert [p[0] for p in _TOGGLES] == ["low_light_enhance", "bg_subtract_enable"]
+    assert [p[0] for p in _TOGGLES] == ["low_light_enhance", "bg_subtract_enable",
+                                        "folded_require_nod", "folded_knees_veto"]
+
+
+def test_no_two_debug_page_controls_share_an_order():
+    """A collision only renders right by accident of declaration order."""
+    from cameras.debug_server import _UI_FIELDS
+    for kind in ("slider", "toggle"):
+        orders = [f.ui.order for f in _UI_FIELDS if f.ui.kind == kind]
+        assert len(orders) == len(set(orders)), kind

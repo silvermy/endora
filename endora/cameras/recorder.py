@@ -127,7 +127,7 @@ class TestRecorder:
     # ── Save ─────────────────────────────────────────────────────────────
 
     def save(self, gesture_name: str = "UNKNOWN", label: str = "manual",
-             pid: object = None) -> Optional[Path]:
+             pid: object = None, note: str = "") -> Optional[Path]:
         """Flush one person's buffer to a .npz file and return the path.
 
         With no pid, saves the longest buffer currently held — a manual
@@ -172,6 +172,7 @@ class TestRecorder:
                 label=np.array(label),
                 gesture=np.array(gesture_name),
                 pid=np.array("" if pid is None else str(pid)),
+                note=np.array(note),
             )
             log.info("TestRecorder: saved %d frames → %s", len(frames), fname)
             return fname

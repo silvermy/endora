@@ -334,3 +334,35 @@ if __name__ == "__main__":
             traceback.print_exc()
     print(f"\n{'PASSED' if failed == 0 else f'{failed} FAILED'} ({len(tests) - failed}/{len(tests)})")
     sys.exit(failed)
+
+
+# ── HOLD follows only a SNAP that was actually sent ──────────────────────────
+# 2026-10-21: a SNAP was withheld (the track was not yet confirmed human), and
+# 1.5 s later its HOLD went to Home Assistant anyway.
+
+def _hold_after(withhold: bool):
+    m = _machine(snap_sustain_s=0.0, hold_duration_s=3.0)
+    fired = []
+    g = m.tick(_vertical_up(), now=0.0)
+    assert g == Gesture.SNAP
+    if withhold:
+        m.note_withheld(g)
+    for i in range(1, 61):                      # arm held up for 6 s
+        g = m.tick(_vertical_up(), now=i / 10.0)
+        if g is not None:
+            fired.append((g, i / 10.0))
+    return fired
+
+
+def test_a_sent_snap_is_followed_by_hold():
+    fired = _hold_after(withhold=False)
+    assert [g for g, _ in fired] == [Gesture.HOLD]
+    assert fired[0][1] >= 3.0
+
+
+def test_a_withheld_snap_is_not_followed_by_hold():
+    assert _hold_after(withhold=True) == []
+
+
+def test_hold_waits_three_seconds_by_default():
+    assert StateMachineConfig().hold_duration_s == 3.0

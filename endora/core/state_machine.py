@@ -81,7 +81,10 @@ class StateMachineConfig:
     # which measures the whole arm rather than the forearm alone. Kept so
     # old configs don't error.
     snap_forearm_min: float = 0.10
-    hold_duration_s: float = 1.5
+    # How long after an emitted SNAP the arm must stay up for HOLD. Was 1.5:
+    # in practice HOLD then followed almost every deliberate SNAP, a second
+    # after it, which leaves no room to use it as its own gesture.
+    hold_duration_s: float = 3.0
     double_snap_window_s: float = 3.0
 
     # Sustained-state gestures need to be held this long before firing.
@@ -592,6 +595,14 @@ class GestureStateMachine:
         Gesture.RAISE_BOTH:  "enable_raise_both",
         Gesture.FOLDED_ARMS: "enable_folded_arms",
     }
+
+    def note_withheld(self, gesture: Gesture) -> None:
+        """The analyser did not send *gesture* after all — the track was not
+        yet confirmed human. A HOLD extends a raise that was actually sent, so
+        a withheld SNAP must not leave one pending: on 2026-10-21 a HOLD went
+        out 1.5 s after a SNAP that never had."""
+        if gesture in (Gesture.SNAP, Gesture.DOUBLE_SNAP):
+            self._raise.snap_emitted = False
 
     def is_enabled(self, gesture: Gesture) -> bool:
         return bool(getattr(self.c, self._ENABLE_ATTR[gesture], True))

@@ -146,15 +146,53 @@ MUGS = ["mug_1", "mug_2", "mug_3"]
 REAL_NODS = ["standing", "seated_1", "seated_2"]
 
 
-@pytest.mark.parametrize("name", MUGS)
-def test_a_drink_fired_before_the_arms_had_to_be_still(name):
-    # Documents the bug.
-    assert _replay_resting(name, tracker_cfg={"folded_nod_arms_ratio_max": 0.0})
+OLD_SHALLOW_NOD = {"folded_nod_min_dip": 0.10}
 
 
 @pytest.mark.parametrize("name", MUGS)
-def test_a_drink_is_not_a_jeannie(name):
+def test_a_drink_fired_while_any_small_dip_counted_as_a_nod(name):
+    # Documents the bug: at the first threshold, with the arms rule off.
+    assert _replay_resting(name, tracker_cfg={"folded_nod_arms_ratio_max": 0.0,
+                                              **OLD_SHALLOW_NOD})
+
+
+# ── a nod is a clear nod ─────────────────────────────────────────────────────
+# 2026-10-20: sitting with a phone in the lap — hands together at the waist,
+# glancing down at the screen and back — fired FOLDED_ARMS twice on "nods" of
+# 0.10-0.13. The user's deliberate Jeannies that morning dipped 0.24-0.32.
+
+PHONES = ["phone_in_lap_1", "phone_in_lap_2"]
+ALL_REAL = REAL_NODS + ["live_seated", "live_standing_1", "live_standing_2"]
+
+
+@pytest.mark.parametrize("name", PHONES)
+def test_glancing_at_a_phone_fired_at_the_old_threshold(name):
+    assert _replay_resting(name, tracker_cfg=OLD_SHALLOW_NOD)
+
+
+@pytest.mark.parametrize("name", PHONES + MUGS)
+def test_a_glance_or_a_sip_is_not_a_nod(name):
     assert _replay_resting(name) == []
+
+
+@pytest.mark.parametrize("name", ALL_REAL)
+def test_every_recorded_real_jeannie_still_fires(name):
+    assert len(_replay_resting(name, folder=REAL)) == 1
+
+
+ARMS_RULE_ON = {"folded_nod_arms_ratio_max": 0.6}
+
+
+def test_the_arms_rule_is_off_by_default():
+    """2026-10-20: at 0.6 it rejected all four of the user's real seated
+    Jeannies (hands/head 1.03-2.08, inside the drinks' range). Off until it
+    can be refitted on the nod recordings that now get saved."""
+    assert ArmTrackerConfig().folded_nod_arms_ratio_max == 0.0
+
+
+@pytest.mark.parametrize("name", MUGS)
+def test_with_the_arms_rule_on_a_drink_is_not_a_jeannie(name):
+    assert _replay_resting(name, tracker_cfg=ARMS_RULE_ON) == []
 
 
 @pytest.mark.parametrize("name", REAL_NODS)
@@ -170,8 +208,8 @@ def _hands_drop(lm, drop_sw: float):
     return lm
 
 
-def test_a_nod_with_the_hands_moving_too_does_not_fire():
-    tr = ArmTracker(ArmTrackerConfig())
+def test_with_the_arms_rule_on_a_nod_with_the_hands_moving_does_not_fire():
+    tr = ArmTracker(ArmTrackerConfig(**ARMS_RULE_ON))
     sm = GestureStateMachine(StateMachineConfig())
     drops = [0.0] * 10 + _nod() + [0.0] * 20
     fired = []
@@ -228,3 +266,38 @@ def test_each_separate_attempt_is_reported(caplog):
             for i in range(10):
                 tr._classify_raw(_pose(lean_deg=60), W, H, now=start + i / FPS)
     assert len([r for r in caplog.records if "near-miss" in r.getMessage()]) == 2
+
+
+# ── every nod leaves a recording ─────────────────────────────────────────────
+# Recordings were only saved when a gesture fired, so the four real Jeannies
+# rejected on 2026-10-20 left nothing to replay.
+
+def test_the_tracker_reports_each_nod_it_decides():
+    tr = ArmTracker(ArmTrackerConfig(**ARMS_RULE_ON))
+    drops = [0.0] * 10 + _nod() + [0.0] * 5        # head only: accepted
+    for i, d in enumerate(drops):
+        tr.classify(_nose_drop(_pose(), d), W, H, None, now=i / FPS)
+    moving = [0.0] * 5 + _nod() + [0.0] * 5        # hands with the head: rejected
+    for i, d in enumerate(moving):
+        t = 10.0 + i / FPS
+        tr.classify(_hands_drop(_nose_drop(_pose(), d), d), W, H, None, now=t)
+    kinds = [k for k, _r, _d in tr.nod_events]
+    assert kinds == ["accepted", "rejected"]
+
+
+def test_the_analyser_saves_a_recording_for_each_nod():
+    from unittest.mock import MagicMock
+    from cameras.analyser import CameraAnalyser
+    from config.settings import Settings
+    a = CameraAnalyser(camera=MagicMock(), settings=Settings(),
+                       on_candidate=MagicMock(), label="A")
+    a._recorder = MagicMock()
+    entry = MagicMock()
+    entry.arm_tracker.nod_events = [("rejected", 1.36, 0.19), ("accepted", None, 0.24)]
+    a._record_nods(entry, 97)
+    calls = a._recorder.save.call_args_list
+    assert [c.kwargs["label"] for c in calls] == ["A_nod_rejected_pid97",
+                                                   "A_nod_accepted_pid97"]
+    assert all(c.kwargs["gesture_name"] == "MANUAL" for c in calls)
+    assert "hands/head 1.36" in calls[0].kwargs["note"]
+    assert entry.arm_tracker.nod_events == []          # consumed, not re-saved

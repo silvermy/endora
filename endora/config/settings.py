@@ -54,6 +54,7 @@ class Settings:
     # from furniture/shadows, especially in low light. Default 0.25 is too
     # permissive; 0.45 filters most ghost detections without missing real people.
     yolo_conf: float = 0.30
+    yolo_keep_conf: float = 0.22
     # Inference resolution (square). A string, not an int — HA presents this
     # as a fixed-choice dropdown (see config/registry.py's enum) rather than
     # a free-entry field, since only a size with a matching bundled/cached
@@ -296,7 +297,7 @@ class Settings:
     # raised and temporarily changes the body silhouette.
     state_release_s: float = 0.45
     # Seconds after SNAP that the arm must stay up to also fire HOLD.
-    hold_duration_s: float = 1.5
+    hold_duration_s: float = 3.0
     # Seconds within which two SNAPs count as DOUBLE_SNAP instead of two SNAPs.
     double_snap_window_s: float = 3.0
     # Seconds held for CROSS_ARMS / T_POSE / RAISE_BOTH before firing.
@@ -328,11 +329,12 @@ class Settings:
     folded_extension_max: float = 0.80
     folded_arm_span_max: float = 2.00
     folded_lean_max_deg: float = 45.0
+    folded_knees_veto: bool = False
     folded_knee_above_hip_max: float = 0.15
     folded_recline_memory_s: float = 1.5
     folded_require_nod: bool = True
-    folded_nod_min_dip: float = 0.10
-    folded_nod_arms_ratio_max: float = 0.6
+    folded_nod_min_dip: float = 0.18
+    folded_nod_arms_ratio_max: float = 0.0
     folded_posture_visibility_min: float = 0.50
     facing_shoulder_min: float = 0.45
 

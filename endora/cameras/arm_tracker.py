@@ -494,6 +494,15 @@ class ArmTrackerConfig:
     # Only applied when the knees are actually visible: legs out of frame is
     # ordinary for someone seated close to the camera, and four of the eight
     # genuine captures have knee confidence below 0.4.
+    #
+    # OFF by default since 2026-10-20 (folded_knees_veto). It was one of the
+    # few ways to keep a body lying on the couch out before the gesture
+    # needed a nod; lying down is now excluded by folded_lean_max_deg (lying
+    # measured 54-74 deg) and resting by the nod. Meanwhile it vetoed every
+    # Jeannie performed sitting upright with the feet up — knees 0.49-0.72
+    # shoulder widths above the hips — both directly and by marking the
+    # person "reclining" for folded_recline_memory_s.
+    folded_knees_veto: bool = False
     folded_knee_above_hip_max: float = 0.15
     # How long a confident sighting of a reclining body keeps suppressing the
     # gesture. See _note_posture for why a per-frame test is not enough and
@@ -507,10 +516,18 @@ class ArmTrackerConfig:
     # A nod is the nose dipping relative to the shoulder line by at least
     # folded_nod_min_dip shoulder widths and coming back up, the whole thing
     # inside folded_nod_window_s, measured only on frames where the arms are
-    # folded — so settling into a seat or walking up does not count. 0.10 is
-    # a first guess: the recordings end when the gesture fired, before
-    # anyone nodded, so no real nod has been measured yet.
-    folded_nod_min_dip: float = 0.10
+    # folded — so settling into a seat or walking up does not count.
+    #
+    # 0.18 since 2026-10-20, from the nod recordings: the user's deliberate
+    # Jeannies that morning dipped 0.24-0.32, while sitting with a phone in
+    # the lap — hands together at the waist, glancing down at the screen and
+    # back — produced seven "nods" of 0.10-0.13 in two minutes and fired
+    # twice at the old 0.10. Replayed: all six recorded real Jeannies still
+    # fire (tests/jeannie_real/ — the 10-03 ones a fraction later, on the
+    # deeper of two nods), and all five recorded false ones — two phone, three
+    # mug — no longer do, which also covers the case the arms-still rule was
+    # meant for. Lower toward 0.15 if real ones start to miss.
+    folded_nod_min_dip: float = 0.18
     folded_nod_window_s: float = 1.5
     # How long a completed nod keeps the pose eligible to fire.
     folded_nod_recent_s: float = 2.0
@@ -526,7 +543,17 @@ class ArmTrackerConfig:
     # hands moved more than this fraction of the head is rejected. 0.6 sits
     # in that gap — fitted on three of each, so watch the logged ratio.
     # 0 disables.
-    folded_nod_arms_ratio_max: float = 0.6
+    #
+    # OFF by default since 2026-10-20: it rejected all four of the user's
+    # seated Jeannies that day — clear nods, dips 0.17-0.33 — at hands/head
+    # 1.03-2.08, squarely inside the drinks' range. Two hands pressed
+    # together are one blob to the pose model, which swaps and misplaces the
+    # wrists, so "how far the hands moved" measured as the single largest
+    # excursion is mostly keypoint noise; and the three real nods it was
+    # fitted on were recorded at 18 samples/s, before v1.9.197 halved that.
+    # Every accepted and rejected nod is now recorded (see nod_events) so a
+    # replacement can be fitted on real numbers rather than three of each.
+    folded_nod_arms_ratio_max: float = 0.0
     # Near-miss reporting. When the hands are close together around chest
     # height — what an attempt looks like — but the pose is still not
     # accepted, every check that failed is logged with its measured value, so
@@ -681,6 +708,11 @@ class ArmTracker:
         self._fold_heads: Deque[Tuple[float, float]] = deque()
         self._fold_best_dip: float = 0.0
         self._last_nod_at: Optional[float] = None
+        # Every nod decided since the analyser last looked: (kind, ratio, dip)
+        # with kind "accepted" or "rejected". The analyser saves a recording
+        # for each, because a nod that does not fire leaves nothing behind
+        # otherwise — and those are exactly the ones worth studying.
+        self.nod_events: list = []
         self._fold_miss_since: Optional[float] = None
         self._fold_miss_last: Optional[float] = None
         self._fold_miss_logged: bool = False
@@ -869,7 +901,9 @@ class ArmTracker:
                 if (ratio is None or self.c.folded_nod_arms_ratio_max <= 0
                         or ratio <= self.c.folded_nod_arms_ratio_max):
                     self._last_nod_at = now
+                    self.nod_events.append(("accepted", ratio, dip))
                 else:
+                    self.nod_events.append(("rejected", ratio, dip))
                     log.info("FOLDED_ARMS nod rejected: the arms moved with the "
                              "head — hands/head travel %.2f (max %.2f), dip %.2f "
                              "shoulder widths", ratio,
@@ -1052,7 +1086,7 @@ class ArmTracker:
                    > self.c.folded_lean_max_deg)
 
         knees_up = False
-        if knee_vis >= self.c.folded_posture_visibility_min:
+        if self.c.folded_knees_veto and knee_vis >= self.c.folded_posture_visibility_min:
             knee_y = (lk[1] + rk[1]) / 2.0
             knees_up = ((hip_mid[1] - knee_y) / shoulder_w
                         > self.c.folded_knee_above_hip_max)
@@ -1104,8 +1138,10 @@ class ArmTracker:
         if lean > self.c.folded_lean_max_deg:
             return f"torso lean {lean:.0f} deg (max {self.c.folded_lean_max_deg:.0f})"
 
-        # Knees, when they can be seen at all.
-        if (vis(LEFT_KNEE) + vis(RIGHT_KNEE)) / 2.0 >= 0.20:
+        # Knees, when they can be seen at all — and only if asked to; see
+        # folded_knees_veto.
+        if (self.c.folded_knees_veto
+                and (vis(LEFT_KNEE) + vis(RIGHT_KNEE)) / 2.0 >= 0.20):
             knee_y = (lk[1] + rk[1]) / 2.0
             rise = (hip_mid[1] - knee_y) / shoulder_w   # +ve = knees above hips
             if rise > self.c.folded_knee_above_hip_max:

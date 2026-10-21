@@ -313,3 +313,15 @@ def test_no_gesture_stays_no_gesture():
     a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
     pid = _only_pid(a)
     assert a._confirmed_gesture(a._persons[pid], pid, None) is None
+
+
+def test_withholding_a_gesture_tells_the_state_machine():
+    """So a HOLD cannot follow a SNAP that was never sent."""
+    from core.state_machine import Gesture
+    a = _analyser()
+    a._match_persons([(None, CENTROID, True)], 640, 480, now=1000.0)
+    pid = _only_pid(a)
+    entry = a._persons[pid]
+    entry.state_machine = MagicMock()
+    assert a._confirmed_gesture(entry, pid, Gesture.SNAP) is None
+    entry.state_machine.note_withheld.assert_called_once_with(Gesture.SNAP)

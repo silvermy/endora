@@ -319,6 +319,70 @@ def _unsaved_keys() -> list:
     return sorted(out)
 
 
+# Gestures a recording can be named for (lower-case, as the recorder writes
+# them). Nod and manual recordings are not fired gestures and stay out of the
+# recent-gestures strip.
+_FIRED_GESTURES = ("snap", "hold", "double_snap", "folded_arms",
+                   "raise_both", "t_pose", "cross_arms")
+
+
+def _recent_gestures(n: int = 6) -> list:
+    """The last *n* gestures that fired, newest first, for the strip under
+    the video: each recording's name and current label (the same store the
+    /label page writes), plus the gesture photo taken at the same moment.
+
+    The buttons this replaced marked "the last gesture" in feedback.jsonl —
+    no way to pick which one, nothing linking the mark to a recording, and
+    nothing ever read the file. Labelling a recording is what tuning uses.
+    """
+    from cameras import labeler
+    fired = [r for r in labeler.list_captures()
+             if r["ts"] and r["gesture"] in _FIRED_GESTURES]
+    # One action, one card. Two tracks on the same body (it happens when the
+    # tracker splits a person) each pass the gesture on and each leave a
+    # recording, though the fusion cooldown lets only one reach Home
+    # Assistant. Same gesture within 2 s is one card; its label applies to
+    # every recording in it.
+    rows = []
+    for r in fired:
+        last = rows[-1] if rows else None
+        if (last and last["gesture"] == r["gesture"]
+                and abs(last["ts"] - r["ts"]) <= 2):
+            last["names"].append(r["name"])
+            last["label"] = last["label"] or r["label"]
+            continue
+        if len(rows) == n:
+            break
+        rows.append(dict(r, names=[r["name"]]))
+    photos = (_frame_capture.list_captures() if _frame_capture else [])
+    for r in rows:
+        r["photo"] = _photo_for(r, photos)
+    return rows
+
+
+# Held poses fire at the END of the hold, and by the time the gesture photo is
+# taken the arms are often already coming down: the first Jeannie anyone tried
+# to judge from the strip showed a man with his arms at his sides. The photo
+# taken when the pose was first recognised shows it held.
+_POSE_STATE = {"folded_arms": "FOLDED_ARMS", "raise_both": "BOTH_UP",
+               "t_pose": "T_POSE", "cross_arms": "CROSS_ARMS"}
+
+
+def _photo_for(row: dict, photos: list) -> Optional[str]:
+    ts = row["ts"]
+    state = _POSE_STATE.get(row["gesture"])
+    if state:
+        held = [p for p in photos if p.get("event_type") == "state_" + state
+                and ts - 4.0 <= float(p.get("timestamp", 0)) <= ts + 1.0]
+        if held:
+            return max(held, key=lambda p: float(p["timestamp"]))["filename"]
+    want = "gesture_" + row["gesture"].upper()
+    near = [p for p in photos if p.get("event_type") == want
+            and abs(float(p.get("timestamp", 0)) - ts) <= 3.0]
+    best = min(near, key=lambda p: abs(float(p["timestamp"]) - ts), default=None)
+    return best["filename"] if best else None
+
+
 def _apply_setting(key: str, raw: str) -> bool:
     if _settings is None:
         return False
@@ -378,6 +442,13 @@ def _save_to_yaml() -> tuple[bool, str]:
       /data/settings.yaml           — patched in-place (Docker / standalone path)
     """
     all_vals = _current_values()
+    # /set accepts any setting, not only those with a control on this page,
+    # and Save used to persist only the ones with a control — so a setting
+    # changed through /set (gesture_raise_both_enable, 2026-10-21) was live,
+    # reported saved, and silently gone after the next restart.
+    for key in _touched:
+        if key not in all_vals and _settings is not None and hasattr(_settings, key):
+            all_vals[key] = getattr(_settings, key)
     errors: list[str] = []
 
     # ── 1. runtime_overrides.yaml (survives HA Supervisor regeneration) ──
@@ -522,7 +593,29 @@ h3 .sub{color:#555;font-weight:400;letter-spacing:2px}
 #wrap{display:flex;gap:12px;width:100%;max-width:1300px;align-items:flex-start}
 #vbox{flex:1 1 auto;min-width:0}
 #vbox img{width:100%;display:block;border:1px solid #1e1e1e;min-height:240px;background:#111}
-#fbrow{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;padding:8px 0 2px}
+#recent{padding:8px 0 4px}
+.rhead{font-size:12px;color:#888;letter-spacing:.04em;margin-bottom:6px}
+#rlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.rempty{font-size:12px;color:#555;padding:6px 0}
+.rcard{background:#141414;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;
+  display:flex;flex-direction:column}
+.rcard.intended{border-color:#2e7a2e}
+.rcard.not_intended{border-color:#8a2a2a}
+#vbox .rcard img{width:100%;min-height:0;height:auto;aspect-ratio:2/1;object-fit:contain;
+  display:block;background:#0c0c0c;cursor:pointer;border:0}
+.rcard .rnophoto{width:100%;aspect-ratio:2/1;display:flex;align-items:center;justify-content:center;
+  color:#444;font-size:11px;background:#0c0c0c}
+.rmeta{display:flex;justify-content:space-between;padding:5px 7px 3px;font-size:12px}
+.rmeta .rg{color:#ddd;font-weight:700}
+.rmeta .rt{color:#777}
+.rbtns{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:4px 6px 7px}
+.rbtns button{padding:6px 2px;border-radius:6px;border:1px solid #333;background:#1b1b1b;
+  color:#999;font-size:12px;font-weight:600;cursor:pointer}
+.rbtns button.yes.on{background:#123012;border-color:#3a9a3a;color:#7d7}
+.rbtns button.no.on{background:#341010;border-color:#b33;color:#f88}
+#missbtn{background:#08152e;border-color:#2255aa;color:#6699ff}
+#missbtn:hover{background:#102040}
+#missmsg{font-size:12px;text-align:center;color:#777;min-height:14px}
 #dlrow{display:flex;gap:8px;padding:4px 0 2px;border-top:1px solid #333;margin-top:4px}
 .fbtn{
   padding:12px 10px;border-radius:10px;cursor:pointer;
@@ -530,19 +623,10 @@ h3 .sub{color:#555;font-weight:400;letter-spacing:2px}
   text-align:center;text-decoration:none;display:flex;align-items:center;
   justify-content:center;gap:5px;line-height:1.2;white-space:normal
 }
-#fpbtn{background:#2a0808;border-color:#aa2222;color:#ff7777}
-#fpbtn:hover{background:#3d1010}
-#wgbtn{background:#1a0a2a;border-color:#8833cc;color:#cc88ff}
-#wgbtn:hover{background:#280f3d}
-#fnbtn{background:#08152e;border-color:#2255aa;color:#6699ff}
-#fnbtn:hover{background:#102040}
-#npbtn{background:#221500;border-color:#aa7700;color:#ffbb44}
-#npbtn:hover{background:#332200}
 #capbtn{background:#0e1a0e;border-color:#3a7a3a;color:#77cc77}
 #capbtn:hover{background:#162616}
 #dlbtn{background:#0d0d20;border-color:#3a3a8a;color:#8888ee}
 #dlbtn:hover{background:#151530}
-#feedbackmsg{font-size:12px;grid-column:1/-1;text-align:center;color:#777}
 #panel{
   flex:0 0 272px;background:#111;border:1px solid #222;border-radius:8px;
   padding:12px;display:flex;flex-direction:column;gap:12px;
@@ -689,17 +773,16 @@ input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 2px #0d0d0d,0 0 0
 <div id="wrap">
   <div id="vbox">
     <img id="streamimg" alt="stream">
-    <div id="fbrow">
-      <button id="fpbtn" class="fbtn" onclick="doFeedback('fp')" title="Mark the last gesture that fired as a false positive (within 5s)">&#10007; False positive</button>
-      <button id="wgbtn" class="fbtn" onclick="doFeedback('wg')" title="The wrong gesture fired — mark it as incorrect (within 5s)">&#8646; Wrong gesture</button>
-      <button id="fnbtn" class="fbtn" onclick="doFeedback('fn')" title="I just did a gesture and nothing was detected">? Missed gesture</button>
-      <button id="npbtn" class="fbtn" onclick="doFeedback('np')" title="I was visible but YOLO didn't detect me at all">&#128683; No pose</button>
-      <span id="feedbackmsg"></span>
+    <div id="recent">
+      <div class="rhead">Recent gestures &mdash; did you mean them?</div>
+      <div id="rlist"><div class="rempty">nothing has fired yet</div></div>
     </div>
     <div id="dlrow">
+      <button id="missbtn" class="fbtn" onclick="doMissed()" title="You just did a gesture and nothing fired: save the last 5 seconds as a recording to study">? Missed one &mdash; save it</button>
       <a id="capbtn" href="captures" target="_blank" title="Captures" class="fbtn">&#128249; Captures</a>
       <a id="dlbtn" href="feedback/download" download="feedback.jsonl" onclick="downloadFeedback(event)" title="Download feedback.jsonl" class="fbtn">&#11015; feedback.<wbr>jsonl</a>
     </div>
+    <div id="missmsg"></div>
   </div>
   <div id="panel">
     <div class="togrow">
@@ -1004,29 +1087,67 @@ function doCapture() {
     .finally(function(){ btn.disabled=false; });
 }
 
-// ── Feedback ────────────────────────────────────────────────────────────────
-function _ask(q, def) {
-  // prompt() is unreliable in some webviews (e.g. the HA mobile app); never
-  // let it throw or block the feedback request — fall back to the default.
-  try { var v = prompt(q, def); return v === null ? def : (v || def); }
-  catch (e) { return def; }
+// ── Recent gestures ─────────────────────────────────────────────────────────
+// One card per gesture that fired, newest first. Intended / Not intended
+// writes the same label the /label page does, on that gesture's recording.
+const GNAME = {snap:'Endora', double_snap:'Double Endora', hold:'Hold',
+               folded_arms:'Jeannie', raise_both:'Both up', t_pose:'T-pose',
+               cross_arms:'Crossed'};
+let _recentSig = '';
+function loadRecent() {
+  fetch('recent_gestures').then(r => r.json()).then(rows => {
+    const sig = JSON.stringify(rows.map(r => [r.name, r.label, r.photo]));
+    if (sig === _recentSig) return;            // nothing changed: no flicker
+    _recentSig = sig;
+    const list = document.getElementById('rlist');
+    if (!rows.length) { list.innerHTML = '<div class="rempty">nothing has fired yet</div>'; return; }
+    list.innerHTML = '';
+    rows.forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'rcard' + (r.label ? ' ' + r.label : '');
+      const when = new Date(r.ts * 1000).toLocaleTimeString([], {hour:'numeric', minute:'2-digit', second:'2-digit'});
+      const pic = r.photo
+        ? '<img src="captures/' + r.photo + '" title="open full size" onclick="window.open(this.src)">'
+        : '<div class="rnophoto">no photo kept</div>';
+      card.innerHTML = pic +
+        '<div class="rmeta"><span class="rg">' + (GNAME[r.gesture] || r.gesture) + '</span>' +
+        '<span class="rt">' + when + '</span></div>' +
+        '<div class="rbtns">' +
+        '<button class="yes' + (r.label === 'intended' ? ' on' : '') + '">&#10003; Intended</button>' +
+        '<button class="no' + (r.label === 'not_intended' ? ' on' : '') + '">&#10007; Not intended</button></div>';
+      const [yes, no] = card.querySelectorAll('.rbtns button');
+      yes.onclick = () => setRecentLabel(r, 'intended');
+      no.onclick  = () => setRecentLabel(r, 'not_intended');
+      list.appendChild(card);
+    });
+  }).catch(e => console.warn('recent', e));
 }
-function doFeedback(label) {
-  var msg = document.getElementById('feedbackmsg');
-  var hint = label === 'fn' ? _ask('What gesture did you try? (e.g. SNAP)', 'SNAP') : undefined;
-  var intended = label === 'wg' ? _ask('What gesture did you intend? (e.g. SNAP)', 'SNAP') : undefined;
-  var body = label === 'fn' ? JSON.stringify({label:'fn', hint:hint})
-           : label === 'wg' ? JSON.stringify({label:'wg', intended:intended})
-           : JSON.stringify({label:label});
-  msg.style.color = '#888'; msg.textContent = 'logging…';
-  fetch('feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body:body})
-    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-    .then(function(d){
-      msg.style.color = d.ok ? (label==='fp'?'#c55':label==='wg'?'#c85':'#59c') : '#c55';
-      msg.textContent = d.ok ? '✓ ' + d.msg : '✗ ' + (d.error || d.msg || 'error');
-      setTimeout(function(){ msg.textContent=''; }, 5000);
+function setRecentLabel(r, label) {
+  // Clicking the label it already has clears it.
+  const next = r.label === label ? null : label;
+  Promise.all((r.names || [r.name]).map(name =>
+      fetch('label/set', {method:'POST', headers:{'Content-Type':'application/json'},
+                          body: JSON.stringify({name: name, label: next, note: 'from debug page'})})))
+    .then(() => { _recentSig = ''; loadRecent(); })
+    .catch(e => console.warn('label', e));
+}
+loadRecent();
+setInterval(loadRecent, 5000);
+
+// "Missed one": nothing fired, so there is no gesture to label — save the
+// last 5 seconds as a recording instead, which can be replayed later.
+function doMissed() {
+  const msg = document.getElementById('missmsg');
+  msg.style.color = '#888'; msg.textContent = 'saving…';
+  fetch('capture', {method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({label: 'missed'})})
+    .then(r => r.json())
+    .then(d => {
+      msg.style.color = d.ok ? '#59c' : '#c55';
+      msg.textContent = d.ok ? '✓ saved the last 5 seconds' : '✗ ' + (d.error || 'error');
+      setTimeout(() => { msg.textContent = ''; }, 5000);
     })
-    .catch(function(e){ msg.style.color='#c55'; msg.textContent='✗ ' + (e.message || 'request failed'); });
+    .catch(() => { msg.style.color = '#c55'; msg.textContent = '✗ request failed'; });
 }
 
 // ── Download feedback ─────────────────────────────────────────────────────────
@@ -1313,6 +1434,24 @@ class _Handler(BaseHTTPRequestHandler):
 
         elif parsed.path == "/settings":
             body = json.dumps(_current_values()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path == "/quality":
+            # Hourly detection-quality summaries — see cameras/quality.py.
+            from cameras.quality import read_recent
+            body = json.dumps(read_recent()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif parsed.path == "/recent_gestures":
+            body = json.dumps(_recent_gestures()).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))

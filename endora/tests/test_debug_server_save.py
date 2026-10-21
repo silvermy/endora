@@ -162,3 +162,17 @@ def test_effective_settings_reports_source_per_key(tmp_path, monkeypatch):
     assert rows["snap_sustain_s"]["value"] == 0.9
     # Something untouched must report as a shipped default.
     assert rows["raise_elevation_min"]["source"] == "default"
+
+
+
+def test_a_setting_without_a_page_control_is_still_saved(tmp_path, monkeypatch):
+    """/set takes any setting; Save used to keep only those with a slider or
+    toggle, so this one was live, reported saved, and gone after a restart."""
+    _redirect_data_dir(monkeypatch, tmp_path)
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+    assert "gesture_raise_both_enable" not in ds._current_values()
+    assert ds._apply_setting("gesture_raise_both_enable", "true")
+    ok, err = ds._save_to_yaml()
+    assert ok, err
+    saved = (tmp_path / "data" / "runtime_overrides.yaml").read_text()
+    assert "gesture_raise_both_enable: true" in saved

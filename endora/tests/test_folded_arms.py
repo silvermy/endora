@@ -181,12 +181,19 @@ def test_the_lean_limit_sits_between_sitting_and_lying():
         "54 — a threshold outside that gap drops real gestures or admits lying")
 
 
-def test_knees_above_the_hips_is_excluded():
-    """Feet up on the couch. The single cleanest signal in the recorded data:
-    every genuine capture has the knees at or below the hips (+0.02 to +1.51
-    shoulder widths below), and thirteen of the fourteen false fires have
-    them above (0.06 to 2.90 above)."""
-    assert _state(_pose(knee_rise=1.0)) is not ArmState.FOLDED_ARMS
+def test_knees_above_the_hips_is_excluded_when_the_veto_is_on():
+    """Feet up on the couch. Before the nod was required this was the
+    cleanest signal in the recorded data: every genuine capture had the knees
+    at or below the hips, thirteen of fourteen false fires had them above."""
+    assert _state(_pose(knee_rise=1.0), folded_knees_veto=True) \
+        is not ArmState.FOLDED_ARMS
+
+
+def test_sitting_upright_with_the_feet_up_is_accepted():
+    """The default since 2026-10-20: seated Jeannies with the feet up
+    measured knees 0.49-0.72 shoulder widths above the hips and were all
+    vetoed. Lying down is the lean limit's job now, resting the nod's."""
+    assert _state(_pose(knee_rise=0.7)) is ArmState.FOLDED_ARMS
 
 
 def test_knees_level_with_the_hips_is_still_seated():
@@ -234,7 +241,7 @@ def test_a_recent_sighting_of_reclining_suppresses_the_gesture():
     body does not sit up and lie down eight times a second.
     """
     tr = ArmTracker(ArmTrackerConfig())
-    lying = _pose(lean_deg=45, knee_rise=2.0)
+    lying = _pose(lean_deg=60, knee_rise=2.0)
     upright_looking = _pose(knee_vis=0.05)
     # Half a second of clearly lying down, then the hallucinated upright read.
     assert _feed(tr, [lying] * 5 + [upright_looking] * 8) \
@@ -246,7 +253,7 @@ def test_the_memory_expires():
     couch and performing the gesture has to work."""
     tr = ArmTracker(ArmTrackerConfig())
     c = ArmTrackerConfig()
-    _feed(tr, [_pose(lean_deg=45, knee_rise=2.0)] * 5)
+    _feed(tr, [_pose(lean_deg=60, knee_rise=2.0)] * 5)
     later = c.folded_recline_memory_s + 0.5
     assert _feed(tr, [_pose()] * 10, t0=later) is ArmState.FOLDED_ARMS
 
@@ -260,7 +267,7 @@ def test_the_veto_outranks_the_hysteresis_hold():
     """
     tr = ArmTracker(ArmTrackerConfig())
     assert _feed(tr, [_pose()] * 8) is ArmState.FOLDED_ARMS      # confirmed
-    lying = _pose(lean_deg=45, knee_rise=2.0)
+    lying = _pose(lean_deg=60, knee_rise=2.0)
     r = tr.classify(lying, W, H, None, now=0.9)                  # one frame
     assert r.state is not ArmState.FOLDED_ARMS, \
         "the hold coasted through a frame showing the person lying down"

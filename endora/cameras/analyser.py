@@ -993,6 +993,9 @@ class CameraAnalyser(threading.Thread):
         self._yolo_runs: int = 0
         # The detector threshold at the last run, for _report_dropout.
         self._dropout_threshold: float = 0.0
+        # How well people are seen, hour by hour — see cameras/quality.py.
+        from cameras.quality import HourlyQuality
+        self._quality = HourlyQuality(label=self.label)
         # Last known person boxes, in motion-thumbnail coordinates.
         self._motion_regions: list[tuple] = []
 
@@ -1030,15 +1033,16 @@ class CameraAnalyser(threading.Thread):
             body_scale_reject_run_max=int(
                 getattr(s, 'body_scale_reject_run_max', 3)),
             folded_lean_max_deg=float(getattr(s, 'folded_lean_max_deg', 45.0)),
+            folded_knees_veto=bool(getattr(s, 'folded_knees_veto', False)),
             folded_knee_above_hip_max=float(
                 getattr(s, 'folded_knee_above_hip_max', 0.15)),
             folded_recline_memory_s=float(
                 getattr(s, 'folded_recline_memory_s', 1.5)),
             folded_posture_visibility_min=float(
                 getattr(s, 'folded_posture_visibility_min', 0.50)),
-            folded_nod_min_dip=float(getattr(s, 'folded_nod_min_dip', 0.10)),
+            folded_nod_min_dip=float(getattr(s, 'folded_nod_min_dip', 0.18)),
             folded_nod_arms_ratio_max=float(
-                getattr(s, 'folded_nod_arms_ratio_max', 0.6)),
+                getattr(s, 'folded_nod_arms_ratio_max', 0.0)),
             facing_shoulder_min=float(getattr(s, 'facing_shoulder_min', 0.45)),
             state_confirm_s=float(getattr(s, 'state_confirm_s', 0.20)),
             state_release_s=float(getattr(s, 'state_release_s', 0.30)),
@@ -1051,7 +1055,7 @@ class CameraAnalyser(threading.Thread):
             cross_gesture_cooldown_s=float(
                 getattr(s, 'cross_gesture_cooldown_s', 0.5)),
             snap_elevation_min=float(getattr(s, 'snap_elevation_min', 0.70)),
-            hold_duration_s=float(getattr(s, 'hold_duration_s', 1.5)),
+            hold_duration_s=float(getattr(s, 'hold_duration_s', 3.0)),
             double_snap_window_s=float(getattr(s, 'double_snap_window_s', 3.0)),
             sustain_s=float(getattr(s, 'sustain_s', 0.5)),
             folded_require_nod=bool(getattr(s, 'folded_require_nod', True)),
@@ -1149,6 +1153,26 @@ class CameraAnalyser(threading.Thread):
         if raw_live:
             e.last_genuine_live_at = now
 
+    def _record_nods(self, entry: "_PersonEntry", pid) -> None:
+        """Save a recording for every Jeannie nod the tracker just decided.
+
+        Recordings used to be saved only when a gesture fired, so a nod that
+        was rejected — or a Jeannie that failed for any other reason — left
+        nothing to study. Four real Jeannies were rejected on 2026-10-20 and
+        not one could be replayed. Saved as MANUAL so the capture replay test
+        does not expect a gesture from them; the outcome is in the filename
+        and the measurements in the note.
+        """
+        events, entry.arm_tracker.nod_events = entry.arm_tracker.nod_events, []
+        if self._recorder is None:
+            return
+        for kind, ratio, dip in events:
+            note = (f"nod {kind}: dip {dip:.2f}, hands/head "
+                    + ("n/a" if ratio is None else f"{ratio:.2f}"))
+            self._recorder.save(gesture_name="MANUAL",
+                                label=f"{self.label}_nod_{kind}_pid{pid}",
+                                pid=pid, note=note)
+
     def _confirmed_gesture(self, entry: "_PersonEntry", pid, gesture):
         """The gesture, if this track may fire it; otherwise None.
 
@@ -1160,6 +1184,7 @@ class CameraAnalyser(threading.Thread):
         """
         if gesture is None or entry.confirmed_human:
             return gesture
+        entry.state_machine.note_withheld(gesture)
         log.info("[%s] pid=%s %s withheld: not yet confirmed human",
                  self.label, pid, gesture.name)
         return None
@@ -1216,8 +1241,26 @@ class CameraAnalyser(threading.Thread):
                  and now - e.last_seen >= _PERSON_PRUNE_MIN_S]
         for pid in stale:
             self._report_dropout(pid, self._persons[pid], now, "then lost")
+            self._quality.note_lost()
             log.info("[%s] Lost person pid=%d", self.label, pid)
             del self._persons[pid]
+
+    def _note_tracked_quality(self, kps, boxes) -> None:
+        """Feed the hourly quality summary every detection that belongs to a
+        tracked person on this run. _match_persons has just set each matched
+        person's centroid to their detection's, so an exact match picks out
+        exactly the tracked detections."""
+        self._quality.tick()          # first, so an empty room still turns the hour
+        if kps is None:
+            return
+        tracked = {e.centroid for e in self._persons.values()
+                   if e.last_seen_run == self._yolo_runs}
+        for i in range(kps.shape[0]):
+            c = _person_centroid(kps[i])
+            if c is not None and c in tracked:
+                conf = (float(boxes[i][4]) if boxes is not None
+                        and i < len(boxes) else None)
+                self._quality.add_detection(kps[i], conf)
 
     def _note_dropouts(self, weak, threshold: float, frame_w: int,
                        frame_h: int, now: float) -> None:
@@ -1253,6 +1296,7 @@ class CameraAnalyser(threading.Thread):
         e.missing_since, best = None, e.missing_best_weak
         if since is None or now - since < _DROPOUT_REPORT_MIN_S:
             return
+        self._quality.note_dropout()
         threshold = self._dropout_threshold
         there = (f"best candidate there {best:.2f}" if best >= 0
                  else "no candidate there at all")
@@ -1435,6 +1479,7 @@ class CameraAnalyser(threading.Thread):
                     bg_in = proc_frame
                 fg_mask = bg_subtractor.apply(bg_in)
                 motion_mask = short_motion.update(bg_in, now)
+                self._quality.add_frame(bg_in)
             else:
                 fg_mask = None
                 motion_mask = None
@@ -1485,10 +1530,19 @@ class CameraAnalyser(threading.Thread):
             if run_yolo:
                 # Confidence hysteresis:
                 #   acquire  (no one tracked): base_conf * 1.3 — strict, rejects ghosts
-                #   maintain (someone tracked): base_conf * 0.65 — bridges arm-raise dropouts
+                #   maintain (someone tracked): yolo_keep_conf — bridges dropouts
+                #
+                # The keep threshold used to be base_conf * 0.65 (0.29 here).
+                # Folding the arms on the couch drops the detector's
+                # confidence: on 2026-10-20 a tracked person was lost and
+                # rebuilt about ten times in six minutes, every time with a
+                # candidate right where they were at 0.23-0.29. Each rebuild
+                # also has to be confirmed again before it may fire. It is
+                # its own setting now; only keeping an existing track uses it.
                 base_conf = float(getattr(self.s, 'yolo_conf', 0.45))
                 _acquire_conf = base_conf * 1.3      # strict: start a track
-                _maintain_conf = base_conf * 0.65    # permissive: keep one
+                _maintain_conf = min(base_conf,      # permissive: keep one
+                                     float(getattr(self.s, 'yolo_keep_conf', 0.22)))
                 # Inference runs permissive whenever anyone is tracked, so a
                 # raise's dropouts do not lose the person. Which detections
                 # that relaxation is allowed to APPLY to is decided per
@@ -1525,6 +1579,7 @@ class CameraAnalyser(threading.Thread):
                     motion_mask=motion_mask,
                 )
                 self._match_persons(detected, pw, ph, now)
+                self._note_tracked_quality(_cached_kps, _cached_boxes)
                 self._note_dropouts(getattr(model, 'last_weak', None),
                                     float(model.conf), pw, ph, now)
                 self._prune_persons(now)
@@ -1607,6 +1662,7 @@ class CameraAnalyser(threading.Thread):
                 reading = entry.arm_tracker.classify(
                     entry.last_lm, pw, ph, lm_for_hand, now
                 )
+                self._record_nods(entry, pid)
 
                 if reading is not None:
                     # No head start for a sustained pose. v1.9.175 played the

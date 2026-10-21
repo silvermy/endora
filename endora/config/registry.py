@@ -67,7 +67,7 @@ REGISTRY: list[SettingField] = [
     SettingField("frame_crop_top", float, 0.0, "% of frame to crop from top", group="Frame"),
     SettingField("frame_crop_bottom", float, 0.0, "% of frame to crop from bottom", group="Frame",
                   user_facing=True,
-                  ui=UIMeta("Crop bottom (%)", "slider", 0, 60, 1, "View", order=9)),
+                  ui=UIMeta("Crop bottom (%)", "slider", 0, 60, 1, "View", order=12)),
     SettingField("frame_crop_left", float, 0.0, "% of frame to crop from left", group="Frame"),
     SettingField("frame_crop_right", float, 0.0, "% of frame to crop from right", group="Frame"),
 
@@ -78,7 +78,13 @@ REGISTRY: list[SettingField] = [
                   enum=("yolo11n-pose.onnx", "yolo11s-pose.onnx")),
     SettingField("yolo_conf", float, 0.30,
                   "Minimum YOLO detection confidence (0-1)", group="Pose", user_facing=True,
-                  ui=UIMeta("YOLO confidence", "slider", 0.10, 0.80, 0.01, "Body", order=7)),
+                  ui=UIMeta("YOLO confidence", "slider", 0.10, 0.80, 0.01, "Body", order=9)),
+    SettingField("yolo_keep_conf", float, 0.22,
+                  "Detection confidence needed to KEEP a person already being tracked "
+                  "(starting a new track still needs yolo_conf x 1.3). Folded arms on "
+                  "the couch measured 0.23-0.29 and were dropped at the old 0.29",
+                  group="Pose",
+                  ui=UIMeta("Keep-tracking confidence", "slider", 0.05, 0.60, 0.01, "Body", order=10)),
     SettingField("yolo_imgsz", str, "480",
                   "Inference resolution — only bundled sizes actually take "
                   "effect (others silently fall back to 640 on aarch64, "
@@ -169,7 +175,8 @@ REGISTRY: list[SettingField] = [
     SettingField("head_rest_rise_max", float, 0.95,
                   "Reject a raise whose wrist is less than this many shoulder-widths above "
                   "its shoulder — a hand resting on or behind the head (0 = off)",
-                  group="Pose"),
+                  group="Pose",
+                  ui=UIMeta("Hand-on-head guard", "slider", 0.0, 2.0, 0.05, "Gesture", order=7)),
     # Superseded by the two above — kept so existing settings files load,
     # but no longer read by any code path.
     SettingField("arm_above_head_tolerance", float, 0.15,
@@ -186,7 +193,7 @@ REGISTRY: list[SettingField] = [
     SettingField("pose_visibility_min", float, 0.45,
                   "Min landmark visibility to accept a pose (filters furniture)",
                   group="Pose", user_facing=True,
-                  ui=UIMeta("Min visibility", "slider", 0.05, 0.8, 0.01, "View", order=10)),
+                  ui=UIMeta("Min visibility", "slider", 0.05, 0.8, 0.01, "View", order=13)),
     SettingField("keypoint_visibility_min", float, 0.30,
                   "Per-keypoint confidence below which a landmark is treated as not-visible", group="Pose"),
     SettingField("forearm_vertical_min", float, 0.10,
@@ -342,7 +349,8 @@ REGISTRY: list[SettingField] = [
                   "FOLDED_ARMS: how close the wrists must be, in shoulder widths. A "
                   "Jeannie stacks the forearms, so the wrists sit apart; seated on the "
                   "couch they measured 0.64-0.68",
-                  group="Gesture"),
+                  group="Gesture",
+                  ui=UIMeta("Hands-together gap", "slider", 0.30, 1.50, 0.05, "Jeannie", order=16)),
     SettingField("folded_midline_max", float, 0.35,
                   "FOLDED_ARMS: how far the midpoint of the two hands may sit from the "
                   "body midline, in shoulder widths",
@@ -353,7 +361,8 @@ REGISTRY: list[SettingField] = [
                   "first, which includes hands resting on a laptop at roughly 0.6-0.9 "
                   "down — the default posture on a couch, and the gesture's first "
                   "false positive",
-                  group="Gesture"),
+                  group="Gesture",
+                  ui=UIMeta("Hands below shoulders", "slider", 0.30, 1.50, 0.05, "Jeannie", order=17)),
     SettingField("folded_extension_max", float, 0.80,
                   "FOLDED_ARMS: maximum arm straightness — folded arms are bent arms",
                   group="Gesture"),
@@ -369,13 +378,23 @@ REGISTRY: list[SettingField] = [
                   "elbows against narrow visible shoulders. Fitted at 1.60 against "
                   "people at rest; raised to 2.0 once the nod was required, because "
                   "seated Jeannies on the couch measured 1.72-1.80",
-                  group="Gesture"),
+                  group="Gesture",
+                  ui=UIMeta("Arm span max", "slider", 1.20, 3.00, 0.05, "Jeannie", order=18)),
     SettingField("folded_lean_max_deg", float, 45.0,
                   "FOLDED_ARMS: maximum torso lean off vertical, in degrees — excludes "
                   "lying down. Sitting on the living-room couch measures 31-38 degrees, "
                   "lying on it 54-74. The nod, not this, is what separates a gesture "
                   "from resting, so this only has to exclude lying down",
-                  group="Gesture"),
+                  group="Gesture",
+                  ui=UIMeta("Max lean (°)", "slider", 15, 75, 1, "Jeannie", order=15)),
+    SettingField("folded_knees_veto", bool, False,
+                  "FOLDED_ARMS: treat knees above the hips (feet up) as reclining and "
+                  "refuse the pose. Off by default: it blocked Jeannie performed sitting "
+                  "with the feet up, and lying down is excluded by the lean limit and "
+                  "resting by the nod",
+                  group="Gesture",
+                  ui=UIMeta("Jeannie: feet up = reclining", "toggle", order=3,
+                               description="Refuse the fold when the knees are above the hips")),
     SettingField("folded_knee_above_hip_max", float, 0.15,
                   "FOLDED_ARMS: how far the knees may rise above the hips, in shoulder "
                   "widths, before the pose is read as feet-up rather than seated. "
@@ -391,19 +410,24 @@ REGISTRY: list[SettingField] = [
     SettingField("folded_require_nod", bool, True,
                   "FOLDED_ARMS (Jeannie) also needs a nod while the arms are folded. "
                   "Without it the pose fires on anyone resting with their hands together",
-                  group="Gesture"),
-    SettingField("folded_nod_min_dip", float, 0.10,
+                  group="Gesture",
+                  ui=UIMeta("Jeannie needs a nod", "toggle", order=2,
+                               description="FOLDED_ARMS fires only after a nod while the arms are folded")),
+    SettingField("folded_nod_min_dip", float, 0.18,
                   "FOLDED_ARMS: how far the head must dip towards the shoulders and come "
-                  "back, in shoulder widths, to count as a nod. Each held fold without "
-                  "one logs the largest dip measured",
-                  group="Gesture"),
-    SettingField("folded_nod_arms_ratio_max", float, 0.6,
-                  "FOLDED_ARMS: a nod must move the head, not the arms. A dip where "
-                  "the hands travelled more than this fraction of the head's travel "
-                  "(e.g. sipping from a mug held at the chest) is rejected and logged "
-                  "with the ratio. Real Jeannies measured 0.26-0.49, drinks 1.08-1.68. "
-                  "0 disables",
-                  group="Gesture"),
+                  "back, in shoulder widths, to count as a nod. Deliberate Jeannies "
+                  "measured 0.24-0.32; glancing down at a phone in the lap 0.10-0.13. "
+                  "Each held fold without one logs the largest dip measured",
+                  group="Gesture",
+                  ui=UIMeta("Nod depth", "slider", 0.05, 0.50, 0.01, "Jeannie", order=14)),
+    SettingField("folded_nod_arms_ratio_max", float, 0.0,
+                  "FOLDED_ARMS: reject a nod whose hands moved more than this fraction "
+                  "of the head's travel (meant for sipping from a mug held at the "
+                  "chest). OFF (0) by default: at 0.6 it rejected every one of the "
+                  "user's real seated Jeannies (1.03-2.08) — folded hands make the wrist "
+                  "keypoints jump. Every nod is now recorded to refit it",
+                  group="Gesture",
+                  ui=UIMeta("Arms-still ratio (0 = off)", "slider", 0.0, 3.0, 0.05, "Jeannie", order=19)),
     SettingField("folded_posture_visibility_min", float, 0.50,
                   "FOLDED_ARMS: confidence floor for the hips and knees before they may "
                   "veto the gesture on posture. Higher than folded_visibility_min "
@@ -471,7 +495,7 @@ REGISTRY: list[SettingField] = [
                   "Roll to level a tilted horizon", group="Dewarp", user_facing=True),
     SettingField("dewarp_vfov", float, 75.0,
                   "Virtual camera vertical FOV", group="Dewarp", user_facing=True,
-                  ui=UIMeta("Vertical FOV (°)", "slider", 20, 100, 1, "View", order=8)),
+                  ui=UIMeta("Vertical FOV (°)", "slider", 20, 100, 1, "View", order=11)),
     SettingField("dewarp_out_width", int, 1280,
                   "Output frame width of the dewarped image", group="Dewarp", user_facing=True),
     SettingField("dewarp_out_height", int, 480,
@@ -510,8 +534,9 @@ REGISTRY: list[SettingField] = [
 
     # ── Timing fields historically read via getattr() only — see
     # tests/test_registry_sync.py for why these must be real Settings fields ──
-    SettingField("hold_duration_s", float, 1.5,
-                  "Seconds after SNAP that arm must stay up to fire HOLD", group="Hysteresis", user_facing=True),
+    SettingField("hold_duration_s", float, 3.0,
+                  "Seconds after SNAP that arm must stay up to fire HOLD", group="Hysteresis", user_facing=True,
+                  ui=UIMeta("Hold time (s)", "slider", 1.0, 6.0, 0.25, "Gesture", order=8)),
     SettingField("double_snap_window_s", float, 3.0,
                   "Seconds within which two snaps count as DOUBLE_SNAP", group="Hysteresis", user_facing=True),
     SettingField("sustain_credit_ticks", float, 2.5,
@@ -544,7 +569,7 @@ REGISTRY_BY_KEY: dict[str, SettingField] = {f.key: f for f in REGISTRY}
 # nothing reporting that, three separate debugging sessions were spent
 # chasing behaviour that no longer matched the code.
 GESTURE_CRITICAL: list[str] = [
-    "yolo_pose_model", "yolo_imgsz", "yolo_conf",
+    "yolo_pose_model", "yolo_imgsz", "yolo_conf", "yolo_keep_conf",
     "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
     "head_rest_rise_max",
     "snap_elevation_min", "snap_sustain_s",
@@ -557,7 +582,7 @@ GESTURE_CRITICAL: list[str] = [
     "folded_chest_depth", "folded_extension_max",
     "folded_resolution_min", "sustain_gap_s",
     "sustain_credit_ticks",
-    "folded_lean_max_deg", "folded_knee_above_hip_max",
+    "folded_lean_max_deg", "folded_knees_veto", "folded_knee_above_hip_max",
     "folded_arm_span_max", "body_scale_min_ratio",
     "folded_recline_memory_s", "folded_posture_visibility_min",
     "folded_require_nod", "folded_nod_min_dip", "folded_nod_arms_ratio_max",

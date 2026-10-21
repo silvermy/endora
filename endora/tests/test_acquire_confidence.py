@@ -122,7 +122,8 @@ def test_the_analyser_gates_acquisition_on_the_strict_threshold():
     code = "\n".join(l for l in src.splitlines()
                      if not l.lstrip().startswith("#"))
     assert "_acquire_conf = base_conf * 1.3" in code
-    assert "_maintain_conf = base_conf * 0.65" in code
+    assert "_maintain_conf = min(base_conf," in code
+    assert "'yolo_keep_conf'" in code
     assert "acquire_conf=_acquire_conf" in code, \
         "the gate must use the STRICT threshold, not the permissive one"
 
