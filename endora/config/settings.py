@@ -149,6 +149,8 @@ class Settings:
     # guess.
     min_arm_len_frac: float = 0.55
     head_rest_rise_max: float = 0.95
+    # RAISE_BOTH needs the wrists at least this multiple of the elbow gap apart.
+    both_up_spread_min: float = 1.0
     # Deprecated — superseded by the settings above. Kept so existing
     # settings files keep loading; no code reads them.
     arm_above_head_tolerance: float = 0.15

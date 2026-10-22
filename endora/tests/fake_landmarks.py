@@ -99,10 +99,10 @@ def right_arm_up_horizontal() -> Landmarks:
 
 
 def both_arms_up() -> Landmarks:
-    """Both arms raised straight up."""
+    """Both arms raised up and out, hands outside the elbows."""
     return _build(
-        left_elbow=Point(0.35, 0.25),   left_wrist=Point(0.35, 0.10),
-        right_elbow=Point(0.65, 0.25),  right_wrist=Point(0.65, 0.10),
+        left_elbow=Point(0.35, 0.25),   left_wrist=Point(0.32, 0.10),
+        right_elbow=Point(0.65, 0.25),  right_wrist=Point(0.68, 0.10),
     )
 
 

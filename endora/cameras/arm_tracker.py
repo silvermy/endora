@@ -315,6 +315,16 @@ class ArmTrackerConfig:
     # as a multiple of that arm's length.
     tpose_lateral_min: float = 0.50
 
+    # ── Both up: arms raised up AND out ───────────────────────────────────
+    # The wrists must be at least this multiple of the elbows' distance
+    # apart — a "V" with the hands outside the elbows. Both arms up with
+    # the hands clasped on the head (a stretch) has the elbows flared out
+    # and the wrists together, about 0.5-0.7; a single arm raised side-on
+    # puts both wrists in one place, about 0.3-0.5. Every one of the
+    # RAISE_BOTH fires recorded before this rule looked like one of those.
+    # 0 disables.
+    both_up_spread_min: float = 1.0
+
     # ── Cross-arms: wrists crossed at chest height ────────────────────────
     # Each wrist must cross the body midline by this multiple of shoulder
     # width, and the two wrists must be closer together than
@@ -838,6 +848,14 @@ class ArmTracker:
             if _dist((x, y), (sample.x, sample.y)) > max_travel:
                 return False
         return True
+
+    def _arms_spread(self, lw, rw, le, re) -> bool:
+        """Are both raised hands at least as far apart as the elbows (see
+        both_up_spread_min)? Rather than a clasp over the head, or one arm
+        seen side-on."""
+        if self.c.both_up_spread_min <= 0:
+            return True
+        return _dist(lw, rw) >= self.c.both_up_spread_min * _dist(le, re)
 
     def _hand_on_head(self, shoulder: _Pt, wrist: _Pt, shoulder_w: float) -> bool:
         """Is this 'raised' arm really a hand resting on the head?
@@ -1453,7 +1471,8 @@ class ArmTracker:
                 return ArmReading(state=ArmState.T_POSE, upright=bool(upright))
 
             # BOTH_UP: both arms raised.
-            if self.c.detect_both_up and l_raised and r_raised:
+            if (self.c.detect_both_up and l_raised and r_raised
+                    and self._arms_spread(lw, rw, le, re)):
                 return ArmReading(state=ArmState.BOTH_UP, upright=bool(upright))
 
         # ── SINGLE_UP — per side, works with only one visible shoulder ─────

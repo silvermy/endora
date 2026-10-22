@@ -177,6 +177,11 @@ REGISTRY: list[SettingField] = [
                   "its shoulder — a hand resting on or behind the head (0 = off)",
                   group="Pose",
                   ui=UIMeta("Hand-on-head guard", "slider", 0.0, 2.0, 0.05, "Gesture", order=7)),
+    SettingField("both_up_spread_min", float, 1.0,
+                  "Two-arm flare: the hands must be at least this multiple of the elbows' "
+                  "distance apart — up and out, not clasped on the head (0 = off)",
+                  group="Pose",
+                  ui=UIMeta("Two-arm flare spread", "slider", 0.0, 2.0, 0.05, "Gesture", order=5)),
     # Superseded by the two above — kept so existing settings files load,
     # but no longer read by any code path.
     SettingField("arm_above_head_tolerance", float, 0.15,
@@ -571,7 +576,7 @@ REGISTRY_BY_KEY: dict[str, SettingField] = {f.key: f for f in REGISTRY}
 GESTURE_CRITICAL: list[str] = [
     "yolo_pose_model", "yolo_imgsz", "yolo_conf", "yolo_keep_conf",
     "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
-    "head_rest_rise_max",
+    "head_rest_rise_max", "both_up_spread_min",
     "snap_elevation_min", "snap_sustain_s",
     "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
     "flourish_max_rate", "folded_visibility_min",

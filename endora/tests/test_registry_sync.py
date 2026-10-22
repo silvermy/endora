@@ -78,7 +78,8 @@ def test_debug_page_lists_derived_from_registry_match_known_layout():
 
     assert [p[0] for p in _PARAMS] == [
         "raise_elevation_min", "snap_elevation_min", "snap_sustain_s",
-        "cooldown_s", "bg_subtract_min_foreground", "arm_extension_min",
+        "cooldown_s", "bg_subtract_min_foreground", "both_up_spread_min",
+        "arm_extension_min",
         "head_rest_rise_max", "hold_duration_s",
         "yolo_conf", "yolo_keep_conf",
         "dewarp_vfov", "frame_crop_bottom", "pose_visibility_min",
@@ -86,7 +87,7 @@ def test_debug_page_lists_derived_from_registry_match_known_layout():
         "folded_chest_depth", "folded_arm_span_max", "folded_nod_arms_ratio_max",
     ]
     assert [p[5] for p in _PARAMS] == (
-        ["Gesture"] * 8 + ["Body"] * 2 + ["View"] * 3 + ["Jeannie"] * 6)
+        ["Gesture"] * 9 + ["Body"] * 2 + ["View"] * 3 + ["Jeannie"] * 6)
     assert [p[0] for p in _JOY_PARAMS] == ["dewarp_pan", "dewarp_tilt"]
     assert [p[0] for p in _TOGGLES] == ["low_light_enhance", "bg_subtract_enable",
                                         "folded_require_nod", "folded_knees_veto"]
