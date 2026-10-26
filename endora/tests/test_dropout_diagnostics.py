@@ -91,3 +91,55 @@ def test_the_model_keeps_only_below_threshold_candidates():
     weak = m._weak_candidates(preds, ratio=0.5, pad_w=0.0, pad_h=10.0)
     assert np.allclose(sorted(weak[:, 2]), [0.10, 0.28])
     assert weak[0, 0] == 200.0 and weak[0, 1] == 80.0   # back in frame pixels
+
+
+def _anchor(cx, cy, conf, size=100.0):
+    row = np.zeros(56, np.float32)
+    row[:5] = [cx, cy, size, size, conf]
+    return row
+
+
+def test_an_anchor_overlapping_a_real_detection_is_not_a_candidate():
+    # A person seen at 0.6 is ringed by overlapping anchors at every lower
+    # confidence. Reporting those made every rejection look like a near miss.
+    from cameras.pose_model import PoseModel
+    m = PoseModel.__new__(PoseModel)
+    m.conf = 0.22
+    preds = np.stack([_anchor(300, 300, 0.60), _anchor(305, 302, 0.21),
+                      _anchor(900, 300, 0.15)])
+    weak = m._weak_candidates(preds, ratio=1.0, pad_w=0.0, pad_h=0.0)
+    assert np.allclose(weak[:, 2], [0.15])           # only the separate one
+
+
+def test_a_weak_detection_on_its_own_is_still_a_candidate():
+    from cameras.pose_model import PoseModel
+    m = PoseModel.__new__(PoseModel)
+    m.conf = 0.22
+    preds = np.stack([_anchor(300, 300, 0.21), _anchor(302, 301, 0.12)])
+    weak = m._weak_candidates(preds, ratio=1.0, pad_w=0.0, pad_h=0.0)
+    assert np.allclose(weak[:, 2], [0.21])
+
+
+def test_a_dropout_reports_detections_that_were_rejected_near_the_person(caplog):
+    a, pid = _analyser()
+    near = [(402.0, 298.0, "no sign of life")]
+    far = [(50.0, 40.0, "too few keypoints")]
+    with caplog.at_level(logging.INFO):
+        a._yolo_runs += 1
+        a._note_dropouts(None, 0.22, 640, 480, 1.0, rejected=near + far)
+        a._yolo_runs += 1
+        a._note_dropouts(None, 0.22, 640, 480, 1.5, rejected=near)
+        _seen_run(a, now=2.0)
+    [line] = _lines(caplog)
+    assert "detected but rejected: no sign of life x2" in line
+    assert "too few keypoints" not in line
+
+
+def test_rejections_are_collected_with_their_reason():
+    from cameras.analyser import _all_valid_landmarks
+    kps = np.zeros((1, 17, 3), np.float32)
+    kps[0, :3] = [[100, 100, 0.9], [110, 100, 0.9], [90, 100, 0.9]]  # 3 keypoints
+    boxes = np.array([[80, 80, 120, 140, 0.5]], np.float32)
+    rejected = []
+    assert _all_valid_landmarks(kps, 640, 480, boxes=boxes, rejected=rejected) == []
+    assert rejected == [(100.0, 110.0, "too few keypoints")]

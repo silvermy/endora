@@ -20,7 +20,7 @@ import logging
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 import cv2
@@ -635,6 +635,7 @@ def _all_valid_landmarks(
     tracked_centroids: Optional[list] = None,
     acquire_conf: float = 0.0,
     motion_mask: Optional[np.ndarray] = None,
+    rejected: Optional[list] = None,
 ) -> list[tuple]:
     """Return list of (_YOLOLandmarks, centroid_px, raw_live, moved) for every real
     person detected. known_centroids should come from _known_centroids (see
@@ -653,19 +654,35 @@ def _all_valid_landmarks(
     motion_mask (see _MOTION_GAP_S). raw_live keeps a still person tracked;
     only `moved` confirms one, which is what lets a track fire. Without a
     motion_mask, `moved` is raw_live, as confirmation always used to be.
+
+    rejected, if given, collects (x, y, reason) for every detection the model
+    returned that is thrown away here — see _note_dropouts. Placed at the box
+    centre when there is one, since a rejected skeleton may have no centroid.
     """
     if kps is None or kps.shape[0] == 0:
         return []
     result = []
+
+    def _reject(i: int, c, reason: str) -> None:
+        if rejected is None:
+            return
+        if boxes is not None and i < len(boxes):
+            c = ((boxes[i][0] + boxes[i][2]) / 2.0, (boxes[i][1] + boxes[i][3]) / 2.0)
+        if c is not None:
+            rejected.append((float(c[0]), float(c[1]), reason))
+
     for i in range(kps.shape[0]):
         if _person_visible_kp_count(kps[i]) < _MIN_VISIBLE_KPS:
+            _reject(i, None, "too few keypoints")
             continue
         c = _person_centroid(kps[i])
         if c is None:
+            _reject(i, None, "no centroid")
             continue
         conf = (float(boxes[i][4]) if boxes is not None
                 and i < len(boxes) else None)
         if not _acquire_ok(conf, c, tracked_centroids, match_dist, acquire_conf):
+            _reject(i, c, "too weak to start a track")
             continue
         # Two questions, two answers. A painting answers no to both.
         #
@@ -692,6 +709,7 @@ def _all_valid_landmarks(
                 for kc in known_centroids
             )
             if not near_known:
+                _reject(i, c, "no sign of life")
                 continue
         result.append((_YOLOLandmarks(kps[i], frame_w, frame_h), c, raw_live, moved))
     return result
@@ -731,6 +749,9 @@ class _PersonEntry:
     # since (-1 if none).
     missing_since:         Optional[float] = None
     missing_best_weak:     float         = -1.0
+    # Detections near it that cleared the threshold but were thrown away,
+    # counted by reason. See _note_dropouts.
+    missing_rejected:      dict          = field(default_factory=dict)
 
 
 def _known_centroids(
@@ -1013,6 +1034,9 @@ class CameraAnalyser(threading.Thread):
             min_arm_len_frac=float(getattr(s, 'min_arm_len_frac', 0.55)),
             head_rest_rise_max=float(getattr(s, 'head_rest_rise_max', 0.95)),
             both_up_spread_min=float(getattr(s, 'both_up_spread_min', 1.0)),
+            other_arm_overhead_max=float(getattr(s, 'other_arm_overhead_max', 0.95)),
+            other_arm_overhead_visibility=float(
+                getattr(s, 'other_arm_overhead_visibility', 0.80)),
             pose_visibility_min=float(getattr(s, 'pose_visibility_min', 0.45)),
             keypoint_visibility_min=float(getattr(s, 'keypoint_visibility_min', 0.30)),
             leg_raise_margin=float(getattr(s, 'leg_raise_margin', 0.05)),
@@ -1264,7 +1288,8 @@ class CameraAnalyser(threading.Thread):
                 self._quality.add_detection(kps[i], conf)
 
     def _note_dropouts(self, weak, threshold: float, frame_w: int,
-                       frame_h: int, now: float) -> None:
+                       frame_h: int, now: float,
+                       rejected: Optional[list] = None) -> None:
         """Track people the detector stopped seeing, and how close it came.
 
         Diagnostics for 2026-10-03: sitting on the couch, folding the arms made
@@ -1273,6 +1298,12 @@ class CameraAnalyser(threading.Thread):
         needs opposite fixes, so for each dropout this records the strongest
         below-threshold detection near where the person was, and
         _report_dropout logs it once when the dropout ends.
+
+        It also counts the detections near the person that DID clear the
+        threshold and were then thrown away, by reason. Without them a person
+        the model saw perfectly well but who failed the liveness check looked
+        the same as one who fell under the threshold, and on 2026-10-26 that
+        was nearly enough to lower yolo_keep_conf on a guess.
         """
         self._dropout_threshold = threshold
         near = _DROPOUT_NEAR_FRAC * ((frame_w ** 2 + frame_h ** 2) ** 0.5)
@@ -1283,6 +1314,10 @@ class CameraAnalyser(threading.Thread):
                 continue
             if e.missing_since is None:
                 e.missing_since, e.missing_best_weak = now, -1.0
+                e.missing_rejected = {}
+            for rx, ry, reason in rejected or ():
+                if (rx - e.centroid[0]) ** 2 + (ry - e.centroid[1]) ** 2 <= near ** 2:
+                    e.missing_rejected[reason] = e.missing_rejected.get(reason, 0) + 1
             if weak is not None and len(weak):
                 d2 = ((weak[:, 0] - e.centroid[0]) ** 2
                       + (weak[:, 1] - e.centroid[1]) ** 2)
@@ -1301,6 +1336,11 @@ class CameraAnalyser(threading.Thread):
         threshold = self._dropout_threshold
         there = (f"best candidate there {best:.2f}" if best >= 0
                  else "no candidate there at all")
+        if e.missing_rejected:
+            there += "; detected but rejected: " + ", ".join(
+                f"{reason} x{n}" for reason, n in
+                sorted(e.missing_rejected.items(), key=lambda kv: -kv[1]))
+        e.missing_rejected = {}
         log.info("[%s] pid=%s not detected for %.1fs (threshold %.2f) — %s; %s",
                  self.label, pid, now - since, threshold, there, outcome)
 
@@ -1540,6 +1580,12 @@ class CameraAnalyser(threading.Thread):
                 # candidate right where they were at 0.23-0.29. Each rebuild
                 # also has to be confirmed again before it may fire. It is
                 # its own setting now; only keeping an existing track uses it.
+                #
+                # Caution: those 0.23-0.29 readings came from raw anchors and
+                # sat just under whatever the threshold was (see
+                # PoseModel._weak_candidates), so they never showed the
+                # threshold was the cause. Check the dropout line's
+                # "detected but rejected" counts before moving it again.
                 base_conf = float(getattr(self.s, 'yolo_conf', 0.45))
                 _acquire_conf = base_conf * 1.3      # strict: start a track
                 _maintain_conf = min(base_conf,      # permissive: keep one
@@ -1571,6 +1617,7 @@ class CameraAnalyser(threading.Thread):
                           self.label, motion, any_arm_up, len(self._persons),
                           getattr(model, 'last_refined', 0))
 
+                _rejected: list = []
                 detected = _all_valid_landmarks(
                     _cached_kps, pw, ph, fg_mask=fg_mask, min_foreground_frac=min_fg_frac,
                     known_centroids=known_centroids, match_dist=match_dist,
@@ -1578,11 +1625,13 @@ class CameraAnalyser(threading.Thread):
                     tracked_centroids=[e.centroid for e in self._persons.values()],
                     acquire_conf=_acquire_conf,
                     motion_mask=motion_mask,
+                    rejected=_rejected,
                 )
                 self._match_persons(detected, pw, ph, now)
                 self._note_tracked_quality(_cached_kps, _cached_boxes)
                 self._note_dropouts(getattr(model, 'last_weak', None),
-                                    float(model.conf), pw, ph, now)
+                                    float(model.conf), pw, ph, now,
+                                    rejected=_rejected)
                 self._prune_persons(now)
 
                 # Feed the recorder one buffer per tracked person.

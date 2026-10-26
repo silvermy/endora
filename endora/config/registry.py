@@ -182,6 +182,13 @@ REGISTRY: list[SettingField] = [
                   "distance apart — up and out, not clasped on the head (0 = off)",
                   group="Pose",
                   ui=UIMeta("Two-arm flare spread", "slider", 0.0, 2.0, 0.05, "Gesture", order=5)),
+    SettingField("other_arm_overhead_max", float, 0.95,
+                  "A one-arm raise does not count while the other arm is at least this high "
+                  "(elevation, however bent) — both hands overhead is a stretch (0 = off)",
+                  group="Pose"),
+    SettingField("other_arm_overhead_visibility", float, 0.80,
+                  "Confidence the other arm's keypoints need before other_arm_overhead_max "
+                  "applies", group="Pose"),
     # Superseded by the two above — kept so existing settings files load,
     # but no longer read by any code path.
     SettingField("arm_above_head_tolerance", float, 0.15,
@@ -577,6 +584,7 @@ GESTURE_CRITICAL: list[str] = [
     "yolo_pose_model", "yolo_imgsz", "yolo_conf", "yolo_keep_conf",
     "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
     "head_rest_rise_max", "both_up_spread_min",
+    "other_arm_overhead_max", "other_arm_overhead_visibility",
     "snap_elevation_min", "snap_sustain_s",
     "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
     "flourish_max_rate", "folded_visibility_min",

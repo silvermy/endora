@@ -151,6 +151,10 @@ class Settings:
     head_rest_rise_max: float = 0.95
     # RAISE_BOTH needs the wrists at least this multiple of the elbow gap apart.
     both_up_spread_min: float = 1.0
+    # SINGLE_UP is refused while the other arm is this high and seen at least
+    # this confidently — both hands overhead is a stretch, not a flourish.
+    other_arm_overhead_max: float = 0.95
+    other_arm_overhead_visibility: float = 0.80
     # Deprecated — superseded by the settings above. Kept so existing
     # settings files keep loading; no code reads them.
     arm_above_head_tolerance: float = 0.15

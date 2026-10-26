@@ -304,6 +304,21 @@ class ArmTrackerConfig:
     # chair and reclining on the couch); the lowest clear genuine raise rose
     # 0.97, so the margin is thin. 0 disables.
     head_rest_rise_max: float = 0.95
+    # A raise is not a one-arm flourish while the OTHER hand is clearly
+    # overhead too, however bent that arm is. Both false SNAPs labelled
+    # since 2026-10-21 were a stretch — seated, both hands up on or above
+    # the head — with the other arm at elevation 0.98-0.99, seen at 0.93-0.94
+    # confidence. Bent, that arm never counted as raised, so RAISE_BOTH could
+    # not claim the frame and it fell through to SINGLE_UP. Replayed over the
+    # 191 recorded snaps that still fire: both suppressed, none of the 8 labelled intended,
+    # and 8 unlabelled — one of them recorded alongside a RAISE_BOTH in the
+    # same second. At 0.90 the one intended snap with its other arm briefly
+    # high (0.87-0.96, seen at 0.53-0.59) was lost too. The confidence floor
+    # trims 11 unlabelled to 8 and costs neither false positive (0.93-0.94).
+    # Only the arm with the other one overhead loses: when both read as
+    # raised, the one whose partner is barely seen still counts. 0 disables.
+    other_arm_overhead_max: float = 0.95
+    other_arm_overhead_visibility: float = 0.80
     # Elevation at/above which an arm counts as "on its way up" for the
     # early chime.
     arm_rising_elevation: float = 0.45
@@ -1476,6 +1491,19 @@ class ArmTracker:
                 return ArmReading(state=ArmState.BOTH_UP, upright=bool(upright))
 
         # ── SINGLE_UP — per side, works with only one visible shoulder ─────
+        # Not while the other hand is clearly overhead too: see
+        # other_arm_overhead_max.
+        def _overhead(elev: float, ok: bool, sh: int, el: int, wr: int) -> bool:
+            return (self.c.other_arm_overhead_max > 0 and ok
+                    and elev >= self.c.other_arm_overhead_max
+                    and min(vis(sh), vis(el), vis(wr))
+                    >= self.c.other_arm_overhead_visibility)
+
+        l_over = _overhead(l_elev, l_ok, LEFT_SHOULDER, LEFT_ELBOW, LEFT_WRIST)
+        r_over = _overhead(r_elev, r_ok, RIGHT_SHOULDER, RIGHT_ELBOW, RIGHT_WRIST)
+        r_raised = r_raised and not l_over
+        l_raised = l_raised and not r_over
+
         if r_raised or l_raised:
             if r_raised:
                 side, wrist, elbow = Side.RIGHT, rw, re

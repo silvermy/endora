@@ -94,6 +94,9 @@ TRT_CACHE_DIR = "/data/trt_cache"
 # is noise, and the best few are all a missing person needs.
 _WEAK_FLOOR = 0.05
 _WEAK_KEEP = 20
+# Anchors considered when de-duplicating them (see _weak_candidates): the
+# strongest this many above _WEAK_FLOOR, which bounds the NMS cost.
+_WEAK_POOL = 300
 
 
 def _trt_options(cache_dir: str) -> dict:
@@ -631,13 +634,30 @@ class PoseModel:
         """[M, 3] of (cx, cy, conf) in frame pixels for the strongest
         detections that fell BELOW self.conf — diagnostics only, so that a
         tracked person who vanishes can be told apart from one the threshold
-        dropped. The analyser logs the best one near a missing person."""
+        dropped. The analyser logs the best one near a missing person.
+
+        De-duplicated against EVERY anchor, above the threshold as well as
+        below. Raw anchors come in clusters: a person the model sees at 0.6
+        is surrounded by overlapping anchors at every lower confidence, so the
+        best one below the threshold always sits just under it. Taken raw,
+        that made a person detected perfectly well — and then rejected by a
+        later check — look like one who fell just short of the threshold:
+        2,309 of the losses logged 2026-10-22..26 reported a candidate at
+        0.20-0.22 against a threshold of 0.22, and the same pile-up sat at
+        0.23-0.29 when the threshold was 0.29. Only an anchor that survives
+        NMS on its own is a detection that was actually missed."""
         conf = preds[:, 4]
-        weak = (conf >= _WEAK_FLOOR) & (conf < self.conf)
-        if not weak.any():
+        pool = np.flatnonzero(conf >= _WEAK_FLOOR)
+        if pool.size == 0:
             return np.empty((0, 3), np.float32)
-        w = preds[weak]
-        w = w[np.argsort(-w[:, 4])[:_WEAK_KEEP]]
+        pool = pool[np.argsort(-conf[pool])[:_WEAK_POOL]]
+        p = preds[pool]
+        cx, cy, bw, bh = p[:, 0], p[:, 1], p[:, 2], p[:, 3]
+        boxes = np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], axis=1)
+        w = p[_nms(boxes, p[:, 4])]
+        w = w[w[:, 4] < self.conf][:_WEAK_KEEP]
+        if w.shape[0] == 0:
+            return np.empty((0, 3), np.float32)
         out = np.empty((w.shape[0], 3), np.float32)
         out[:, 0] = (w[:, 0] - pad_w) / ratio
         out[:, 1] = (w[:, 1] - pad_h) / ratio
