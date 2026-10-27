@@ -182,11 +182,11 @@ REGISTRY: list[SettingField] = [
                   "distance apart — up and out, not clasped on the head (0 = off)",
                   group="Pose",
                   ui=UIMeta("Two-arm flare spread", "slider", 0.0, 2.0, 0.05, "Gesture", order=5)),
-    SettingField("other_arm_overhead_max", float, 0.95,
+    SettingField("other_arm_overhead_max", float, 0.90,
                   "A one-arm raise does not count while the other arm is at least this high "
                   "(elevation, however bent) — both hands overhead is a stretch (0 = off)",
                   group="Pose"),
-    SettingField("other_arm_overhead_visibility", float, 0.80,
+    SettingField("other_arm_overhead_visibility", float, 0.60,
                   "Confidence the other arm's keypoints need before other_arm_overhead_max "
                   "applies", group="Pose"),
     # Superseded by the two above — kept so existing settings files load,

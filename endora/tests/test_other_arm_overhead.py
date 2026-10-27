@@ -10,7 +10,10 @@ a stretch, seated:
   moment as raise_both/stretch_hands_on_head, which v1.9.200 stopped from
   firing RAISE_BOTH; it still fired SNAP);
 * one_held_one_raised — one arm held up for seconds, then the other raised
-  to join it.
+  to join it;
+* reclined_hands_behind_head — 2026-10-26 evening, lying back on the couch
+  with both hands behind the head, the other arm at 0.93 but seen at only
+  0.64. It got past the first defaults (0.95 / 0.80).
 
 Each has the other arm at elevation 0.98-0.99, bent, so it never counted as
 raised and the frame fell through to SINGLE_UP. The genuine fixtures are
@@ -30,7 +33,8 @@ from core.state_machine import Gesture, GestureStateMachine, StateMachineConfig
 from tests.test_captured import _YOLOLandmarks
 
 FIXTURES = Path(__file__).parent / "stretch"
-STRETCHES = ["hands_clasped_overhead", "one_held_one_raised"]
+STRETCHES = ["hands_clasped_overhead", "one_held_one_raised",
+             "reclined_hands_behind_head"]
 GENUINE = ["genuine_other_arm_down", "genuine_other_arm_barely_seen"]
 
 
@@ -70,10 +74,16 @@ def test_a_genuine_snap_still_fires(name):
     assert Gesture.SNAP in _replay(name)
 
 
+def test_the_first_defaults_let_the_reclined_stretch_through():
+    # Documents why 0.95 / 0.80 was loosened.
+    assert Gesture.SNAP in _replay("reclined_hands_behind_head",
+                                   other_arm_overhead_max=0.95,
+                                   other_arm_overhead_visibility=0.80)
+
+
 def test_only_the_arm_whose_partner_is_overhead_loses():
     # When both arms read as raised, the confident one keeps its raise
-    # because its partner is barely seen; vetoing both dropped this snap.
-    tracker = ArmTracker(ArmTrackerConfig())
-    assert tracker.c.other_arm_overhead_visibility > 0.59
-    assert Gesture.SNAP in _replay("genuine_other_arm_barely_seen",
-                                   other_arm_overhead_max=0.90)
+    # because its partner is barely seen (0.53-0.59, under the 0.60 floor);
+    # vetoing both dropped this snap.
+    assert ArmTrackerConfig().other_arm_overhead_visibility > 0.59
+    assert Gesture.SNAP in _replay("genuine_other_arm_barely_seen")

@@ -312,13 +312,18 @@ class ArmTrackerConfig:
     # not claim the frame and it fell through to SINGLE_UP. Replayed over the
     # 191 recorded snaps that still fire: both suppressed, none of the 8 labelled intended,
     # and 8 unlabelled — one of them recorded alongside a RAISE_BOTH in the
-    # same second. At 0.90 the one intended snap with its other arm briefly
-    # high (0.87-0.96, seen at 0.53-0.59) was lost too. The confidence floor
-    # trims 11 unlabelled to 8 and costs neither false positive (0.93-0.94).
-    # Only the arm with the other one overhead loses: when both read as
-    # raised, the one whose partner is barely seen still counts. 0 disables.
-    other_arm_overhead_max: float = 0.95
-    other_arm_overhead_visibility: float = 0.80
+    # same second.
+    #
+    # 0.90 / 0.60 since 2026-10-27: two more labelled the evening after it
+    # shipped, both reclining on the couch with both hands up behind the
+    # head, slipped under 0.95 / 0.80 — the other arm at 0.92 (seen 0.98) and
+    # at 0.93 (seen 0.64). Replayed over the recorded snaps at 0.90 / 0.60:
+    # all four labelled false ones suppressed, none of 13 labelled intended,
+    # 23 unlabelled. Only the arm with the other one overhead loses: when
+    # both read as raised, the one whose partner is barely seen still
+    # counts. 0 disables.
+    other_arm_overhead_max: float = 0.90
+    other_arm_overhead_visibility: float = 0.60
     # Elevation at/above which an arm counts as "on its way up" for the
     # early chime.
     arm_rising_elevation: float = 0.45

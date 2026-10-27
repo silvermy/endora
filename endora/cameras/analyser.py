@@ -1034,9 +1034,9 @@ class CameraAnalyser(threading.Thread):
             min_arm_len_frac=float(getattr(s, 'min_arm_len_frac', 0.55)),
             head_rest_rise_max=float(getattr(s, 'head_rest_rise_max', 0.95)),
             both_up_spread_min=float(getattr(s, 'both_up_spread_min', 1.0)),
-            other_arm_overhead_max=float(getattr(s, 'other_arm_overhead_max', 0.95)),
+            other_arm_overhead_max=float(getattr(s, 'other_arm_overhead_max', 0.90)),
             other_arm_overhead_visibility=float(
-                getattr(s, 'other_arm_overhead_visibility', 0.80)),
+                getattr(s, 'other_arm_overhead_visibility', 0.60)),
             pose_visibility_min=float(getattr(s, 'pose_visibility_min', 0.45)),
             keypoint_visibility_min=float(getattr(s, 'keypoint_visibility_min', 0.30)),
             leg_raise_margin=float(getattr(s, 'leg_raise_margin', 0.05)),
