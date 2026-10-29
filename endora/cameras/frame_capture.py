@@ -3,11 +3,22 @@ cameras/frame_capture.py — Save annotated debug frames on gesture events.
 
 Frames (JPEG) and metadata (JSON) are written to /data/debug_frames/.
 A rolling max of MAX_FRAMES pairs is kept; oldest are evicted automatically.
+
+Gesture photos are the exception. Every arm-state change also lands in that
+rolling set, so 200 frames covered about an hour and a half on the Jetson:
+195 of them state changes, five gestures. A fire's photo was gone long before
+anyone sat down to label it, and the trace alone could not say whether a
+"not intended" snap was a hand behind the head or a hallucinated arm. So a
+gesture frame, and the state frame just before it (for a held pose that is the
+photo of the pose itself, see debug_server._photo_for), are moved to KEEP_DIR
+beside the keypoint traces and live as long as they do — which is forever.
+About 100 KB each.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -20,6 +31,10 @@ log = logging.getLogger(__name__)
 
 CAPTURE_DIR = Path("/data/debug_frames")
 MAX_FRAMES = 200
+KEEP_DIR = Path(os.environ.get("ENDORA_CAPTURE_DIR", "/data/test_captures")) / "photos"
+# How far back a gesture reaches for the state frame to keep with it. Matches
+# the window debug_server._photo_for searches for a held pose's photo.
+KEEP_STATE_BEFORE_S = 4.0
 
 
 class FrameCapture:
@@ -29,10 +44,12 @@ class FrameCapture:
         self,
         capture_dir: Path = CAPTURE_DIR,
         max_frames: int = MAX_FRAMES,
+        keep_dir: Path = KEEP_DIR,
     ) -> None:
         self._dir = Path(capture_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._max = max_frames
+        self._keep_dir = Path(keep_dir)
         self._lock = threading.Lock()
 
     def save(
@@ -69,12 +86,45 @@ class FrameCapture:
             with self._lock:
                 jpg_path.write_bytes(buf.tobytes())
                 meta_path.write_text(json.dumps(meta))
+                if event_type.startswith("gesture_"):
+                    jpg_path = self._keep(stem, ts)
                 self._evict()
             log.debug("Captured frame: %s", jpg_path.name)
             return jpg_path
         except Exception as exc:
             log.debug("FrameCapture.save error: %s", exc)
             return None
+
+    def _keep(self, stem: str, ts: float) -> Path:
+        """Move this gesture frame, and the last state frame before it, out
+        of the rolling set. Must be called under self._lock. Returns where the
+        gesture frame now is; on any failure it stays where it was."""
+        try:
+            self._keep_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            log.warning("FrameCapture: cannot create %s: %s", self._keep_dir, exc)
+            return self._dir / f"{stem}.jpg"
+        stems = [stem]
+        states = []
+        for meta_path in self._dir.glob("*_state_*.json"):
+            try:
+                t = float(meta_path.name.split("_", 1)[0])
+            except ValueError:
+                continue
+            if ts - KEEP_STATE_BEFORE_S <= t <= ts:
+                states.append((t, meta_path.stem))
+        if states:
+            stems.append(max(states)[1])
+        for s in stems:
+            for suffix in (".jpg", ".json"):
+                try:
+                    (self._dir / f"{s}{suffix}").replace(self._keep_dir / f"{s}{suffix}")
+                except FileNotFoundError:
+                    pass
+                except Exception as exc:
+                    log.warning("FrameCapture: could not keep %s%s: %s", s, suffix, exc)
+        kept = self._keep_dir / f"{stem}.jpg"
+        return kept if kept.exists() else self._dir / f"{stem}.jpg"
 
     def _evict(self) -> None:
         """Remove oldest files when over the limit. Must be called under self._lock."""
@@ -86,24 +136,28 @@ class FrameCapture:
                 meta.unlink(missing_ok=True)
 
     def list_captures(self) -> list[dict]:
-        """Return metadata for all saved captures, newest first."""
+        """Return metadata for all saved captures, kept ones included, newest
+        first."""
         result = []
-        for meta_path in sorted(
-            self._dir.glob("*.json"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        ):
+        metas = list(self._dir.glob("*.json"))
+        if self._keep_dir.is_dir():
+            metas += self._keep_dir.glob("*.json")
+        for meta_path in metas:
             try:
                 data = json.loads(meta_path.read_text())
                 data["filename"] = meta_path.stem + ".jpg"
                 result.append(data)
             except Exception:
                 pass
+        result.sort(key=lambda d: float(d.get("timestamp", 0)), reverse=True)
         return result
 
     def get_jpeg(self, filename: str) -> Optional[bytes]:
         """Return the raw JPEG bytes for *filename*, or None if not found."""
-        p = self._dir / Path(filename).name
+        name = Path(filename).name
+        p = self._dir / name
+        if not p.exists():
+            p = self._keep_dir / name
         if p.suffix != ".jpg" or not p.exists():
             return None
         try:
