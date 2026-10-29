@@ -70,3 +70,17 @@ def test_rotate_empty_does_not_clobber_backup(tmp_path, monkeypatch):
     # Rotating an already-empty live log must keep the previous backup intact.
     assert logger.rotate() == b""
     assert (tmp_path / "feedback.jsonl.prev").read_bytes() == prev
+
+
+def test_the_log_rolls_over_at_its_size_cap(tmp_path, monkeypatch):
+    """Nothing downloads the log any more, so it must bound itself."""
+    monkeypatch.setattr(fl, "_MAX_LOG_BYTES", 2000)
+    logger = _logger(tmp_path, monkeypatch)
+    for _ in range(80):                         # ~40 bytes each
+        logger.mark_no_pose()
+    live = tmp_path / "feedback.jsonl"
+    prev = tmp_path / "feedback.jsonl.prev"
+    assert prev.exists() and prev.stat().st_size >= 2000
+    assert live.stat().st_size < 2000
+    logger.mark_no_pose()                       # still writing after the roll
+    assert live.read_text().count("\n") >= 1

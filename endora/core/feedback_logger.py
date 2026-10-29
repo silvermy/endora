@@ -37,6 +37,13 @@ log = logging.getLogger(__name__)
 _DATA_DIR = Path("/data") if Path("/data").exists() else Path(".")
 _LOG_PATH = _DATA_DIR / "feedback.jsonl"
 
+# The log was only ever trimmed by downloading it from the debug page, and
+# nothing has downloaded it since labelling replaced the feedback buttons —
+# while near-misses kept being appended. Past this size the live file becomes
+# <log>.prev (replacing the old one) and a new one starts, so at most about
+# twice this is ever on disk.
+_MAX_LOG_BYTES = 5 * 1024 * 1024
+
 # How many recent ArmReadings to snapshot for false-negative reports.
 _FN_BUFFER_SIZE = 30
 
@@ -329,6 +336,23 @@ class FeedbackLogger:
             log.warning("[feedback] Cannot open %s: %s — feedback disabled", _LOG_PATH, exc)
             return None
 
+    def _roll_over(self) -> None:
+        """Move the full live log to <log>.prev and start a new one. Callers
+        must hold self._lock. Unlike rotate(), nothing is returned and the
+        counts carry on."""
+        try:
+            self._fh.close()
+        except OSError:
+            pass
+        self._fh = None
+        try:
+            os.replace(_LOG_PATH, _LOG_PATH.with_name(_LOG_PATH.name + ".prev"))
+            log.info("[feedback] %s reached %d bytes — moved to .prev",
+                     _LOG_PATH.name, _MAX_LOG_BYTES)
+        except OSError as exc:
+            log.warning("[feedback] roll-over failed: %s", exc)
+        self._fh = self._open_log()
+
     def _write(self, entry: dict) -> bool:
         """Append one JSON line and force it to disk.
 
@@ -348,6 +372,8 @@ class FeedbackLogger:
                 os.fsync(self._fh.fileno())
             except (OSError, ValueError):
                 pass  # fsync unsupported on some mounts; flush already hit the OS
+            if self._fh.tell() >= _MAX_LOG_BYTES:
+                self._roll_over()
             return True
         except Exception as exc:
             log.warning("[feedback] Write failed (%s) — entry dropped: %s",

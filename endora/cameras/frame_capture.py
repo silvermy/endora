@@ -11,8 +11,12 @@ anyone sat down to label it, and the trace alone could not say whether a
 "not intended" snap was a hand behind the head or a hallucinated arm. So a
 gesture frame, and the state frame just before it (for a held pose that is the
 photo of the pose itself, see debug_server._photo_for), are moved to KEEP_DIR
-beside the keypoint traces and live as long as they do — which is forever.
-About 100 KB each.
+beside the keypoint traces. About 100 KB each.
+
+Kept photos of fires nobody labelled are deleted after KEEP_UNLABELLED_DAYS;
+by then nobody is going to judge them. A labelled fire's photos stay as long
+as its trace, which is forever: they are what a later disagreement about that
+label gets settled with.
 """
 from __future__ import annotations
 
@@ -35,6 +39,13 @@ KEEP_DIR = Path(os.environ.get("ENDORA_CAPTURE_DIR", "/data/test_captures")) / "
 # How far back a gesture reaches for the state frame to keep with it. Matches
 # the window debug_server._photo_for searches for a held pose's photo.
 KEEP_STATE_BEFORE_S = 4.0
+KEEP_UNLABELLED_DAYS = 30
+_EXPIRE_EVERY_S = 24 * 3600
+# A photo belongs to a labelled capture when the capture's timestamp (whole
+# seconds, from the trace's filename) is this close: the gesture frame lands
+# within a second or two of the trace, the state frame up to
+# KEEP_STATE_BEFORE_S before it.
+_LABEL_MATCH_S = KEEP_STATE_BEFORE_S + 2.0
 
 
 class FrameCapture:
@@ -51,6 +62,7 @@ class FrameCapture:
         self._max = max_frames
         self._keep_dir = Path(keep_dir)
         self._lock = threading.Lock()
+        self._last_expiry = 0.0
 
     def save(
         self,
@@ -90,6 +102,12 @@ class FrameCapture:
                     jpg_path = self._keep(stem, ts)
                 self._evict()
             log.debug("Captured frame: %s", jpg_path.name)
+            if ts - self._last_expiry >= _EXPIRE_EVERY_S:
+                # The first save after startup, then daily. Off the camera
+                # loop: it reads the label store and lists every kept photo.
+                self._last_expiry = ts
+                threading.Thread(target=self.expire_kept, name="photo-expiry",
+                                 daemon=True).start()
             return jpg_path
         except Exception as exc:
             log.debug("FrameCapture.save error: %s", exc)
@@ -125,6 +143,36 @@ class FrameCapture:
                     log.warning("FrameCapture: could not keep %s%s: %s", s, suffix, exc)
         kept = self._keep_dir / f"{stem}.jpg"
         return kept if kept.exists() else self._dir / f"{stem}.jpg"
+
+    def expire_kept(self, now: Optional[float] = None) -> int:
+        """Delete kept photos older than KEEP_UNLABELLED_DAYS that belong to
+        no labelled capture. Returns how many photos were deleted."""
+        if not self._keep_dir.is_dir():
+            return 0
+        from cameras import labeler
+        now = time.time() if now is None else now
+        cutoff = now - KEEP_UNLABELLED_DAYS * 86400
+        labelled = sorted(
+            labeler._parse_name(name)["ts"] for name, v in labeler.get_labels().items()
+            if v.get("label") and labeler._parse_name(name)["ts"] is not None)
+        removed = 0
+        with self._lock:
+            for jpg in self._keep_dir.glob("*.jpg"):
+                try:
+                    t = float(jpg.name.split("_", 1)[0])
+                except ValueError:
+                    continue
+                if t >= cutoff:
+                    continue
+                if any(abs(t - lt) <= _LABEL_MATCH_S for lt in labelled):
+                    continue
+                jpg.unlink(missing_ok=True)
+                jpg.with_suffix(".json").unlink(missing_ok=True)
+                removed += 1
+        if removed:
+            log.info("FrameCapture: deleted %d unlabelled photos older than %d days",
+                     removed, KEEP_UNLABELLED_DAYS)
+        return removed
 
     def _evict(self) -> None:
         """Remove oldest files when over the limit. Must be called under self._lock."""
