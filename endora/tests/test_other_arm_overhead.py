@@ -14,6 +14,11 @@ a stretch, seated:
 * reclined_hands_behind_head — 2026-10-26 evening, lying back on the couch
   with both hands behind the head, the other arm at 0.93 but seen at only
   0.64. It got past the first defaults (0.95 / 0.80).
+* both_up_elbow_collapsed — 2026-10-29, both hands straight up together.
+  On the frame that fired, the model put the right elbow almost on the
+  shoulder, the elbow check made that arm unreadable, and the veto, which
+  used the zeroed elevation, saw no second hand. The veto now measures the
+  other hand from shoulder and wrist alone.
 
 Each has the other arm at elevation 0.98-0.99, bent, so it never counted as
 raised and the frame fell through to SINGLE_UP. The genuine fixtures are
@@ -34,7 +39,7 @@ from tests.test_captured import _YOLOLandmarks
 
 FIXTURES = Path(__file__).parent / "stretch"
 STRETCHES = ["hands_clasped_overhead", "one_held_one_raised",
-             "reclined_hands_behind_head"]
+             "reclined_hands_behind_head", "both_up_elbow_collapsed"]
 GENUINE = ["genuine_other_arm_down", "genuine_other_arm_barely_seen"]
 
 
@@ -87,3 +92,15 @@ def test_only_the_arm_whose_partner_is_overhead_loses():
     # vetoing both dropped this snap.
     assert ArmTrackerConfig().other_arm_overhead_visibility > 0.59
     assert Gesture.SNAP in _replay("genuine_other_arm_barely_seen")
+
+
+def test_the_veto_does_not_need_the_other_elbow():
+    """The firing frame of both_up_elbow_collapsed, alone: the right elbow
+    sits on the shoulder, so that arm fails _elbow_is_articulated — but its
+    wrist is plainly overhead, and that is all the veto asks."""
+    from cameras.arm_tracker import _elbow_is_articulated
+    data = np.load(FIXTURES / "both_up_elbow_collapsed.npz")
+    last = data["keypoints"][-1]
+    s, e, w = (tuple(last[i][:2]) for i in (6, 8, 10))
+    assert not _elbow_is_articulated(s, e, w)
+    assert (s[1] - w[1]) / np.hypot(s[0] - w[0], s[1] - w[1]) > 0.9

@@ -1504,8 +1504,24 @@ class ArmTracker:
                     and min(vis(sh), vis(el), vis(wr))
                     >= self.c.other_arm_overhead_visibility)
 
-        l_over = _overhead(l_elev, l_ok, LEFT_SHOULDER, LEFT_ELBOW, LEFT_WRIST)
-        r_over = _overhead(r_elev, r_ok, RIGHT_SHOULDER, RIGHT_ELBOW, RIGHT_WRIST)
+        # Measured from the shoulder and wrist alone, NOT from l_elev/r_elev:
+        # those are zeroed when the side fails _elbow_is_articulated, and
+        # whether a hand is overhead has nothing to do with where the model
+        # put the elbow. On 2026-10-29 both hands went straight up together;
+        # on the one frame the right elbow landed on the shoulder, the right
+        # arm became "unreadable", this veto saw no second hand, and the left
+        # arm fired a snap.
+        def _wrist_elevation(sh_ok: bool, sh: _Pt, wr: int) -> Tuple[float, bool]:
+            if not (sh_ok and vis(wr) >= KV):
+                return 0.0, False
+            w = px(wr)
+            d = _dist(sh, w)
+            return ((sh[1] - w[1]) / d if d > 1e-6 else 0.0), True
+
+        l_over = _overhead(*_wrist_elevation(ls_ok, ls, LEFT_WRIST),
+                           LEFT_SHOULDER, LEFT_ELBOW, LEFT_WRIST)
+        r_over = _overhead(*_wrist_elevation(rs_ok, rs, RIGHT_WRIST),
+                           RIGHT_SHOULDER, RIGHT_ELBOW, RIGHT_WRIST)
         r_raised = r_raised and not l_over
         l_raised = l_raised and not r_over
 
