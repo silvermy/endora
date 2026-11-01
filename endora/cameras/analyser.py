@@ -1038,7 +1038,7 @@ class CameraAnalyser(threading.Thread):
                            moved: bool = True) -> _PersonEntry:
         s = self.s
         arm_tracker = ArmTracker(ArmTrackerConfig(
-            raise_elevation_min=float(getattr(s, 'raise_elevation_min', 0.70)),
+            raise_elevation_min=float(getattr(s, 'raise_elevation_min', 0.85)),
             arm_extension_min=float(getattr(s, 'arm_extension_min', 0.80)),
             min_arm_len_frac=float(getattr(s, 'min_arm_len_frac', 0.55)),
             head_rest_rise_max=float(getattr(s, 'head_rest_rise_max', 0.95)),

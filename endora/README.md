@@ -375,8 +375,8 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | Problem | Fix |
 |---|---|
 | No skeleton / tracking furniture | Raise `pose_visibility_min` toward `0.5`; centre yourself with `dewarp_pan` |
-| Arm raise not detected | Lower `raise_elevation_min` toward `0.60` |
-| Arm raise triggers too easily | Raise `raise_elevation_min` toward `0.80` |
+| Arm raise not detected | Lower `raise_elevation_min` toward `0.75` — but a hand behind the head while reclining measures 0.70-0.83 |
+| Arm raise triggers too easily | Raise `raise_elevation_min` toward `0.90` |
 | SNAP not firing at all | Check the pose sample rate first — see the row below. Then lower `flourish_min_climb` / `flourish_min_rate`, or set `snap_require_flourish: false` to fall back to a held raise |
 | SNAP fires only occasionally, and the debug overlay shows an implausible `sweep` rate (10+/s) | The model is sampling too slowly to see the sweep: the log's `pose N sample/s` is the number that matters, not the camera fps. Raise it (faster model, lower `yolo_imgsz`, better hardware) rather than loosening thresholds |
 | CPU pegged whenever someone is in the room | `yolo_max_skip_active` is `1` — every frame while a person is tracked. Correct on a GPU; on a Pi try `3` |
@@ -417,7 +417,7 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `debug_port` | `8765` | Debug stream port |
 | `ha_event_name` | `gesture_detected` | HA event type fired on gesture |
 | `log_level` | `info` | `debug` / `info` / `warning` / `error` |
-| `raise_elevation_min` | `0.70` | How far above horizontal an arm must point to count as raised (1.0 = straight up). Same value standing, sitting or lying down |
+| `raise_elevation_min` | `0.85` | How far above horizontal an arm must point to count as raised (1.0 = straight up). Same value standing, sitting or lying down |
 | `arm_extension_min` | `0.80` | How straight the arm must be (1.0 = fully extended, 0.71 = elbow at 90°) |
 | `body_upright_min` | `-0.15` | Hip-shoulder gap to confirm upright (negative OK for fisheye) |
 | `pose_visibility_min` | `0.45` | Min landmark visibility to accept a pose (filters furniture) |

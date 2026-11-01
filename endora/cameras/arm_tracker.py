@@ -280,11 +280,20 @@ class ArmTrackerConfig:
     """
 
     # ── Raise: "arm extended straight up" ─────────────────────────────────
-    # Minimum elevation for an arm to count as raised. 0.70 ~ 45 degrees
+    # Minimum elevation for an arm to count as raised. 0.85 ~ 58 degrees
     # above horizontal; 1.0 would demand a perfectly vertical arm. A truly
     # vertical arm still projects near 1.0 even on a steeply tilted camera,
     # so there is plenty of headroom here.
-    raise_elevation_min: float = 0.70
+    #
+    # 0.70 (~44 degrees) until 2026-11-01. Lying back on the couch with a hand
+    # behind the head, the model draws an arm pointing up and back at
+    # 0.70-0.83, which passed. On the frame each fired, the 26 snaps labelled
+    # intended measured 0.80-1.00, all but one 0.90 or more. Replayed over
+    # every labelled recording at 0.85: 5 of the 9 false snaps no longer
+    # fire, one intended snap is lost (10-26 15:25:31, which fired at
+    # exactly 0.80 — the replay cannot tell whether it would have fired a
+    # frame later, still rising), and 2 of 22 unlabelled since 10-21.
+    raise_elevation_min: float = 0.85
     # Minimum extension (straightness). 0.80 ~ elbow open past ~105 degrees.
     # Rejects a hand held at the face or a chicken-winged forearm, which is
     # why no separate wrist-near-nose exclusion is needed.

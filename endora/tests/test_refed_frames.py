@@ -39,13 +39,14 @@ FIXTURES = Path(__file__).parent / "refed_frames"
 REFED = ["couch_no_pose_2218", "couch_no_pose_1038", "chin_in_hand"]
 
 
-def _snaps(name: str, refed: int) -> list:
+def _snaps(name: str, refed: int, **config) -> list:
     data = np.load(FIXTURES / f"{name}.npz")
     w, h = int(data["frame_w"]), int(data["frame_h"])
     kps, ts = list(data["keypoints"]), [float(t) for t in data["t_offsets"]]
     kps += [kps[-1]] * refed
     ts += [ts[-1] + 0.1 * (i + 1) for i in range(refed)]
-    tracker = ArmTracker(ArmTrackerConfig(detect_cross_arms=False, detect_t_pose=False))
+    tracker = ArmTracker(ArmTrackerConfig(detect_cross_arms=False, detect_t_pose=False,
+                                          **config))
     sm = GestureStateMachine(StateMachineConfig())
     return [g for k, t in zip(kps, ts)
             if (g := sm.tick(tracker.classify(_YOLOLandmarks(k, w, h), w, h, now=t),
@@ -54,7 +55,9 @@ def _snaps(name: str, refed: int) -> list:
 
 @pytest.mark.parametrize("name", REFED)
 def test_it_fired_only_because_a_frame_was_fed_twice(name):
-    assert _snaps(name, refed=5)
+    # At the 0.70 raise angle these fired under; chin_in_hand is no longer a
+    # raise at all at 0.85 (see test_arm_angle.py).
+    assert _snaps(name, refed=5, raise_elevation_min=0.70)
 
 
 @pytest.mark.parametrize("name", REFED)

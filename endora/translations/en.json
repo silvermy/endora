@@ -54,7 +54,7 @@
     },
     "raise_elevation_min": {
       "name": "Arm raise angle",
-      "description": "How far above horizontal an arm must point to count as raised (1.0 = straight up, 0.70 ~ 45 degrees). Works the same standing, sitting or lying down"
+      "description": "How far above horizontal an arm must point to count as raised (1.0 = straight up, 0.85 ~ 58 degrees). Works the same standing, sitting or lying down"
     },
     "arm_extension_min": {
       "name": "Arm straightness",

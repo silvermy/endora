@@ -65,8 +65,10 @@ def _replay(name: str, **config) -> list:
 
 @pytest.mark.parametrize("name", STRETCHES)
 def test_the_recording_fired_without_the_rule(name):
-    # Documents the bug: each of these really did fire.
-    assert Gesture.SNAP in _replay(name, other_arm_overhead_max=0.0)
+    # Documents the bug: each of these really did fire, at the 0.70 raise
+    # angle of the time (0.85 since 2026-11-01 also stops one of them).
+    assert Gesture.SNAP in _replay(name, other_arm_overhead_max=0.0,
+                                   raise_elevation_min=0.70)
 
 
 @pytest.mark.parametrize("name", STRETCHES)

@@ -23,14 +23,14 @@ from tests.test_captured import _YOLOLandmarks
 PHANTOM = Path(__file__).parent / "hand_on_head" / "chin_in_hand_phantom.npz"
 
 
-def _snaps(extra_frames: int) -> list:
+def _snaps(extra_frames: int, **config) -> list:
     data = np.load(PHANTOM)
     w, h = int(data["frame_w"]), int(data["frame_h"])
     kps, ts = list(data["keypoints"]), [float(t) for t in data["t_offsets"]]
     kps += [kps[-1]] * extra_frames
     ts += [ts[-1] + 0.06 * (i + 1) for i in range(extra_frames)]
     tracker = ArmTracker(ArmTrackerConfig(detect_cross_arms=False, detect_t_pose=False,
-                                          detect_both_up=False))
+                                          detect_both_up=False, **config))
     sm = GestureStateMachine(StateMachineConfig())
     fired = []
     for k, t in zip(kps, ts):
@@ -46,5 +46,7 @@ def test_one_frame_cannot_confirm_a_raise():
 
 def test_the_same_raise_seen_again_still_fires():
     """The trade-off: a raise that holds for a second frame is accepted, so
-    this only stops phantoms that last a single frame."""
-    assert len(_snaps(extra_frames=1)) == 1
+    this only stops phantoms that last a single frame. At the 0.70 raise
+    angle of the time: since 2026-11-01 (0.85) this phantom is not a raise
+    at all."""
+    assert len(_snaps(extra_frames=1, raise_elevation_min=0.70)) == 1

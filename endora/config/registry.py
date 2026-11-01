@@ -157,10 +157,10 @@ REGISTRY: list[SettingField] = [
     # elevation = (shoulder_y - wrist_y) / |shoulder - wrist|, measured in
     # pixels: the sine of the arm's angle above horizontal. Dimensionless,
     # so it needs no body-size or frame-size scaling.
-    SettingField("raise_elevation_min", float, 0.70,
+    SettingField("raise_elevation_min", float, 0.85,
                   "How far above horizontal an arm must point to count as raised "
-                  "(1.0 = straight up, 0.70 ~ 45 degrees). Replaces the old "
-                  "frame-fraction margins",
+                  "(1.0 = straight up, 0.85 ~ 58 degrees, 0.70 ~ 45 degrees). "
+                  "Replaces the old frame-fraction margins",
                   group="Pose", user_facing=True,
                   ui=UIMeta("Arm raise angle", "slider", 0.30, 1.0, 0.01, "Gesture", order=0)),
     SettingField("arm_extension_min", float, 0.80,

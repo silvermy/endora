@@ -214,7 +214,7 @@ Tune `dewarp_pan` until you are roughly centred in the debug stream.
 | `debug_port` | `8765` | Debug stream port |
 | `ha_event_name` | `gesture_detected` | HA event type fired on gesture |
 | `log_level` | `info` | `debug` / `info` / `warning` / `error` |
-| `raise_elevation_min` | `0.70` | How far above horizontal an arm must point to count as raised (1.0 = straight up). Same value standing, sitting or lying down |
+| `raise_elevation_min` | `0.85` | How far above horizontal an arm must point to count as raised (1.0 = straight up). Same value standing, sitting or lying down |
 | `arm_extension_min` | `0.80` | How straight the arm must be (1.0 = fully extended, 0.71 = elbow at 90°) |
 | `body_upright_min` | `-0.15` | Hip-shoulder gap to confirm upright (negative OK for fisheye) |
 | `pose_visibility_min` | `0.45` | Min landmark visibility to accept a pose (filters furniture) |

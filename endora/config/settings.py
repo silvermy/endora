@@ -137,7 +137,7 @@ class Settings:
     # up, 0.0 = level, -1.0 = hanging down. Dimensionless, so it means the
     # same thing at any camera distance, any frame shape, and in any posture
     # — standing, sitting or lying on a couch.
-    raise_elevation_min: float = 0.70
+    raise_elevation_min: float = 0.85
     # How straight the arm must be: |shoulder-wrist| / (upper arm + forearm).
     # 1.0 = fully extended, 0.71 = elbow at 90 degrees. A hand held against
     # your own face scores low, which is why the old wrist-near-nose veto is
