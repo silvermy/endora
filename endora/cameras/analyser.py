@@ -754,6 +754,15 @@ class _PersonEntry:
     missing_rejected:      dict          = field(default_factory=dict)
 
 
+def _detected_now(entry: "_PersonEntry", now: float) -> bool:
+    """Was this person matched to a detection on the frame stamped *now*?
+
+    Only such a frame may be classified — see the per-person loop in
+    CameraAnalyser.run for what feeding the cached last_lm did instead.
+    """
+    return entry.last_seen == now
+
+
 def _known_centroids(
     persons: "dict[int, _PersonEntry]", now: float
 ) -> list[tuple]:
@@ -1705,6 +1714,26 @@ class CameraAnalyser(threading.Thread):
             _primary_gesture: Optional[Gesture] = None
 
             for pid, entry in list(self._persons.items()):
+                # Only a frame on which this person was actually detected.
+                # Classifying everyone every iteration fed last_lm — the
+                # keypoints from their LAST detection — back in as though it
+                # were a new frame, so a dropout replayed a frozen pose. One
+                # fresh frame with the arm up, then that same frame again
+                # 0.1 s later, passed the "seen on two frames" guard (see
+                # ArmTracker._confirm_needed), and a jump across the gap
+                # passed as a sweep. On 2026-10-30 that fired SNAP twice off
+                # someone lying on the couch, both photos reading NO POSE
+                # DETECTED. The recordings hold only fresh detections, so
+                # every replay and test already assumed this: all 33 labelled
+                # intended fires still fire on them alone, and 8 labelled
+                # false ones only ever fired with a re-fed frame.
+                if not _detected_now(entry, now):
+                    if entry.last_reading is not None and (
+                        _primary_reading is None
+                        or entry.last_reading.state != ArmState.DOWN
+                    ):
+                        _primary_reading = entry.last_reading
+                    continue
                 prev_state = entry.last_arm_state
                 # Only pass hand_lm to the person whose arm is already up —
                 # grlib detects one hand in the frame and we can't tell whose.
