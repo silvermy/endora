@@ -596,6 +596,12 @@ class GestureStateMachine:
         Gesture.FOLDED_ARMS: "enable_folded_arms",
     }
 
+    @property
+    def waiting_for_nod(self) -> bool:
+        """The current or most recent fold was held long enough for
+        FOLDED_ARMS but no nod had been seen (see the no_nod near-miss)."""
+        return self._sustain.nod_wait_logged
+
     def note_withheld(self, gesture: Gesture) -> None:
         """The analyser did not send *gesture* after all — the track was not
         yet confirmed human. A HOLD extends a raise that was actually sent, so

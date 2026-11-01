@@ -19,6 +19,9 @@ a stretch, seated:
   shoulder, the elbow check made that arm unreadable, and the veto, which
   used the zeroed elevation, saw no second hand. The veto now measures the
   other hand from shoulder and wrist alone.
+* wide_v_seated — 2026-11-01 09:27, seated, both hands up in a wide V. The
+  other arm reads only 0.58 elevation (hand far out to the side) but the
+  wrist is 0.94 shoulder widths above its shoulder: other_hand_rise_max.
 
 Each has the other arm at elevation 0.98-0.99, bent, so it never counted as
 raised and the frame fell through to SINGLE_UP. The genuine fixtures are
@@ -39,7 +42,8 @@ from tests.test_captured import _YOLOLandmarks
 
 FIXTURES = Path(__file__).parent / "stretch"
 STRETCHES = ["hands_clasped_overhead", "one_held_one_raised",
-             "reclined_hands_behind_head", "both_up_elbow_collapsed"]
+             "reclined_hands_behind_head", "both_up_elbow_collapsed",
+             "wide_v_seated"]
 GENUINE = ["genuine_other_arm_down", "genuine_other_arm_barely_seen"]
 
 
@@ -68,6 +72,7 @@ def test_the_recording_fired_without_the_rule(name):
     # Documents the bug: each of these really did fire, at the 0.70 raise
     # angle of the time (0.85 since 2026-11-01 also stops one of them).
     assert Gesture.SNAP in _replay(name, other_arm_overhead_max=0.0,
+                                   other_hand_rise_max=0.0,
                                    raise_elevation_min=0.70)
 
 
@@ -106,3 +111,9 @@ def test_the_veto_does_not_need_the_other_elbow():
     s, e, w = (tuple(last[i][:2]) for i in (6, 8, 10))
     assert not _elbow_is_articulated(s, e, w)
     assert (s[1] - w[1]) / np.hypot(s[0] - w[0], s[1] - w[1]) > 0.9
+
+
+def test_a_wide_v_is_caught_by_the_hand_height_not_the_angle():
+    # The angle alone lets it through; the wrist height does not.
+    assert Gesture.SNAP in _replay("wide_v_seated", other_hand_rise_max=0.0)
+    assert Gesture.SNAP not in _replay("wide_v_seated", other_arm_overhead_max=0.0)

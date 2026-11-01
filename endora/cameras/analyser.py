@@ -167,6 +167,9 @@ _LIVENESS_EXEMPT_DIST = 0.06
 # misses are routine and would drown the rest.
 _DROPOUT_NEAR_FRAC = 0.10
 _DROPOUT_REPORT_MIN_S = 0.3
+# Shortest interval between two "fold ended without a nod" recordings for one
+# person — see CameraAnalyser._record_fold_without_nod.
+_NO_NOD_SAVE_GAP_S = 30.0
 
 # A tracked pid only becomes exempt from the wrist-liveness check (i.e. only
 # becomes a "known centroid" other candidates can match against) after TWO
@@ -732,6 +735,11 @@ class _PersonEntry:
     # True once the chime has sounded for the sweep currently in progress;
     # cleared when the arm settles, so one flourish makes one sound.
     chimed_this_sweep: bool          = False
+    # A fold still waiting for its nod: when it was last seen folded, and
+    # when one was last saved — see _record_fold_without_nod.
+    no_nod_fold_at:    Optional[float] = None
+    no_nod_dip:        float         = 0.0
+    no_nod_saved_at:   Optional[float] = None
     # Liveness confirmation — see _LIVENESS_CONFIRM_WINDOW_S. Sticky once
     # True; confirmed_human pids (and pids still inside their own grace
     # period since last_genuine_live_at — see _known_centroids) contribute
@@ -1046,6 +1054,7 @@ class CameraAnalyser(threading.Thread):
             other_arm_overhead_max=float(getattr(s, 'other_arm_overhead_max', 0.90)),
             other_arm_overhead_visibility=float(
                 getattr(s, 'other_arm_overhead_visibility', 0.60)),
+            other_hand_rise_max=float(getattr(s, 'other_hand_rise_max', 0.85)),
             pose_visibility_min=float(getattr(s, 'pose_visibility_min', 0.45)),
             keypoint_visibility_min=float(getattr(s, 'keypoint_visibility_min', 0.30)),
             leg_raise_margin=float(getattr(s, 'leg_raise_margin', 0.05)),
@@ -1060,7 +1069,7 @@ class CameraAnalyser(threading.Thread):
             folded_chest_depth=float(getattr(s, 'folded_chest_depth', 0.80)),
             folded_resolution_min=float(getattr(s, 'folded_resolution_min', 1.60)),
             folded_visibility_min=float(getattr(s, 'folded_visibility_min', 0.50)),
-            folded_extension_max=float(getattr(s, 'folded_extension_max', 0.80)),
+            folded_extension_max=float(getattr(s, 'folded_extension_max', 0.85)),
             folded_arm_span_max=float(getattr(s, 'folded_arm_span_max', 2.00)),
             body_scale_min_ratio=float(getattr(s, 'body_scale_min_ratio', 0.55)),
             body_scale_min_samples=int(getattr(s, 'body_scale_min_samples', 5)),
@@ -1206,6 +1215,36 @@ class CameraAnalyser(threading.Thread):
             self._recorder.save(gesture_name="MANUAL",
                                 label=f"{self.label}_nod_{kind}_pid{pid}",
                                 pid=pid, note=note)
+
+    def _record_fold_without_nod(self, entry: "_PersonEntry", pid, reading,
+                                 gesture, now: float) -> None:
+        """Save a recording when a fold ends without the nod it was waiting for.
+
+        Recordings were saved when a gesture fired or a nod was decided, so a
+        seated Jeannie that never registered its nod left nothing behind: on
+        2026-11-01 over a hundred folds logged "no nod yet" at 0.00-0.03
+        shoulder widths and not one could be replayed. At most one every
+        _NO_NOD_SAVE_GAP_S, because a flickering fold ends every second or two.
+        """
+        if gesture is Gesture.FOLDED_ARMS or (reading is not None and reading.nodded):
+            entry.no_nod_fold_at = None
+            return
+        if reading is not None and reading.state == ArmState.FOLDED_ARMS:
+            if entry.state_machine.waiting_for_nod:
+                entry.no_nod_fold_at, entry.no_nod_dip = now, reading.nod_dip
+            return
+        if (entry.no_nod_fold_at is None
+                or now - entry.no_nod_fold_at <= entry.state_machine.c.sustain_gap_s):
+            return
+        entry.no_nod_fold_at = None
+        if self._recorder is None or (entry.no_nod_saved_at is not None
+                                      and now - entry.no_nod_saved_at < _NO_NOD_SAVE_GAP_S):
+            return
+        entry.no_nod_saved_at = now
+        self._recorder.save(gesture_name="MANUAL",
+                            label=f"{self.label}_fold_no_nod_pid{pid}", pid=pid,
+                            note=f"fold ended without a nod: largest dip "
+                                 f"{entry.no_nod_dip:.2f}")
 
     def _confirmed_gesture(self, entry: "_PersonEntry", pid, gesture):
         """The gesture, if this track may fire it; otherwise None.
@@ -1797,6 +1836,7 @@ class CameraAnalyser(threading.Thread):
 
                 gesture = self._confirmed_gesture(
                     entry, pid, entry.state_machine.tick(reading, now))
+                self._record_fold_without_nod(entry, pid, reading, gesture, now)
                 if gesture is not None:
                     log.debug("[%s] pid=%d gesture: %s", self.label, pid, gesture)
                     # Guarantee the sound accompanies a real gesture. The

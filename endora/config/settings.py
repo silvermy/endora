@@ -155,6 +155,7 @@ class Settings:
     # this confidently — both hands overhead is a stretch, not a flourish.
     other_arm_overhead_max: float = 0.90
     other_arm_overhead_visibility: float = 0.60
+    other_hand_rise_max: float = 0.85
     # Deprecated — superseded by the settings above. Kept so existing
     # settings files keep loading; no code reads them.
     arm_above_head_tolerance: float = 0.15
@@ -332,7 +333,7 @@ class Settings:
     folded_chest_depth: float = 0.80
     folded_resolution_min: float = 1.60
     folded_visibility_min: float = 0.50
-    folded_extension_max: float = 0.80
+    folded_extension_max: float = 0.85
     folded_arm_span_max: float = 2.00
     folded_lean_max_deg: float = 45.0
     folded_knees_veto: bool = False

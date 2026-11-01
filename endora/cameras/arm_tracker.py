@@ -333,6 +333,14 @@ class ArmTrackerConfig:
     # counts. 0 disables.
     other_arm_overhead_max: float = 0.90
     other_arm_overhead_visibility: float = 0.60
+    # The veto also applies when the other WRIST is this many shoulder
+    # widths above its own shoulder, whatever the arm's angle. A stretch with
+    # the hands up in a wide V puts the other arm at only 0.58 elevation —
+    # the hand far out to the side — while the wrist sits 0.94 shoulder
+    # widths up (seated, 2026-11-01 09:27, labelled not intended). Replayed
+    # over the labelled snaps at 0.85: that one stops, no intended snap is
+    # lost, nor any unlabelled one since 10-21. 0 disables.
+    other_hand_rise_max: float = 0.85
     # Elevation at/above which an arm counts as "on its way up" for the
     # early chime.
     arm_rising_elevation: float = 0.45
@@ -427,7 +435,14 @@ class ArmTrackerConfig:
     # Folded arms are bent arms: hands at the chest with the elbows out puts
     # extension well under a straight arm's 0.80. Requiring the bend keeps a
     # pair of hands resting low and straight from qualifying.
-    folded_extension_max: float = 0.80
+    #
+    # 0.85 since 2026-11-01 (was 0.80). Seated Jeannies that day read folded
+    # for about a second at a time and dropped out, so no nod ever fell
+    # inside one fold: in 29 episodes the only thing wrong was one arm at
+    # 0.80-0.87, most 0.84 or less. Every recorded Jeannie, real and false,
+    # replays the same at 0.85 as at 0.80 — the nod is what rejects a resting
+    # pose, not this.
+    folded_extension_max: float = 0.85
     # Ceiling on arm span — upper arm plus forearm — in shoulder widths.
     #
     # An occluded body reads LONG here, which is the opposite of what you
@@ -1508,10 +1523,13 @@ class ArmTracker:
         # Not while the other hand is clearly overhead too: see
         # other_arm_overhead_max.
         def _overhead(elev: float, ok: bool, sh: int, el: int, wr: int) -> bool:
-            return (self.c.other_arm_overhead_max > 0 and ok
-                    and elev >= self.c.other_arm_overhead_max
-                    and min(vis(sh), vis(el), vis(wr))
-                    >= self.c.other_arm_overhead_visibility)
+            if not ok or min(vis(sh), vis(el), vis(wr)) < self.c.other_arm_overhead_visibility:
+                return False
+            if self.c.other_arm_overhead_max > 0 and elev >= self.c.other_arm_overhead_max:
+                return True
+            rise_max = self.c.other_hand_rise_max
+            return (rise_max > 0 and shoulder_w > 1e-6
+                    and (px(sh)[1] - px(wr)[1]) / shoulder_w >= rise_max)
 
         # Measured from the shoulder and wrist alone, NOT from l_elev/r_elev:
         # those are zeroed when the side fails _elbow_is_articulated, and

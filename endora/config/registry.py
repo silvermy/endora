@@ -188,7 +188,11 @@ REGISTRY: list[SettingField] = [
                   group="Pose"),
     SettingField("other_arm_overhead_visibility", float, 0.60,
                   "Confidence the other arm's keypoints need before other_arm_overhead_max "
-                  "applies", group="Pose"),
+                  "or other_hand_rise_max applies", group="Pose"),
+    SettingField("other_hand_rise_max", float, 0.85,
+                  "A one-arm raise also does not count while the other wrist is this many "
+                  "shoulder widths above its shoulder — hands up in a wide V (0 = off)",
+                  group="Pose"),
     # Superseded by the two above — kept so existing settings files load,
     # but no longer read by any code path.
     SettingField("arm_above_head_tolerance", float, 0.15,
@@ -375,7 +379,7 @@ REGISTRY: list[SettingField] = [
                   "false positive",
                   group="Gesture",
                   ui=UIMeta("Hands below shoulders", "slider", 0.30, 1.50, 0.05, "Jeannie", order=17)),
-    SettingField("folded_extension_max", float, 0.80,
+    SettingField("folded_extension_max", float, 0.85,
                   "FOLDED_ARMS: maximum arm straightness — folded arms are bent arms",
                   group="Gesture"),
     SettingField("facing_shoulder_min", float, 0.45,
@@ -584,7 +588,7 @@ GESTURE_CRITICAL: list[str] = [
     "yolo_pose_model", "yolo_imgsz", "yolo_conf", "yolo_keep_conf",
     "raise_elevation_min", "arm_extension_min", "min_arm_len_frac",
     "head_rest_rise_max", "both_up_spread_min",
-    "other_arm_overhead_max", "other_arm_overhead_visibility",
+    "other_arm_overhead_max", "other_arm_overhead_visibility", "other_hand_rise_max",
     "snap_elevation_min", "snap_sustain_s",
     "snap_require_flourish", "flourish_min_climb", "flourish_min_rate",
     "flourish_max_rate", "folded_visibility_min",
