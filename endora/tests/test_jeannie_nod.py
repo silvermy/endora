@@ -79,6 +79,44 @@ def test_fold_then_nod_fires():
     assert 1.0 <= fired[0] <= 1.8, fired
 
 
+def _run_confirmed_at(drops, confirmed_at):
+    """As _run, with fires withheld until the track is confirmed human.
+    Returns the times of the fires that were actually sent."""
+    tr = ArmTracker(ArmTrackerConfig())
+    sm = GestureStateMachine(StateMachineConfig())
+    sent = []
+    for i, drop in enumerate(drops):
+        t = i / FPS
+        g = sm.tick(tr.classify(_nose_drop(_pose(), drop), W, H, None, now=t), t)
+        if g is Gesture.FOLDED_ARMS:
+            if t < confirmed_at:
+                sm.note_withheld(g)
+            else:
+                sent.append(t)
+    return sent
+
+
+def test_a_nod_after_a_withheld_fire_still_fires():
+    # 2026-11-03: 0.22 withheld on a new track, then 0.33 five seconds later
+    # with the track confirmed and the fold never released. Nothing fired.
+    first = [0.0] * 10 + _nod() + [0.0] * 50
+    sent = _run_confirmed_at(first + _nod() + [0.0] * 10, confirmed_at=5.0)
+    assert len(sent) == 1
+    assert sent[0] >= len(first) / FPS, sent
+
+
+def test_a_nod_withheld_just_before_confirmation_fires_once_confirmed():
+    drops = [0.0] * 10 + _nod() + [0.0] * 40
+    assert len(_run_confirmed_at(drops, confirmed_at=1.5)) == 1
+
+
+def test_a_withheld_nod_expires_without_another_nod():
+    # With the latch cleared, only a recent nod may fire again: confirmed
+    # after this one has gone stale, the track stays silent.
+    drops = [0.0] * 10 + _nod() + [0.0] * 80
+    assert _run_confirmed_at(drops, confirmed_at=5.0) == []
+
+
 def test_a_nod_anywhere_during_a_long_fold_fires():
     drops = [0.0] * 30 + _nod() + [0.0] * 10
     assert len(_run(drops)) == 1

@@ -544,7 +544,7 @@ class GestureStateMachine:
                 self._sustain.nod_wait_logged = True
                 self._near_miss(
                     "FOLDED_ARMS",
-                    f"no_nod: arms folded but no nod yet — largest dip "
+                    f"no_nod: arms folded but no nod yet — largest dip so far "
                     f"{reading.nod_dip:.2f} shoulder widths",
                     reading)
             return None
@@ -606,9 +606,17 @@ class GestureStateMachine:
         """The analyser did not send *gesture* after all — the track was not
         yet confirmed human. A HOLD extends a raise that was actually sent, so
         a withheld SNAP must not leave one pending: on 2026-10-21 a HOLD went
-        out 1.5 s after a SNAP that never had."""
+        out 1.5 s after a SNAP that never had.
+
+        A withheld Jeannie must not latch the fold either, or the nods that
+        follow go unheard until the pose is released: on 2026-11-03 a 0.33 nod
+        did nothing, 5 s after a 0.22 one was withheld on a track confirmed
+        that same second. Only the fold: it still has to earn each fire with
+        a recent nod, where the other poses would fire on being held."""
         if gesture in (Gesture.SNAP, Gesture.DOUBLE_SNAP):
             self._raise.snap_emitted = False
+        elif gesture is Gesture.FOLDED_ARMS:
+            self._pose_latch.pop(ArmState.FOLDED_ARMS, None)
 
     def is_enabled(self, gesture: Gesture) -> bool:
         return bool(getattr(self.c, self._ENABLE_ATTR[gesture], True))

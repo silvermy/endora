@@ -1240,6 +1240,11 @@ class CameraAnalyser(threading.Thread):
                 or now - entry.no_nod_fold_at <= entry.state_machine.c.sustain_gap_s):
             return
         entry.no_nod_fold_at = None
+        # The no_nod near-miss prints once, as the fold begins, so this is the
+        # only line that reports what the nods in it actually measured.
+        log.info("[%s] pid=%s fold ended without a nod: largest dip %.2f "
+                 "shoulder widths (need %.2f)", self.label, pid, entry.no_nod_dip,
+                 entry.arm_tracker.c.folded_nod_min_dip)
         if self._recorder is None or (entry.no_nod_saved_at is not None
                                       and now - entry.no_nod_saved_at < _NO_NOD_SAVE_GAP_S):
             return
@@ -2091,6 +2096,11 @@ def _draw_debug(frame, all_person_kps, hand_lm, reading, fired_gesture,
             color = (0, 255, 100) if (rose and still) else (0, 165, 255)
             lines.append((f"rose: {'Y' if rose else 'N'} (+{getattr(reading, 'rise_delta', 0.0):.2f})"
                           f"  still: {'Y' if still else 'N'}", color))
+        if state_name == 'FOLDED_ARMS':
+            nodded = getattr(reading, 'nodded', False)
+            lines.append((f"nod: {'Y' if nodded else 'N'}"
+                          f"  dip {getattr(reading, 'nod_dip', 0.0):.2f}",
+                          (0, 255, 100) if nodded else (0, 165, 255)))
         _sc = getattr(reading, 'sweep_climb', 0.0)
         _sr = getattr(reading, 'sweep_rate', 0.0)
         if _sc > 0.01 or state_name == 'SINGLE_UP':
