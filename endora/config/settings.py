@@ -341,6 +341,8 @@ class Settings:
     folded_recline_memory_s: float = 1.5
     folded_require_nod: bool = True
     folded_nod_min_dip: float = 0.18
+    folded_nod_hold_s: float = 1.5
+    folded_nod_hold_chest_slack: float = 0.15
     folded_nod_arms_ratio_max: float = 0.0
     folded_posture_visibility_min: float = 0.50
     facing_shoulder_min: float = 0.45

@@ -429,6 +429,14 @@ REGISTRY: list[SettingField] = [
                   group="Gesture",
                   ui=UIMeta("Jeannie needs a nod", "toggle", order=2,
                                description="FOLDED_ARMS fires only after a nod while the arms are folded")),
+    SettingField("folded_nod_hold_s", float, 1.5,
+                  "FOLDED_ARMS: how long after a fully folded frame the fold survives the "
+                  "head dropping below the shoulders, so a deep nod is measured (0 = off)",
+                  group="Gesture"),
+    SettingField("folded_nod_hold_chest_slack", float, 0.15,
+                  "FOLDED_ARMS: during that hold, how far past the bottom of the chest band "
+                  "the hands may read, in shoulder widths — the shoulders drop with the head",
+                  group="Gesture"),
     SettingField("folded_nod_min_dip", float, 0.18,
                   "FOLDED_ARMS: how far the head must dip towards the shoulders and come "
                   "back, in shoulder widths, to count as a nod. Deliberate Jeannies "
@@ -603,6 +611,7 @@ GESTURE_CRITICAL: list[str] = [
     "folded_arm_span_max", "body_scale_min_ratio",
     "folded_recline_memory_s", "folded_posture_visibility_min",
     "folded_require_nod", "folded_nod_min_dip", "folded_nod_arms_ratio_max",
+    "folded_nod_hold_s", "folded_nod_hold_chest_slack",
     # HOLD was missing here while every other gesture flag was listed, and
     # it is the one that most visibly surprises: it fires hold_duration_s
     # after a successful SNAP, from the same raised arm, with its own HA

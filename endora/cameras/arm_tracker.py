@@ -583,6 +583,14 @@ class ArmTrackerConfig:
     # meant for. Lower toward 0.15 if real ones start to miss.
     folded_nod_min_dip: float = 0.18
     folded_nod_window_s: float = 1.5
+    # How long after a fully folded frame the fold survives the head going
+    # below the shoulder line, and how far (in shoulder widths) the hands may
+    # then read past the bottom of the chest band — see
+    # _fold_holds_through_nod. Replayed over 345 recorded folds that ended
+    # without a nod: 2 now fire, one a deliberate deep nod; none of the
+    # recorded resting poses or labelled false Jeannies change. 0 disables.
+    folded_nod_hold_s: float = 1.5
+    folded_nod_hold_chest_slack: float = 0.15
     # How long a completed nod keeps the pose eligible to fire.
     folded_nod_recent_s: float = 2.0
     # A Jeannie nod is the HEAD moving while the folded arms stay still. On
@@ -751,6 +759,8 @@ class ArmTracker:
         self._pending_state: Optional[ArmState] = None
         self._pending_since: float = 0.0
         self._pending_last: float = 0.0
+        # Last frame that passed every fold test — see _fold_holds_through_nod.
+        self._fold_strict_at: Optional[float] = None
         # Rolling per-arm history for the trajectory checks.
         self._hist: Deque[_HistSample] = deque()
         # Recent body sizes for this track, for the scale-stability check —
@@ -925,6 +935,31 @@ class ArmTracker:
                 and now - self._fold_miss_since >= self.c.folded_near_miss_settle_s):
             self._fold_miss_logged = True
             log.info("FOLDED_ARMS near-miss: %s", "; ".join(why))
+
+    def _fold_holds_through_nod(self, now, hands_together, bent, proportioned,
+                                facing, reclined, posture, lw, rw, fold_top,
+                                fold_bottom, shoulder_w) -> bool:
+        """May this frame count as folded although the head is below the
+        shoulder line?
+
+        The fold requires the nose above the shoulders, so a deep nod failed
+        it and the frames that WERE the nod were thrown away. Recorded
+        2026-11-02: head +0.56 to -0.10 shoulder widths, tracker's largest dip
+        0.00; the shoulders drop with the head, so the hands also read just
+        past the bottom of the chest band. Only for folded_nod_hold_s after a
+        frame that passed everything: a head left down expires, and nothing
+        else is relaxed. In particular not `facing` — a nod makes that ratio
+        larger, and forgiving it let a sip from a mug (tests/jeannie_resting)
+        count as a nod through frames with the head high or turned.
+        """
+        hold = self.c.folded_nod_hold_s
+        if (hold <= 0 or now is None or self._fold_strict_at is None
+                or now - self._fold_strict_at > hold):
+            return False
+        bottom = fold_bottom + self.c.folded_nod_hold_chest_slack * shoulder_w
+        return (hands_together and bent and proportioned and facing
+                and not reclined and posture is None
+                and fold_top < lw[1] < bottom and fold_top < rw[1] < bottom)
 
     def _note_fold_head(self, now: Optional[float], sh_mid: _Pt, nose: _Pt,
                         shoulder_w: float,
@@ -1430,6 +1465,20 @@ class ArmTracker:
                 posture = self._folded_posture_problem(sh_mid, hip_mid,
                                                        shoulder_w, lk, rk, vis)
                 reclined = self._reclined_recently(now)
+                folded_now = (hands_together and at_chest and bent and proportioned
+                              and facing and head_up and not reclined
+                              and posture is None)
+                if folded_now:
+                    self._fold_strict_at = now
+                elif self._fold_holds_through_nod(
+                        now, hands_together, bent, proportioned, facing, reclined,
+                        posture, lw, rw, fold_top, fold_bottom, shoulder_w):
+                    nodded, dip = self._note_fold_head(
+                        now, sh_mid, px(NOSE), shoulder_w,
+                        hands=((lw[0] + rw[0]) / 2.0, (lw[1] + rw[1]) / 2.0))
+                    return ArmReading(state=ArmState.FOLDED_ARMS,
+                                      upright=bool(upright),
+                                      nodded=nodded, nod_dip=dip)
                 if not (hands_together and at_chest and bent and proportioned
                         and facing and head_up and not reclined
                         and posture is None):

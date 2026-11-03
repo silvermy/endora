@@ -301,3 +301,30 @@ def test_the_analyser_saves_a_recording_for_each_nod():
     assert all(c.kwargs["gesture_name"] == "MANUAL" for c in calls)
     assert "hands/head 1.36" in calls[0].kwargs["note"]
     assert entry.arm_tracker.nod_events == []          # consumed, not re-saved
+
+
+# ── a deep nod holds the fold ────────────────────────────────────────────────
+# 2026-11-02, seated: arms folded, then the head from +0.56 to -0.10 shoulder
+# widths and back. The fold requires the nose above the shoulders, so every
+# frame of that nod was rejected and the tracker reported a dip of 0.00.
+
+def test_a_deep_nod_was_lost_without_the_hold():
+    assert _replay_resting("deep_nod_seated", folder=REAL,
+                           tracker_cfg={"folded_nod_hold_s": 0.0}) == []
+
+
+def test_a_deep_nod_fires():
+    assert len(_replay_resting("deep_nod_seated", folder=REAL)) == 1
+
+
+@pytest.mark.parametrize("name", RESTING + PHONES + MUGS)
+def test_the_hold_does_not_turn_a_resting_pose_into_a_nod(name):
+    assert _replay_resting(name) == []
+
+
+def test_a_head_left_down_lets_the_fold_expire():
+    tr = ArmTracker(ArmTrackerConfig())
+    tr._fold_strict_at = 10.0
+    args = (True, True, True, True, False, None, (0.0, 50.0), (0.0, 50.0), 0.0, 100.0, 100.0)
+    assert tr._fold_holds_through_nod(11.5, *args)
+    assert not tr._fold_holds_through_nod(11.6, *args)
