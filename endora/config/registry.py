@@ -437,7 +437,7 @@ REGISTRY: list[SettingField] = [
                   "FOLDED_ARMS: during that hold, how far past the bottom of the chest band "
                   "the hands may read, in shoulder widths — the shoulders drop with the head",
                   group="Gesture"),
-    SettingField("folded_nod_min_dip", float, 0.18,
+    SettingField("folded_nod_min_dip", float, 0.20,
                   "FOLDED_ARMS: how far the head must dip towards the shoulders and come "
                   "back, in shoulder widths, to count as a nod. Deliberate Jeannies "
                   "measured 0.24-0.32; glancing down at a phone in the lap 0.10-0.13. "

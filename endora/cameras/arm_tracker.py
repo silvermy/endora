@@ -580,8 +580,16 @@ class ArmTrackerConfig:
     # fire (tests/jeannie_real/ — the 10-03 ones a fraction later, on the
     # deeper of two nods), and all five recorded false ones — two phone, three
     # mug — no longer do, which also covers the case the arms-still rule was
-    # meant for. Lower toward 0.15 if real ones start to miss.
-    folded_nod_min_dip: float = 0.18
+    # meant for.
+    #
+    # 0.20 since 2026-11-03. All four Jeannies labelled false on 11-02 and
+    # 11-03 were a second person standing with hands together, apparently
+    # talking, with head dips of 0.19-0.21. Replayed over the labelled
+    # recordings: 5 of the 8 false ones still firing at 0.18 stop. The cost
+    # is one labelled real Jeannie (10-27 11:19) and seated_1 of 10-03, whose
+    # nods qualify only up to 0.191; deep nods count since v1.9.209 (see
+    # _fold_holds_through_nod). Lower toward 0.18 if real ones start to miss.
+    folded_nod_min_dip: float = 0.20
     folded_nod_window_s: float = 1.5
     # How long after a fully folded frame the fold survives the head going
     # below the shoulder line, and how far (in shoulder widths) the hands may

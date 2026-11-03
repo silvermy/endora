@@ -1083,7 +1083,7 @@ class CameraAnalyser(threading.Thread):
                 getattr(s, 'folded_recline_memory_s', 1.5)),
             folded_posture_visibility_min=float(
                 getattr(s, 'folded_posture_visibility_min', 0.50)),
-            folded_nod_min_dip=float(getattr(s, 'folded_nod_min_dip', 0.18)),
+            folded_nod_min_dip=float(getattr(s, 'folded_nod_min_dip', 0.20)),
             folded_nod_hold_s=float(getattr(s, 'folded_nod_hold_s', 1.5)),
             folded_nod_hold_chest_slack=float(
                 getattr(s, 'folded_nod_hold_chest_slack', 0.15)),

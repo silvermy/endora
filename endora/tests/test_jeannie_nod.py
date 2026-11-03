@@ -143,7 +143,7 @@ def test_resting_with_folded_arms_does_not_fire(name):
 
 REAL = Path(__file__).parent / "jeannie_real"
 MUGS = ["mug_1", "mug_2", "mug_3"]
-REAL_NODS = ["standing", "seated_1", "seated_2"]
+REAL_NODS = ["standing", "seated_2"]     # seated_1: see the end of this file
 
 
 OLD_SHALLOW_NOD = {"folded_nod_min_dip": 0.10}
@@ -328,3 +328,29 @@ def test_a_head_left_down_lets_the_fold_expire():
     args = (True, True, True, True, False, None, (0.0, 50.0), (0.0, 50.0), 0.0, 100.0, 100.0)
     assert tr._fold_holds_through_nod(11.5, *args)
     assert not tr._fold_holds_through_nod(11.6, *args)
+
+
+# ── a talking head is not a nod ──────────────────────────────────────────────
+# All four Jeannies labelled false on 2026-11-02 and 11-03 were a second person
+# standing with hands together, apparently talking: head dips of 0.19-0.21.
+
+TALKING = ["second_person_talking_1", "second_person_talking_2"]
+
+
+@pytest.mark.parametrize("name", TALKING)
+def test_a_talking_head_fired_at_the_old_depth(name):
+    assert _replay_resting(name, tracker_cfg={"folded_nod_min_dip": 0.18})
+
+
+@pytest.mark.parametrize("name", TALKING)
+def test_a_talking_head_does_not_fire(name):
+    assert _replay_resting(name) == []
+
+
+def test_the_cost_a_shallow_real_nod():
+    """seated_1 is a real Jeannie whose nod qualifies only up to 0.191. It was
+    given up knowingly for the fixtures above; lower folded_nod_min_dip toward
+    0.18 if real nods like it start to miss."""
+    assert _replay_resting("seated_1", folder=REAL,
+                           tracker_cfg={"folded_nod_min_dip": 0.18})
+    assert _replay_resting("seated_1", folder=REAL) == []
